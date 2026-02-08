@@ -1,4 +1,4 @@
-# InternUP - Browse-first feed + Micro-onboarding + Curated feed
+# Internactive - Browse-first feed + Micro-onboarding + Curated feed
 
 ## Goal
 Make the site feel fast like Indeed:
