@@ -30,8 +30,8 @@ export default async function ApplyPage({
     return (
       <main className="min-h-screen bg-white px-6 py-12">
         <div className="mx-auto max-w-3xl">
-          <a href="/internships" className="text-sm font-medium text-blue-700 hover:underline">
-            â† Back to internships
+          <a href="/jobs" className="text-sm font-medium text-blue-700 hover:underline">
+            ← Back to jobs
           </a>
 
           <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
@@ -49,16 +49,16 @@ export default async function ApplyPage({
     'use server'
 
     const { user: currentUser } = await requireRole('student')
-    const listingId = listing.id
+    const listingIdForSubmit = listing.id
     const file = formData.get('resume') as File | null
 
-    if (!listingId || !file) {
-      redirect(`/apply/${params.listingId}?error=Missing+resume`)
+    if (!listingIdForSubmit || !file) {
+      redirect(`/apply/${listingId}?error=Missing+resume`)
     }
 
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
     if (!isPdf) {
-      redirect(`/apply/${params.listingId}?error=Resume+must+be+a+PDF`)
+      redirect(`/apply/${listingId}?error=Resume+must+be+a+PDF`)
     }
 
     const supabaseAction = await supabaseServer()
@@ -66,32 +66,32 @@ export default async function ApplyPage({
       .from('applications')
       .select('id')
       .eq('student_id', currentUser.id)
-      .eq('internship_id', listingId)
+      .eq('internship_id', listingIdForSubmit)
       .maybeSingle()
 
     if (existing?.id) {
-      redirect(`/apply/${params.listingId}?error=You+already+applied+to+this+internship`)
+      redirect(`/apply/${listingId}?error=You+already+applied+to+this+internship`)
     }
 
     const timestamp = Date.now()
-    const path = `resumes/${currentUser.id}/${listingId}/${timestamp}.pdf`
+    const path = `resumes/${currentUser.id}/${listingIdForSubmit}/${timestamp}.pdf`
     const { error: uploadError } = await supabaseAction.storage
       .from('resumes')
       .upload(path, file, { contentType: 'application/pdf', upsert: false })
 
     if (uploadError) {
-      redirect(`/apply/${params.listingId}?error=${encodeURIComponent(uploadError.message)}`)
+      redirect(`/apply/${listingId}?error=${encodeURIComponent(uploadError.message)}`)
     }
 
     const { error: insertError } = await supabaseAction.from('applications').insert({
-      internship_id: listingId,
+      internship_id: listingIdForSubmit,
       student_id: currentUser.id,
       resume_url: path,
       status: 'submitted',
     })
 
     if (insertError) {
-      redirect(`/apply/${params.listingId}?error=${encodeURIComponent(insertError.message)}`)
+      redirect(`/apply/${listingId}?error=${encodeURIComponent(insertError.message)}`)
     }
 
     redirect('/applications')
@@ -100,8 +100,8 @@ export default async function ApplyPage({
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <a href="/internships" className="text-sm font-medium text-blue-700 hover:underline">
-          â† Back to internships
+        <a href="/jobs" className="text-sm font-medium text-blue-700 hover:underline">
+          ← Back to jobs
         </a>
 
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">Apply</h1>
@@ -111,7 +111,7 @@ export default async function ApplyPage({
           <div className="space-y-1">
             <div className="text-lg font-semibold text-slate-900">{listing.title}</div>
             <div className="text-sm text-slate-600">
-              {listing.company_name || 'Company'} â€¢ {listing.location || 'TBD'}
+              {listing.company_name || 'Company'} · {listing.location || 'TBD'}
             </div>
             <div className="text-xs text-slate-500">
               Experience: {listing.experience_level || 'TBD'}

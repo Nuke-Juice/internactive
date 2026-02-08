@@ -127,9 +127,9 @@ export default async function StudentDashboardPage() {
                     {l.id ? (
                       <a
                         className="text-sm font-medium text-blue-700 hover:underline"
-                        href={`/apply/${l.id}`}
+                        href={`/jobs/${l.id}`}
                       >
-                        Apply
+                        View & apply
                       </a>
                     ) : null}
                     <a className="text-sm text-slate-600 hover:underline" href="/applications">

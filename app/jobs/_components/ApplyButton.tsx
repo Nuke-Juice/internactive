@@ -1,0 +1,293 @@
+'use client'
+
+import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabaseBrowser } from '@/lib/supabase/client'
+
+type Props = {
+  listingId: string
+  isAuthenticated: boolean
+  className?: string
+}
+
+const availabilityOptions = [10, 20, 30]
+
+function parseAuthError(message: string) {
+  const normalized = message.toLowerCase()
+  if (normalized.includes('invalid login credentials')) {
+    return 'Email/password did not match an existing account. A new account will be created with these credentials.'
+  }
+  if (normalized.includes('email rate limit exceeded') || normalized.includes('rate limit')) {
+    return 'Signup rate limit reached. Try again in a minute or log in with an existing account.'
+  }
+  return message
+}
+
+export default function ApplyButton({ listingId, isAuthenticated, className }: Props) {
+  const [open, setOpen] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [school, setSchool] = useState('')
+  const [major, setMajor] = useState('')
+  const [availability, setAvailability] = useState(20)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const router = useRouter()
+
+  const buttonClassName = useMemo(
+    () =>
+      className ||
+      'inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700',
+    [className]
+  )
+
+  async function submitMicroOnboarding() {
+    setError(null)
+
+    if (!school.trim() || !major.trim()) {
+      return setError('School and major are required.')
+    }
+    if (!email.trim() || !password.trim()) {
+      return setError('Email and password are required to continue.')
+    }
+
+    setLoading(true)
+    const supabase = supabaseBrowser()
+
+    let {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+
+      if (signInError) {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+        })
+
+        if (signUpError) {
+          setLoading(false)
+          return setError(parseAuthError(signUpError.message))
+        }
+
+        user = signUpData.user
+      } else {
+        user = signInData.user
+      }
+    }
+
+    if (!user) {
+      setLoading(false)
+      return setError('Could not start a session. Please verify your email or try logging in first.')
+    }
+
+    const { data: userRow, error: userRowError } = await supabase
+      .from('users')
+      .select('id, role')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (userRowError) {
+      setLoading(false)
+      return setError(userRowError.message)
+    }
+
+    if (!userRow) {
+      const { error: createUserError } = await supabase.from('users').insert({
+        id: user.id,
+        role: 'student',
+        verified: false,
+      })
+
+      if (createUserError) {
+        setLoading(false)
+        return setError(createUserError.message)
+      }
+    }
+
+    if (userRow?.role && userRow.role !== 'student') {
+      setLoading(false)
+      return setError('This account is not a student account. Use a student account to apply.')
+    }
+
+    const { error: profileError } = await supabase.from('student_profiles').upsert(
+      {
+        user_id: user.id,
+        school: school.trim(),
+        majors: [major.trim()],
+        year: 'Freshman',
+        coursework: [],
+        experience_level: 'none',
+        availability_start_month: 'May',
+        availability_hours_per_week: availability,
+        interests: null,
+      },
+      { onConflict: 'user_id' }
+    )
+
+    if (profileError) {
+      setLoading(false)
+      return setError(profileError.message)
+    }
+
+    const { data: existingApplication, error: existingApplicationError } = await supabase
+      .from('applications')
+      .select('id')
+      .eq('student_id', user.id)
+      .eq('internship_id', listingId)
+      .maybeSingle()
+
+    if (existingApplicationError) {
+      setLoading(false)
+      return setError(existingApplicationError.message)
+    }
+
+    if (!existingApplication?.id) {
+      const { error: applicationError } = await supabase.from('applications').insert({
+        internship_id: listingId,
+        student_id: user.id,
+        status: 'submitted',
+      })
+
+      if (applicationError) {
+        const message = applicationError.message.toLowerCase()
+        if (message.includes('resume') || message.includes('null value')) {
+          setOpen(false)
+          setLoading(false)
+          router.push(`/apply/${listingId}`)
+          router.refresh()
+          return
+        }
+
+        setLoading(false)
+        return setError(applicationError.message)
+      }
+    }
+
+    setOpen(false)
+    setLoading(false)
+    router.push('/applications')
+    router.refresh()
+  }
+
+  if (isAuthenticated) {
+    return (
+      <a href={`/apply/${listingId}`} className={buttonClassName}>
+        Apply
+      </a>
+    )
+  }
+
+  return (
+    <>
+      <button type="button" className={buttonClassName} onClick={() => setOpen(true)}>
+        Apply
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Quick onboarding</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Tell us your school, major, and availability to apply.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700">School</label>
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
+                  value={school}
+                  onChange={(event) => setSchool(event.target.value)}
+                  placeholder="e.g., University of Utah"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Major</label>
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
+                  value={major}
+                  onChange={(event) => setMajor(event.target.value)}
+                  placeholder="e.g., Finance"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Availability (hrs/week)</label>
+                <div className="mt-2 flex gap-2">
+                  {availabilityOptions.map((option) => {
+                    const selected = availability === option
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setAvailability(option)}
+                        className={`rounded-md border px-3 py-2 text-sm ${
+                          selected
+                            ? 'border-blue-200 bg-blue-50 text-blue-700'
+                            : 'border-slate-300 bg-white text-slate-700'
+                        }`}
+                      >
+                        {option}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Email</label>
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@email.com"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Password</label>
+                <input
+                  type="password"
+                  className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="********"
+                />
+              </div>
+            </div>
+
+            {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+
+            <button
+              type="button"
+              onClick={submitMicroOnboarding}
+              disabled={loading}
+              className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {loading ? 'Submitting...' : 'Continue and apply'}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}

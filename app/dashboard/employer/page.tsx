@@ -89,7 +89,7 @@ export default async function EmployerDashboardPage({
 
           <nav className="flex items-center gap-2">
             <a
-              href="/internships"
+              href="/jobs"
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               View public listings

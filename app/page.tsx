@@ -13,6 +13,12 @@ export default function HomePage() {
 
           <nav className="flex items-center gap-2">
             <a
+              href="/jobs"
+              className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Browse jobs
+            </a>
+            <a
               href="/login"
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
@@ -54,10 +60,10 @@ export default function HomePage() {
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <a
-                href="/signup/student"
+                href="/jobs"
                 className="inline-flex items-center justify-center rounded-md bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-700"
               >
-                Create student account
+                Browse internships
               </a>
               <a
                 href="/signup/employer"

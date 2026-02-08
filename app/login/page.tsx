@@ -44,7 +44,7 @@ export default function LoginPage({
       .eq('id', user.user.id)
       .single()
 
-    if (userRow?.role === 'student') redirect('/dashboard/student')
+    if (userRow?.role === 'student') redirect('/jobs')
     if (userRow?.role === 'employer') redirect('/dashboard/employer')
 
     redirect('/')

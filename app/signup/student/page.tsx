@@ -86,7 +86,7 @@ export default function StudentSignupPage() {
     })
 
     setLoading(false)
-    window.location.href = '/dashboard'
+    window.location.href = '/jobs'
   }
 
   return (
