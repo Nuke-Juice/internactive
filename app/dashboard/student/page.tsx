@@ -41,7 +41,7 @@ export default async function StudentDashboardPage() {
           <div className="flex items-center gap-2">
             <div className="h-9 w-9 rounded-lg bg-blue-600" aria-hidden />
             <Link href="/" className="text-sm font-semibold tracking-tight text-slate-900">
-              InternUP
+              Internactive
             </Link>
           </div>
 
