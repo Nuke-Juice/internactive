@@ -12,9 +12,11 @@ type FilterState = {
 type Props = {
   categories: string[]
   state: FilterState
+  basePath?: string
+  anchorId?: string
 }
 
-export default function FiltersPanel({ categories, state }: Props) {
+export default function FiltersPanel({ categories, state, basePath = '/jobs', anchorId }: Props) {
   function href(overrides: Partial<FilterState>) {
     const merged: FilterState = { ...state, ...overrides }
     const params = new URLSearchParams()
@@ -27,11 +29,14 @@ export default function FiltersPanel({ categories, state }: Props) {
     if (merged.maxHours) params.set('hours', merged.maxHours)
 
     const query = params.toString()
-    return query ? `/jobs?${query}` : '/jobs'
+    const hash = anchorId ? `#${anchorId}` : ''
+    return query ? `${basePath}?${query}${hash}` : `${basePath}${hash}`
   }
 
   const chipClass =
     'inline-flex items-center rounded-full border px-3 py-1 text-sm transition-colors'
+  const categoryTileClass =
+    'inline-flex min-h-10 items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium text-center transition-colors'
   const toggleClass =
     'flex items-center justify-between rounded-lg border px-3 py-2 text-sm font-medium transition-colors'
 
@@ -39,21 +44,21 @@ export default function FiltersPanel({ categories, state }: Props) {
     <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-6">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Filters</h2>
-        <Link href="/jobs" className="text-xs font-medium text-blue-700 hover:underline">
+        <Link href={href({})} className="text-xs font-medium text-blue-700 hover:underline">
           Clear all
         </Link>
       </div>
 
       <div className="mt-4">
         <p className="text-xs font-medium text-slate-500">Category</p>
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2 grid grid-cols-2 gap-2">
           {categories.map((category) => {
             const active = state.category === category
             return (
               <Link
                 key={category}
                 href={href({ category: active ? '' : category })}
-                className={`${chipClass} ${
+                className={`${categoryTileClass} ${
                   active
                     ? 'border-blue-200 bg-blue-50 text-blue-700'
                     : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'

@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
 
@@ -7,14 +6,6 @@ const readinessStyles: Record<string, string> = {
   Match: 'border-blue-200 bg-blue-50 text-blue-700',
   Stretch: 'border-slate-200 bg-slate-50 text-slate-700',
   Exploratory: 'border-slate-200 bg-white text-slate-600',
-}
-
-async function logout() {
-  'use server'
-
-  const supabase = await supabaseServer()
-  await supabase.auth.signOut()
-  redirect('/login')
 }
 
 function formatReadiness(value: string | null) {
@@ -36,46 +27,12 @@ export default async function StudentDashboardPage() {
 
   return (
     <main className="min-h-screen bg-white">
-      <header className="border-b border-slate-200">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-lg bg-blue-600" aria-hidden />
-            <Link href="/" className="text-sm font-semibold tracking-tight text-slate-900">
-              Internactive
-            </Link>
-          </div>
-
-          <nav className="flex items-center gap-2">
-            <Link
-              href="/applications"
-              className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Applications
-            </Link>
-            <Link
-              href="/upgrade"
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Upgrade
-            </Link>
-            <form action={logout}>
-              <button
-                type="submit"
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Log out
-              </button>
-            </form>
-          </nav>
-        </div>
-      </header>
-
       <section className="mx-auto max-w-6xl px-6 py-10">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">Curated internships</h1>
             <p className="mt-1 text-slate-600">
-              Readiness labels are guidance â€” not judgment.
+              Readiness labels are guidance - not judgment.
             </p>
           </div>
 

@@ -55,7 +55,7 @@ export default function LoginPage({
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-md">
         <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
-          â† Back
+          Back
         </Link>
 
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">Log in</h1>
@@ -78,7 +78,7 @@ export default function LoginPage({
               type="password"
               name="password"
               className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
-              placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+              placeholder="********"
               required
             />
           </div>
@@ -97,7 +97,7 @@ export default function LoginPage({
           </button>
 
           <p className="text-xs text-slate-500">
-            Donâ€™t have an account?{' '}
+            Do not have an account?{' '}
             <Link className="text-blue-700 hover:underline" href="/signup/student">
               Student signup
             </Link>{' '}
