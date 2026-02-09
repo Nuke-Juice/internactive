@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 
 const FIELD =
@@ -75,8 +76,12 @@ export default function EmployerSignupPage() {
       <div className="mx-auto max-w-3xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
-              ← Back
+            <Link
+              href="/"
+              aria-label="Go back"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+            >
+              <ArrowLeft className="h-5 w-5" />
             </Link>
             <h1 className="mt-3 text-2xl font-semibold text-slate-900">
               Employer profile
@@ -86,10 +91,6 @@ export default function EmployerSignupPage() {
             </p>
           </div>
 
-          <div className="hidden sm:block rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <div className="font-medium text-slate-900">Goal</div>
-            <div className="mt-1">Fewer applications. Better fit. Faster review.</div>
-          </div>
         </div>
 
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

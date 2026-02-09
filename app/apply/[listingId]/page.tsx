@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { ArrowLeft } from 'lucide-react'
 import { supabaseServer } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/auth/requireRole'
 import { trackAnalyticsEvent } from '@/lib/analytics'
@@ -108,8 +109,12 @@ export default async function ApplyPage({
     return (
       <main className="min-h-screen bg-white px-6 py-12">
         <div className="mx-auto max-w-3xl">
-          <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
-            ← Back to jobs
+          <Link
+            href="/"
+            aria-label="Go back"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+          >
+            <ArrowLeft className="h-5 w-5" />
           </Link>
 
           <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
@@ -316,8 +321,12 @@ export default async function ApplyPage({
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
-          ← Back to jobs
+        <Link
+          href="/"
+          aria-label="Go back"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+        >
+          <ArrowLeft className="h-5 w-5" />
         </Link>
 
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">Apply</h1>

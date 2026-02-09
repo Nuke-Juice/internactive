@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 import { createBillingPortalSessionAction, startVerifiedEmployerCheckoutAction } from '@/lib/billing/actions'
 import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import { supabaseServer } from '@/lib/supabase/server'
@@ -128,9 +129,10 @@ export default async function UpgradePage({
             </form>
             <Link
               href="/dashboard/employer"
-              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              aria-label="Go back"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
             >
-              Back to dashboard
+              <ArrowLeft className="h-5 w-5" />
             </Link>
           </div>
         </div>

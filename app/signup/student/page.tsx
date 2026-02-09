@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import { ArrowLeft } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 
 const COURSEWORK = [
@@ -93,8 +94,12 @@ export default function StudentSignupPage() {
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
-          ← Back
+        <Link
+          href="/"
+          aria-label="Go back"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+        >
+          <ArrowLeft className="h-5 w-5" />
         </Link>
 
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">Student signup</h1>

@@ -7,10 +7,16 @@ function roleLabel(role: string | null) {
       subtitle: 'Messages with candidates and hiring conversations will appear here.',
     }
   }
+  if (role === 'student') {
+    return {
+      title: 'Inbox',
+      subtitle: 'Messages with employers and recruiting threads will appear here.',
+    }
+  }
 
   return {
     title: 'Inbox',
-    subtitle: 'Messages with employers and recruiting threads will appear here.',
+    subtitle: 'Sign in to view your messages and conversation threads.',
   }
 }
 

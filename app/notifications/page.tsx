@@ -7,10 +7,16 @@ function roleLabel(role: string | null) {
       subtitle: 'We will show employer updates here, like new applicants and billing events.',
     }
   }
+  if (role === 'student') {
+    return {
+      title: 'Notifications',
+      subtitle: 'We will show student updates here, like application status and interview activity.',
+    }
+  }
 
   return {
     title: 'Notifications',
-    subtitle: 'We will show student updates here, like application status and interview activity.',
+    subtitle: 'Sign in to see your notifications and account activity updates.',
   }
 }
 

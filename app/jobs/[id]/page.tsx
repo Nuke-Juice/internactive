@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { supabaseServer } from '@/lib/supabase/server'
 import { DEFAULT_MATCHING_WEIGHTS, evaluateInternshipMatch, parseMajors } from '@/lib/matching'
@@ -135,8 +136,12 @@ export default async function JobDetailPage({
     return (
       <main className="min-h-screen bg-white px-6 py-12">
         <div className="mx-auto max-w-3xl">
-          <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
-            Back to jobs
+          <Link
+            href="/"
+            aria-label="Go back"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+          >
+            <ArrowLeft className="h-5 w-5" />
           </Link>
 
           <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6">
@@ -159,8 +164,12 @@ export default async function JobDetailPage({
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
-          Back to jobs
+        <Link
+          href="/"
+          aria-label="Go back"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+        >
+          <ArrowLeft className="h-5 w-5" />
         </Link>
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
