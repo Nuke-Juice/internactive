@@ -15,6 +15,7 @@ import {
   normalizeMissingProfileFields,
 } from '@/lib/profileCompleteness'
 import { buildApplicationMatchSnapshot } from '@/lib/applicationMatchSnapshot'
+import { sendEmployerApplicationAlert } from '@/lib/email/employerAlerts'
 import ApplyForm from './ApplyForm'
 
 function formatMajors(value: string[] | string | null) {
@@ -107,7 +108,7 @@ export default async function ApplyPage({
     return (
       <main className="min-h-screen bg-white px-6 py-12">
         <div className="mx-auto max-w-3xl">
-          <Link href="/jobs" className="text-sm font-medium text-blue-700 hover:underline">
+          <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
             ← Back to jobs
           </Link>
 
@@ -263,16 +264,20 @@ export default async function ApplyPage({
       profile,
     })
 
-    const { error: insertError } = await supabaseAction.from('applications').insert({
-      internship_id: listingIdForSubmit,
-      student_id: currentUser.id,
-      resume_url: path,
-      status: 'submitted',
-      match_score: snapshot.match_score,
-      match_reasons: snapshot.match_reasons,
-      match_gaps: snapshot.match_gaps,
-      matching_version: snapshot.matching_version,
-    })
+    const { data: insertedApplication, error: insertError } = await supabaseAction
+      .from('applications')
+      .insert({
+        internship_id: listingIdForSubmit,
+        student_id: currentUser.id,
+        resume_url: path,
+        status: 'submitted',
+        match_score: snapshot.match_score,
+        match_reasons: snapshot.match_reasons,
+        match_gaps: snapshot.match_gaps,
+        matching_version: snapshot.matching_version,
+      })
+      .select('id')
+      .single()
 
     if (insertError) {
       if (isDuplicateApplicationConstraintError(insertError)) {
@@ -296,13 +301,22 @@ export default async function ApplyPage({
       userId: currentUser.id,
       properties: { listing_id: listingIdForSubmit, source: 'applyPage' },
     })
+
+    if (insertedApplication?.id) {
+      try {
+        await sendEmployerApplicationAlert({ applicationId: insertedApplication.id })
+      } catch {
+        // no-op; email should not block application submission
+      }
+    }
+
     redirect('/applications')
   }
 
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <Link href="/jobs" className="text-sm font-medium text-blue-700 hover:underline">
+        <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
           ← Back to jobs
         </Link>
 

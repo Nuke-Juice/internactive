@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
+import { PLAN_LIMIT_REACHED } from '@/lib/billing/plan'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { normalizeSkillsClient } from '@/lib/skills/normalizeSkillsClient'
 
@@ -91,6 +93,10 @@ function buildDescription(details: {
   ].join('\n')
 }
 
+function isVerifiedStatus(status: string | null | undefined) {
+  return status === 'active' || status === 'trialing'
+}
+
 export default function EmployerAccount({
   userId,
   userEmail,
@@ -132,6 +138,7 @@ export default function EmployerAccount({
   const [posting, setPosting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const planLimitReached = Boolean(error?.startsWith(PLAN_LIMIT_REACHED))
 
   const titleError = title.trim() ? null : 'Title is required.'
   const categoryError = roleCategory.trim() ? null : 'Role category is required.'
@@ -210,6 +217,20 @@ export default function EmployerAccount({
 
     setPosting(true)
     const supabase = supabaseBrowser()
+
+    const { data: subscription } = await supabase.from('subscriptions').select('status').eq('user_id', userId).maybeSingle()
+    const isVerifiedEmployer = isVerifiedStatus(subscription?.status)
+
+    if (!isVerifiedEmployer) {
+      const { count } = await supabase.from('internships').select('id', { count: 'exact', head: true }).eq('employer_id', userId)
+      if ((count ?? 0) >= 1) {
+        setPosting(false)
+        setError(
+          `${PLAN_LIMIT_REACHED}: Free employers can have one active internship. Upgrade to Verified Employer for unlimited postings.`
+        )
+        return
+      }
+    }
 
     const normalizedLocation = `${locationCity.trim()}, ${locationState.trim()} (${workMode})`
     const normalizedRequiredSkills = requiredSkills.map(normalizeTag).filter(Boolean)
@@ -320,6 +341,14 @@ export default function EmployerAccount({
 
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+      {planLimitReached && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          <div>Upgrade to continue posting internships.</div>
+          <Link href="/upgrade" className="mt-2 inline-flex font-medium text-blue-700 hover:underline">
+            Open billing
+          </Link>
+        </div>
       )}
       {success && (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">

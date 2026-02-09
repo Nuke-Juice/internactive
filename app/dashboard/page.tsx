@@ -15,7 +15,7 @@ export default async function DashboardPage() {
 
   if (roleError || !userRow) redirect('/')
 
-  if (userRow.role === 'student') redirect('/jobs')
+  if (userRow.role === 'student') redirect('/')
   if (userRow.role === 'employer') redirect('/dashboard/employer')
 
   redirect('/')

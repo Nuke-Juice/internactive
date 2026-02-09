@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
 
@@ -72,13 +71,7 @@ export default async function ApplicationsPage() {
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <Link
-              href="/dashboard/student"
-              className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Back to dashboard
-            </Link>
-            <h1 className="mt-3 text-2xl font-semibold text-slate-900">Applications</h1>
+            <h1 className="text-2xl font-semibold text-slate-900">Applications</h1>
             <p className="mt-2 text-slate-600">Track status at a glance.</p>
           </div>
         </div>

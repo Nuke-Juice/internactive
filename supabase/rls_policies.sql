@@ -4,6 +4,8 @@ alter table public.employer_profiles enable row level security;
 alter table public.student_profiles enable row level security;
 alter table public.internships enable row level security;
 alter table public.applications enable row level security;
+alter table public.stripe_customers enable row level security;
+alter table public.subscriptions enable row level security;
 
 -- users: self read/update
 create policy "users_select_own"
@@ -114,3 +116,30 @@ with check (
       and i.employer_id = auth.uid()
   )
 );
+
+-- stripe_customers: employer/user reads and writes own customer mapping
+create policy "stripe_customers_select_own"
+on public.stripe_customers
+for select
+to authenticated
+using (user_id = auth.uid());
+
+create policy "stripe_customers_insert_own"
+on public.stripe_customers
+for insert
+to authenticated
+with check (user_id = auth.uid());
+
+create policy "stripe_customers_update_own"
+on public.stripe_customers
+for update
+to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
+
+-- subscriptions: user reads own subscription status
+create policy "subscriptions_select_own"
+on public.subscriptions
+for select
+to authenticated
+using (user_id = auth.uid());

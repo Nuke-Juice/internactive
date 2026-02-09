@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { Pencil } from 'lucide-react'
 import UniversityCombobox from '@/components/account/UniversityCombobox'
 import {
   addRecoverySuccessParam,
@@ -253,6 +254,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   const [saving, setSaving] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [isProfileLoaded, setIsProfileLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successToast, setSuccessToast] = useState<{ id: number; message: string } | null>(null)
   const [successToastVisible, setSuccessToastVisible] = useState(false)
@@ -327,11 +329,11 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
 
   const recoveryReady = minimumProfileReady && hasResumeForApply
 
-  const showCardHints = mode === 'view' && showIncompleteGuide && missingCount > 0
+  const showCardHints = mode === 'view' && isProfileLoaded && showIncompleteGuide && missingCount > 0
 
   function cardClass(isMissing: boolean) {
     return `relative rounded-xl border p-4 ${
-      isMissing ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200 bg-slate-50'
+      isProfileLoaded && isMissing ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200 bg-slate-50'
     }`
   }
 
@@ -346,6 +348,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
     const supabase = supabaseBrowser()
 
     async function loadLatestProfile() {
+      setIsProfileLoaded(false)
       setLoading(true)
       const { data, error: loadError } = await supabase
         .from('student_profiles')
@@ -355,6 +358,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
 
       if (loadError || !data) {
         setLoading(false)
+        setIsProfileLoaded(true)
         return
       }
 
@@ -471,6 +475,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       }
 
       setLoading(false)
+      setIsProfileLoaded(true)
     }
 
     void loadLatestProfile()
@@ -1039,8 +1044,9 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       )}
 
       {loading && (
-        <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          Loading latest profile...
+        <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="h-3 w-40 animate-pulse rounded bg-slate-200" />
+          <div className="mt-2 h-3 w-56 animate-pulse rounded bg-slate-200" />
         </div>
       )}
 
@@ -1093,7 +1099,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('first-name')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="flex items-center gap-4">
               {profilePhotoUrl ? (
@@ -1112,7 +1118,11 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
                 <div className="text-base font-semibold text-slate-900">
                   {[firstName.trim(), lastName.trim()].filter(Boolean).join(' ') || 'Student'}
                 </div>
-                <div className="text-sm text-slate-600">{email || 'No email on file'}</div>
+                {isProfileLoaded ? (
+                  <div className="text-sm text-slate-600">{email || 'No email on file'}</div>
+                ) : (
+                  <div className="mt-1 h-4 w-40 animate-pulse rounded bg-slate-200" />
+                )}
                 {profileHeadline && <div className="mt-1 text-sm text-slate-700">{profileHeadline}</div>}
               </div>
             </div>
@@ -1128,11 +1138,15 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('university-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">University</div>
-            <div className="mt-1 text-sm font-medium text-slate-900">{selectedUniversity?.name || universityQuery || 'Not set'}</div>
-            {!selectedUniversity && universityQuery && (
+            <div className="mt-1 text-sm font-medium text-slate-900">
+              {isProfileLoaded ? selectedUniversity?.name || universityQuery || 'Not set' : (
+                <span className="block h-4 w-44 animate-pulse rounded bg-slate-200" />
+              )}
+            </div>
+            {isProfileLoaded && !selectedUniversity && universityQuery && (
               <div className="mt-1 text-xs text-amber-700">Unverified university. Edit profile to verify.</div>
             )}
           </div>
@@ -1146,7 +1160,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('major-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Major / interest area</div>
             <div className="mt-1 text-sm font-medium text-slate-900">{major || 'Not set'}</div>
@@ -1161,7 +1175,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('graduation-year-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Graduation year</div>
             <div className="mt-1 text-sm font-medium text-slate-900">{graduationYear || 'Not set'}</div>
@@ -1176,7 +1190,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('experience-level-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Experience level</div>
             <div className="mt-1 text-sm font-medium text-slate-900">{getExperienceLabel(experienceLevel)}</div>
@@ -1191,7 +1205,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('start-month-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Availability start month</div>
             <div className="mt-1 text-sm font-medium text-slate-900">{availabilityStartMonth || 'Not set'}</div>
@@ -1206,7 +1220,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('hours-per-week-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Hours per week</div>
             <div className="mt-1 text-sm font-medium text-slate-900">
@@ -1224,7 +1238,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('coursework-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Coursework</div>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -1250,7 +1264,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('skills-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Skills</div>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -1276,7 +1290,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('resume-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Resume</div>
             <div className="mt-1 text-sm font-medium text-slate-900">
@@ -1295,7 +1309,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               onClick={() => editField('season-summer')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden><path d="M13.83 3.34a2.5 2.5 0 1 1 3.54 3.54L8.3 15.96l-3.6.56.56-3.6 9.07-9.58Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Season preferences</div>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -1318,7 +1332,11 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Account settings</div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-              <div className="text-sm text-slate-700">{email || 'No email on file'}</div>
+              {isProfileLoaded ? (
+                <div className="text-sm text-slate-700">{email || 'No email on file'}</div>
+              ) : (
+                <div className="h-4 w-36 animate-pulse rounded bg-slate-200" />
+              )}
               <button
                 type="button"
                 onClick={signOut}

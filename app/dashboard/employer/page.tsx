@@ -1,6 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireRole } from '@/lib/auth/requireRole'
+import { startVerifiedEmployerCheckoutAction } from '@/lib/billing/actions'
+import { isPlanLimitReachedCode, PLAN_LIMIT_REACHED } from '@/lib/billing/plan'
+import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import {
   INTERNSHIP_VALIDATION_ERROR,
   type InternshipValidationErrorCode,
@@ -29,7 +32,7 @@ function formatMajors(value: unknown) {
 }
 
 function getCreateInternshipError(searchParams?: { code?: string; error?: string }) {
-  const code = searchParams?.code as InternshipValidationErrorCode | undefined
+  const code = searchParams?.code as InternshipValidationErrorCode | string | undefined
 
   if (code === INTERNSHIP_VALIDATION_ERROR.WORK_MODE_REQUIRED) {
     return { message: 'Work mode is required.', field: 'work_mode' as const }
@@ -48,6 +51,12 @@ function getCreateInternshipError(searchParams?: { code?: string; error?: string
   }
   if (code === INTERNSHIP_VALIDATION_ERROR.DEADLINE_INVALID) {
     return { message: 'Application deadline must be today or later.', field: 'application_deadline' as const }
+  }
+  if (code === PLAN_LIMIT_REACHED) {
+    return {
+      message: 'Free employers can have one active internship. Upgrade to Verified Employer to post unlimited internships.',
+      field: null,
+    }
   }
   if (searchParams?.error) {
     return { message: decodeURIComponent(searchParams.error), field: null }
@@ -75,11 +84,26 @@ export default async function EmployerDashboardPage({
     .select('id, title, location, experience_level, majors, created_at')
     .eq('employer_id', user.id)
     .order('created_at', { ascending: false })
+  const { isVerifiedEmployer } = await getEmployerVerificationStatus({ supabase, userId: user.id })
 
   async function createInternship(formData: FormData) {
     'use server'
 
     const { user: currentUser } = await requireRole('employer')
+    const supabaseAction = await supabaseServer()
+
+    const verification = await getEmployerVerificationStatus({ supabase: supabaseAction, userId: currentUser.id })
+    if (!verification.isVerifiedEmployer) {
+      const { count } = await supabaseAction
+        .from('internships')
+        .select('id', { count: 'exact', head: true })
+        .eq('employer_id', currentUser.id)
+
+      if ((count ?? 0) >= 1) {
+        redirect(`/dashboard/employer?code=${PLAN_LIMIT_REACHED}`)
+      }
+    }
+
     const title = String(formData.get('title') ?? '').trim()
     const locationCity = String(formData.get('location_city') ?? '').trim()
     const locationState = String(formData.get('location_state') ?? '').trim().toUpperCase()
@@ -119,7 +143,6 @@ export default async function EmployerDashboardPage({
         ? 'Remote'
         : `${locationCity.trim()}, ${locationState.trim()} (${workMode})`
 
-    const supabaseAction = await supabaseServer()
     const { error } = await supabaseAction.from('internships').insert({
       employer_id: currentUser.id,
       title,
@@ -146,6 +169,7 @@ export default async function EmployerDashboardPage({
   }
 
   const createInternshipError = getCreateInternshipError(resolvedSearchParams)
+  const showUpgradeModal = isPlanLimitReachedCode(resolvedSearchParams?.code)
 
   return (
     <main className="min-h-screen bg-white">
@@ -162,6 +186,17 @@ export default async function EmployerDashboardPage({
             className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             View applicant inbox
+          </Link>
+        </div>
+
+        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          Plan:{' '}
+          <span className="font-semibold text-slate-900">
+            {isVerifiedEmployer ? 'Verified Employer' : 'Free Employer'}
+          </span>
+          {!isVerifiedEmployer ? ' (1 active internship limit)' : ' (unlimited internships + email alerts)'}
+          <Link href="/upgrade" className="ml-2 font-medium text-blue-700 hover:underline">
+            {isVerifiedEmployer ? 'Manage subscription' : 'Upgrade'}
           </Link>
         </div>
 
@@ -397,6 +432,39 @@ export default async function EmployerDashboardPage({
           )}
         </div>
       </section>
+
+      {showUpgradeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-900">Free plan limit reached</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Free employers can keep one active internship. Upgrade to Verified Employer to publish unlimited internships and receive email alerts.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <form action={startVerifiedEmployerCheckoutAction}>
+                <button
+                  type="submit"
+                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Upgrade for $49/mo
+                </button>
+              </form>
+              <Link
+                href="/upgrade"
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Billing details
+              </Link>
+              <Link
+                href="/dashboard/employer"
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

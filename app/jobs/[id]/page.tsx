@@ -135,7 +135,7 @@ export default async function JobDetailPage({
     return (
       <main className="min-h-screen bg-white px-6 py-12">
         <div className="mx-auto max-w-3xl">
-          <Link href="/jobs" className="text-sm font-medium text-blue-700 hover:underline">
+          <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
             Back to jobs
           </Link>
 
@@ -159,7 +159,7 @@ export default async function JobDetailPage({
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <Link href="/jobs" className="text-sm font-medium text-blue-700 hover:underline">
+        <Link href="/" className="text-sm font-medium text-blue-700 hover:underline">
           Back to jobs
         </Link>
 

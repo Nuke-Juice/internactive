@@ -5,6 +5,7 @@ import { APPLY_ERROR, isDuplicateApplicationConstraintError, type ApplyErrorCode
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
 import { buildApplicationMatchSnapshot } from '@/lib/applicationMatchSnapshot'
+import { sendEmployerApplicationAlert } from '@/lib/email/employerAlerts'
 
 type ApplyFromMicroOnboardingInput = {
   listingId: string
@@ -123,16 +124,20 @@ export async function applyFromMicroOnboardingAction({
     profile,
   })
 
-  const { error: insertError } = await supabase.from('applications').insert({
-    internship_id: listingId,
-    student_id: user.id,
-    resume_url: resumePath,
-    status: 'submitted',
-    match_score: snapshot.match_score,
-    match_reasons: snapshot.match_reasons,
-    match_gaps: snapshot.match_gaps,
-    matching_version: snapshot.matching_version,
-  })
+  const { data: insertedApplication, error: insertError } = await supabase
+    .from('applications')
+    .insert({
+      internship_id: listingId,
+      student_id: user.id,
+      resume_url: resumePath,
+      status: 'submitted',
+      match_score: snapshot.match_score,
+      match_reasons: snapshot.match_reasons,
+      match_gaps: snapshot.match_gaps,
+      matching_version: snapshot.matching_version,
+    })
+    .select('id')
+    .single()
 
   if (insertError) {
     if (isDuplicateApplicationConstraintError(insertError)) {
@@ -157,5 +162,14 @@ export async function applyFromMicroOnboardingAction({
     userId: user.id,
     properties: { listing_id: listingId, source: 'applyFromMicroOnboardingAction' },
   })
+
+  if (insertedApplication?.id) {
+    try {
+      await sendEmployerApplicationAlert({ applicationId: insertedApplication.id })
+    } catch {
+      // no-op; email should not block application submission
+    }
+  }
+
   return { ok: true }
 }
