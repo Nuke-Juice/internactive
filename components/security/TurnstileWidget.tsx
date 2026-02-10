@@ -36,13 +36,23 @@ export default function TurnstileWidget({
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() ?? ''
   const containerRef = useRef<HTMLDivElement | null>(null)
   const widgetIdRef = useRef<string | null>(null)
+  const onTokenChangeRef = useRef<typeof onTokenChange>(onTokenChange)
+  const onErrorRef = useRef<typeof onError>(onError)
   const [scriptReady, setScriptReady] = useState(false)
   const [token, setToken] = useState('')
 
   useEffect(() => {
+    onTokenChangeRef.current = onTokenChange
+  }, [onTokenChange])
+
+  useEffect(() => {
+    onErrorRef.current = onError
+  }, [onError])
+
+  useEffect(() => {
     if (siteKey) return
-    onError?.('Turnstile site key is missing.')
-  }, [onError, siteKey])
+    onErrorRef.current?.('Turnstile site key is missing.')
+  }, [siteKey])
 
   useEffect(() => {
     if (!scriptReady || !siteKey || !containerRef.current || !window.turnstile || widgetIdRef.current) return
@@ -53,16 +63,16 @@ export default function TurnstileWidget({
       appearance,
       callback: (value: string) => {
         setToken(value)
-        onTokenChange?.(value)
+        onTokenChangeRef.current?.(value)
       },
       'expired-callback': () => {
         setToken('')
-        onTokenChange?.('')
+        onTokenChangeRef.current?.('')
       },
       'error-callback': () => {
         setToken('')
-        onTokenChange?.('')
-        onError?.('Turnstile verification could not be completed.')
+        onTokenChangeRef.current?.('')
+        onErrorRef.current?.('Turnstile verification could not be completed.')
       },
     })
 
@@ -72,7 +82,7 @@ export default function TurnstileWidget({
         widgetIdRef.current = null
       }
     }
-  }, [action, appearance, onError, onTokenChange, scriptReady, siteKey])
+  }, [action, appearance, scriptReady, siteKey])
 
   return (
     <div className={className}>
@@ -80,7 +90,7 @@ export default function TurnstileWidget({
         src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
         strategy="afterInteractive"
         onLoad={() => setScriptReady(true)}
-        onError={() => onError?.('Turnstile script failed to load.')}
+        onError={() => onErrorRef.current?.('Turnstile script failed to load.')}
       />
       <div ref={containerRef} />
       <input type="hidden" name={fieldName} value={token} />
