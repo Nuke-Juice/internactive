@@ -521,7 +521,7 @@ export default async function JobsView({
                 {!user && (
                   <Link
                     href="/signup/student"
-                    className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-6 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
                   >
                     Create profile
                   </Link>
@@ -533,20 +533,6 @@ export default async function JobsView({
       ) : null}
 
       <section id={anchorId} className="mx-auto max-w-6xl scroll-mt-24 px-6 py-8">
-        {!user && (
-          <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p>Create profile to get specialized internships matched to you.</p>
-              <Link
-                href="/signup/student"
-                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-              >
-                Create profile
-              </Link>
-            </div>
-          </div>
-        )}
-
         {showCompleteProfileBanner && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

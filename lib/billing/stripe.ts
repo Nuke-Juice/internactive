@@ -18,9 +18,29 @@ export function getStripeClient() {
   return stripeClient
 }
 
+function normalizeUrl(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  try {
+    const parsed = new URL(withProtocol)
+    parsed.pathname = ''
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString().replace(/\/+$/, '')
+  } catch {
+    return null
+  }
+}
+
 export function getAppUrl() {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim() || process.env.APP_URL?.trim()
-  if (configured) return configured.replace(/\/+$/, '')
+  const configured = normalizeUrl(process.env.NEXT_PUBLIC_APP_URL ?? '') ?? normalizeUrl(process.env.APP_URL ?? '')
+  if (configured) return configured
+
+  // On Vercel, prefer the stable production domain over per-deployment hosts.
+  const vercelProductionUrl = normalizeUrl(process.env.VERCEL_PROJECT_PRODUCTION_URL ?? '')
+  if (vercelProductionUrl) return vercelProductionUrl
 
   const vercelUrl = process.env.VERCEL_URL?.trim()
   if (vercelUrl) {
