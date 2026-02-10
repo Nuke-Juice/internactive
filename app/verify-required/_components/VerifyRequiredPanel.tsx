@@ -60,9 +60,34 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
     setRefreshing(true)
     setRefreshError(null)
     const supabase = supabaseBrowser()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+
+    if (!session) {
+      setRefreshing(false)
+      setRefreshError('No active session found. Sign in again, then verify your email link.')
+      showToast({
+        kind: 'warning',
+        message: 'Session expired. Please sign in again.',
+        key: 'verify-session-missing',
+      })
+      return
+    }
+
     const { error } = await supabase.auth.refreshSession()
     if (error) {
       setRefreshing(false)
+      if (error.message.toLowerCase().includes('refresh token not found')) {
+        await supabase.auth.signOut()
+        setRefreshError('Session expired. Please sign in again, then click your verification link.')
+        showToast({
+          kind: 'warning',
+          message: 'Session expired. Please sign in again.',
+          key: 'verify-refresh-token-missing',
+        })
+        return
+      }
       setRefreshError(error.message)
       return
     }

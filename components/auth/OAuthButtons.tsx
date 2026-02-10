@@ -7,6 +7,7 @@ type OAuthProvider = 'google' | 'linkedin_oidc'
 
 type Props = {
   roleHint?: 'student' | 'employer'
+  nextPath?: string
   className?: string
 }
 
@@ -15,7 +16,15 @@ function providerLabel(provider: OAuthProvider) {
   return 'LinkedIn'
 }
 
-export default function OAuthButtons({ roleHint, className }: Props) {
+function normalizeNextPath(value: string | null | undefined) {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('/')) return null
+  if (trimmed.startsWith('//')) return null
+  return trimmed
+}
+
+export default function OAuthButtons({ roleHint, nextPath, className }: Props) {
   const [loadingProvider, setLoadingProvider] = useState<OAuthProvider | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -24,8 +33,9 @@ export default function OAuthButtons({ roleHint, className }: Props) {
     setLoadingProvider(provider)
 
     const supabase = supabaseBrowser()
-    const nextPath = roleHint ? `/account?role=${roleHint}` : '/account'
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
+    const defaultNextPath = roleHint ? `/account?role=${roleHint}` : '/account'
+    const destinationPath = normalizeNextPath(nextPath) ?? defaultNextPath
+    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(destinationPath)}`
 
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,

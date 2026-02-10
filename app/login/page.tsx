@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
-import { isAdminRole, isAppRole, isUserRole } from '@/lib/auth/roles'
+import { normalizeNextPath, resolvePostAuthRedirect } from '@/lib/auth/postAuthRedirect'
 import { supabaseServer } from '@/lib/supabase/server'
 import OAuthButtons from '@/components/auth/OAuthButtons'
 
@@ -11,14 +11,6 @@ function getErrorMessage(message: string) {
     return 'Invalid email or password.'
   }
   return message
-}
-
-function normalizeNextPath(value: string | undefined) {
-  if (!value) return null
-  const trimmed = value.trim()
-  if (!trimmed.startsWith('/')) return null
-  if (trimmed.startsWith('//')) return null
-  return trimmed
 }
 
 export default function LoginPage({
@@ -49,25 +41,16 @@ export default function LoginPage({
       redirect(`/login?error=${message}${nextParam}`)
     }
 
-    const { data: user } = await supabase.auth.getUser()
-    if (!user.user) redirect('/login?error=Unable+to+load+session.')
+    const { data: authData } = await supabase.auth.getUser()
+    if (!authData.user) redirect('/login?error=Unable+to+load+session.')
 
-    const { data: userRow } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.user.id)
-      .maybeSingle()
+    const { destination } = await resolvePostAuthRedirect({
+      supabase,
+      userId: authData.user.id,
+      requestedNextPath: nextPath,
+    })
 
-    if (nextPath) redirect(nextPath)
-
-    const role = isUserRole(userRow?.role) ? userRow.role : null
-    if (isAdminRole(role)) redirect('/admin/internships')
-    if (isAppRole(role)) {
-      if (role === 'student') redirect('/')
-      if (role === 'employer') redirect('/dashboard/employer')
-    }
-
-    redirect('/account')
+    redirect(destination)
   }
 
   const nextPath = normalizeNextPath(searchParams?.next)
@@ -88,7 +71,7 @@ export default function LoginPage({
 
         <div className="mt-6 border-t border-slate-200 pt-6">
         <div className="mb-4 rounded-2xl border border-slate-300 bg-white p-4 shadow-sm">
-          <OAuthButtons />
+          <OAuthButtons nextPath={nextPath ?? undefined} />
         </div>
         <form action={signIn} className="space-y-4 rounded-2xl border border-slate-300 bg-white p-6 shadow-md">
           {nextPath ? <input type="hidden" name="next" value={nextPath} /> : null}
