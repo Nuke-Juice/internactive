@@ -13,10 +13,10 @@ function getErrorMessage(message: string) {
   return message
 }
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
-  searchParams?: { error?: string; next?: string }
+  searchParams?: Promise<{ error?: string; next?: string }>
 }) {
   async function signIn(formData: FormData) {
     'use server'
@@ -53,7 +53,8 @@ export default function LoginPage({
     redirect(destination)
   }
 
-  const nextPath = normalizeNextPath(searchParams?.next)
+  const resolvedSearchParams = (searchParams ? await searchParams : {}) ?? {}
+  const nextPath = normalizeNextPath(resolvedSearchParams.next)
 
   return (
     <main className="min-h-screen bg-white px-6 py-12">
@@ -96,9 +97,9 @@ export default function LoginPage({
             />
           </div>
 
-          {searchParams?.error && (
+          {resolvedSearchParams.error && (
             <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
-              {decodeURIComponent(searchParams.error)}
+              {decodeURIComponent(resolvedSearchParams.error)}
             </p>
           )}
 
