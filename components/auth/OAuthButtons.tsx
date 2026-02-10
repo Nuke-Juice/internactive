@@ -62,6 +62,10 @@ function normalizeNextPath(value: string | null | undefined) {
   return trimmed
 }
 
+function isLocalhostUrl(value: string) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(value.trim())
+}
+
 export default function OAuthButtons({ roleHint, nextPath, className }: Props) {
   const [loadingProvider, setLoadingProvider] = useState<OAuthProvider | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +77,13 @@ export default function OAuthButtons({ roleHint, nextPath, className }: Props) {
     const supabase = supabaseBrowser()
     const defaultNextPath = roleHint ? `/signup/${roleHint}/details?role=${roleHint}` : '/account'
     const destinationPath = normalizeNextPath(nextPath) ?? defaultNextPath
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(destinationPath)}`
+    const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, '')
+    const currentOrigin = window.location.origin
+    const appOrigin =
+      configuredAppUrl && !(isLocalhostUrl(configuredAppUrl) && !isLocalhostUrl(currentOrigin))
+        ? configuredAppUrl
+        : currentOrigin
+    const redirectTo = `${appOrigin}/auth/callback?next=${encodeURIComponent(destinationPath)}`
 
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
