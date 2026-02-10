@@ -45,11 +45,16 @@ export default function EmployerSignupDetailsPage() {
 
       if (!user.email_confirmed_at) {
         window.location.href =
-          '/signup/employer?error=Verify+your+email+before+completing+your+profile+details.'
+          '/verify-required?next=%2Fsignup%2Femployer%2Fdetails&action=signup_profile_completion'
         return
       }
 
-      const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle()
+      const { data: userRow } = await supabase.from('users').select('role, verified').eq('id', user.id).maybeSingle()
+      if (userRow?.verified !== true) {
+        window.location.href =
+          '/verify-required?next=%2Fsignup%2Femployer%2Fdetails&action=signup_profile_completion'
+        return
+      }
       const role = userRow?.role
 
       if (role === 'student') {
@@ -62,7 +67,6 @@ export default function EmployerSignupDetailsPage() {
           {
             id: user.id,
             role: 'employer',
-            verified: false,
           },
           { onConflict: 'id' }
         )
@@ -113,7 +117,20 @@ export default function EmployerSignupDetailsPage() {
     if (!user.email_confirmed_at) {
       setSaving(false)
       window.location.href =
-        '/signup/employer?error=Verify+your+email+before+completing+your+profile+details.'
+        '/verify-required?next=%2Fsignup%2Femployer%2Fdetails&action=signup_profile_completion'
+      return
+    }
+
+    const { data: usersRow } = await supabase
+      .from('users')
+      .select('verified')
+      .eq('id', user.id)
+      .maybeSingle<{ verified: boolean | null }>()
+
+    if (usersRow?.verified !== true) {
+      setSaving(false)
+      window.location.href =
+        '/verify-required?next=%2Fsignup%2Femployer%2Fdetails&action=signup_profile_completion'
       return
     }
 
@@ -122,7 +139,6 @@ export default function EmployerSignupDetailsPage() {
         {
           id: user.id,
           role: 'employer',
-          verified: false,
         },
         { onConflict: 'id' }
       ),

@@ -43,8 +43,10 @@ export async function GET(request: Request) {
     const roleHint = readRoleHint(nextUrl, metadata)
     const admin = hasSupabaseAdminCredentials() ? supabaseAdmin() : null
 
-    async function upsertUsersRow(role: 'student' | 'employer') {
-      const payload = { id: authUser.id, role, verified: false }
+    async function upsertUsersRow(role?: 'student' | 'employer') {
+      const payload: { id: string; role?: 'student' | 'employer'; verified?: boolean } = { id: authUser.id }
+      if (role) payload.role = role
+      if (authUser.email_confirmed_at) payload.verified = true
       const result = await supabase.from('users').upsert(payload, { onConflict: 'id' })
       if (!result.error) return true
       if (!admin) return false
@@ -61,6 +63,11 @@ export async function GET(request: Request) {
       const wroteUser = await upsertUsersRow('employer')
       if (!wroteUser) {
         return NextResponse.redirect(new URL('/login?error=Could+not+finish+OAuth+sign-in', url.origin))
+      }
+    } else if (authUser.email_confirmed_at) {
+      const wroteUser = await upsertUsersRow()
+      if (!wroteUser) {
+        return NextResponse.redirect(new URL('/login?error=Could+not+finish+sign-in', url.origin))
       }
     }
   }

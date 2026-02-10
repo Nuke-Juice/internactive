@@ -31,7 +31,13 @@ export default async function VerifyRequiredPage({ searchParams }: { searchParam
     redirect('/login')
   }
 
-  if (user.email_confirmed_at) {
+  const { data: usersRow } = await supabase
+    .from('users')
+    .select('verified')
+    .eq('id', user.id)
+    .maybeSingle<{ verified: boolean | null }>()
+
+  if (user.email_confirmed_at && usersRow?.verified === true) {
     redirect(nextUrl)
   }
 

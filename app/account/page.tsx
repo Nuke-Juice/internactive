@@ -129,11 +129,16 @@ export default async function AccountPage() {
 
   const { data: userRow } = await supabase
     .from('users')
-    .select('role')
+    .select('role, verified')
     .eq('id', user.id)
     .maybeSingle()
 
   const role: UserRole | null = isUserRole(userRow?.role) ? userRow.role : null
+  const isVerificationComplete = userRow?.verified === true
+
+  if (!isVerificationComplete) {
+    redirect(buildVerifyRequiredHref('/account', 'signup_email_verification_pending'))
+  }
 
   if (role && isAdminRole(role)) {
     if (isDev) {
@@ -161,6 +166,17 @@ export default async function AccountPage() {
     } = await actionSupabase.auth.getUser()
 
     if (!actionUser) redirect('/login')
+    if (!actionUser.email_confirmed_at) {
+      redirect(buildVerifyRequiredHref('/account', 'signup_continue'))
+    }
+    const { data: verificationRow } = await actionSupabase
+      .from('users')
+      .select('verified')
+      .eq('id', actionUser.id)
+      .maybeSingle<{ verified: boolean | null }>()
+    if (verificationRow?.verified !== true) {
+      redirect(buildVerifyRequiredHref('/account', 'signup_email_verification_pending'))
+    }
 
     let finalRole: UserRole
     try {
@@ -182,56 +198,14 @@ export default async function AccountPage() {
     }
 
     if (finalRole === 'student') {
-      const { error: profileError } = await actionSupabase.from('student_profiles').upsert(
-        {
-          user_id: actionUser.id,
-          school: 'Not set',
-          major_id: null,
-          majors: null,
-          year: 'Not set',
-          coursework: null,
-          experience_level: 'none',
-          availability_start_month: 'May',
-          availability_hours_per_week: 20,
-          interests: null,
-          preferred_city: null,
-          preferred_state: null,
-          preferred_zip: null,
-          max_commute_minutes: 30,
-          transport_mode: 'driving',
-          exact_address_line1: null,
-          location_lat: null,
-          location_lng: null,
-        },
-        { onConflict: 'user_id' }
-      )
-
-      if (profileError) redirect(`/account?error=${encodeURIComponent(profileError.message)}`)
+      redirect('/signup/student/details')
     }
 
     if (finalRole === 'employer') {
-      const { error: profileError } = await actionSupabase.from('employer_profiles').upsert(
-        {
-          user_id: actionUser.id,
-          company_name: null,
-          website: null,
-          contact_email: actionUser.email ?? null,
-          industry: null,
-          location: null,
-          location_city: null,
-          location_state: null,
-          location_zip: null,
-          location_address_line1: null,
-          location_lat: null,
-          location_lng: null,
-        },
-        { onConflict: 'user_id' }
-      )
-
-      if (profileError) redirect(`/account?error=${encodeURIComponent(profileError.message)}`)
+      redirect('/signup/employer/details')
     }
 
-    redirect('/account?welcome=1')
+    redirect('/account')
   }
 
   if (!role) {

@@ -53,6 +53,13 @@ function hasPositiveHours(value: MinimumProfileInput['availability_hours_per_wee
   return false
 }
 
+function hasValidSchool(value: string | null | undefined) {
+  if (typeof value !== 'string') return false
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return false
+  return normalized !== 'not set' && normalized !== 'n/a' && normalized !== 'none'
+}
+
 export function getMinimumProfileCompleteness(profile: MinimumProfileInput | null): MinimumProfileCompleteness {
   if (!profile) {
     return { ok: false, missing: [...MINIMUM_PROFILE_FIELDS] }
@@ -61,7 +68,7 @@ export function getMinimumProfileCompleteness(profile: MinimumProfileInput | nul
   const majors = parseMajors(profile.majors)
 
   const checks: Record<MinimumProfileField, boolean> = {
-    school: typeof profile.school === 'string' && profile.school.trim().length > 0,
+    school: hasValidSchool(profile.school),
     major: (typeof profile.major_id === 'string' && profile.major_id.trim().length > 0) || majors.length > 0,
     availability_start_month:
       typeof profile.availability_start_month === 'string' && profile.availability_start_month.trim().length > 0,

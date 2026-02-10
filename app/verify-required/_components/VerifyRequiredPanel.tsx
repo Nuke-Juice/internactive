@@ -25,6 +25,7 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
   const [cooldownSeconds, setCooldownSeconds] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
   const { showToast } = useToast()
 
   useEffect(() => {
@@ -56,27 +57,40 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
     return () => clearTimeout(timer)
   }, [cooldownSeconds])
 
-  async function refreshAndContinue() {
-    setRefreshing(true)
-    setRefreshError(null)
+  async function checkVerificationStatus(options?: { manual?: boolean }) {
+    const manual = options?.manual === true
+    if (manual) {
+      setRefreshing(true)
+      setRefreshError(null)
+    } else {
+      setChecking(true)
+    }
+
     const supabase = supabaseBrowser()
     const {
       data: { session },
     } = await supabase.auth.getSession()
 
     if (!session) {
+      if (manual) {
+        setRefreshError('No active session found. Sign in again, then verify your email link.')
+        showToast({
+          kind: 'warning',
+          message: 'Session expired. Please sign in again.',
+          key: 'verify-session-missing',
+        })
+      }
       setRefreshing(false)
-      setRefreshError('No active session found. Sign in again, then verify your email link.')
-      showToast({
-        kind: 'warning',
-        message: 'Session expired. Please sign in again.',
-        key: 'verify-session-missing',
-      })
+      setChecking(false)
       return
     }
 
     const { error } = await supabase.auth.refreshSession()
     if (error) {
+      if (!manual) {
+        setChecking(false)
+        return
+      }
       setRefreshing(false)
       if (error.message.toLowerCase().includes('refresh token not found')) {
         await supabase.auth.signOut()
@@ -95,21 +109,49 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
     const {
       data: { user },
     } = await supabase.auth.getUser()
-    setRefreshing(false)
 
     if (!user?.email_confirmed_at) {
-      setRefreshError('Email is still unverified. Open your verification email and click the link first.')
-      showToast({
-        kind: 'warning',
-        message: 'Email is still unverified.',
-        key: 'verify-still-unverified',
-      })
+      if (manual) {
+        setRefreshError('Email is still unverified. Open your verification email and click the link first.')
+        showToast({
+          kind: 'warning',
+          message: 'Email is still unverified.',
+          key: 'verify-still-unverified',
+        })
+      }
+      setRefreshing(false)
+      setChecking(false)
       return
     }
 
+    const { data: usersRow } = await supabase
+      .from('users')
+      .select('verified')
+      .eq('id', user.id)
+      .maybeSingle<{ verified: boolean | null }>()
+
+    if (usersRow?.verified !== true) {
+      if (manual) {
+        setRefreshError('Verification is still processing. Use the email link, then try again.')
+      }
+      setRefreshing(false)
+      setChecking(false)
+      return
+    }
+
+    setRefreshing(false)
+    setChecking(false)
     router.push(`${nextUrl}${nextUrl.includes('?') ? '&' : '?'}verified=1`)
     router.refresh()
   }
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void checkVerificationStatus()
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -119,6 +161,9 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
       </p>
       <p className="mt-2 text-sm text-slate-600">
         Locked action: <span className="font-medium text-slate-900">{actionName.replace(/_/g, ' ')}</span>.
+      </p>
+      <p className="mt-2 text-sm text-slate-600">
+        This page will unlock automatically after you click the verification link.
       </p>
 
       <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
@@ -139,13 +184,14 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
         </button>
         <button
           type="button"
-          onClick={refreshAndContinue}
+          onClick={() => void checkVerificationStatus({ manual: true })}
           disabled={refreshing}
           className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
         >
           {refreshing ? 'Refreshing...' : 'I verified, refresh'}
         </button>
       </form>
+      {checking ? <p className="mt-3 text-xs text-slate-500">Checking verification status...</p> : null}
 
       {state.message ? (
         <div

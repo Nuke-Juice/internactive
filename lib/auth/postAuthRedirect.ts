@@ -3,7 +3,7 @@ import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
 import { isAdminRole, isAppRole, isUserRole, type AppRole, type UserRole } from '@/lib/auth/roles'
 import { buildVerifyRequiredHref } from '@/lib/auth/emailVerification'
 
-type RoleLookupRow = { role: UserRole | null } | null
+type RoleLookupRow = { role: UserRole | null; verified?: boolean | null } | null
 
 function isNonEmpty(value: string | null | undefined) {
   return typeof value === 'string' && value.trim().length > 0
@@ -82,11 +82,21 @@ export async function resolvePostAuthRedirect(params: {
 
   const { data: userRow } = await params.supabase
     .from('users')
-    .select('role')
+    .select('role, verified')
     .eq('id', params.userId)
     .maybeSingle<RoleLookupRow>()
 
   const role = isUserRole(userRow?.role) ? userRow.role : null
+  const isVerificationComplete = userRow?.verified === true
+  if (!isVerificationComplete) {
+    const verifyNext = normalizedNext ?? (isAppRole(role) ? signupDetailsPathForRole(role) : '/account')
+    return {
+      destination: buildVerifyRequiredHref(verifyNext, 'signup_email_verification_pending'),
+      role,
+      onboardingComplete: false,
+    }
+  }
+
   if (!role) {
     return {
       destination: '/account',

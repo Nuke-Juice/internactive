@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ChevronDown } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import MajorCombobox, { type CanonicalMajor } from '@/components/account/MajorCombobox'
 
@@ -66,6 +66,8 @@ const COURSEWORK_CATALOG = [
   'Business Communication',
 ]
 
+const YEAR_OPTIONS = ['Freshman', 'Sophomore', 'Junior', 'Senior']
+
 const FIELD =
   'mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100'
 
@@ -99,8 +101,11 @@ function parseMajors(value: StudentProfileRow['majors']) {
 export default function StudentSignupDetailsPage() {
   const [initializing, setInitializing] = useState(true)
 
-  const [school, setSchool] = useState('University of Utah')
-  const [year, setYear] = useState('Freshman')
+  const [school, setSchool] = useState('')
+  const [schoolQuery, setSchoolQuery] = useState('')
+  const [schoolOpen, setSchoolOpen] = useState(false)
+  const [year, setYear] = useState('')
+  const [yearOpen, setYearOpen] = useState(false)
   const [gender, setGender] = useState('')
   const [majorQuery, setMajorQuery] = useState('')
   const [selectedMajor, setSelectedMajor] = useState<CanonicalMajor | null>(null)
@@ -136,6 +141,14 @@ export default function StudentSignupDetailsPage() {
     return available.filter((item) => item.toLowerCase().includes(query)).slice(0, 8)
   }, [coursework, courseworkInput])
 
+  const filteredSchoolOptions = useMemo(() => {
+    const query = schoolQuery.trim().toLowerCase()
+    if (!query) return SCHOOL_OPTIONS.slice(0, 10)
+    return SCHOOL_OPTIONS.filter((option) => option.toLowerCase().includes(query)).slice(0, 10)
+  }, [schoolQuery])
+
+  const showSchoolDropdown = schoolOpen && schoolQuery.trim().length > 0 && school !== schoolQuery
+
   useEffect(() => {
     const supabase = supabaseBrowser()
 
@@ -151,14 +164,20 @@ export default function StudentSignupDetailsPage() {
 
       if (!user.email_confirmed_at) {
         window.location.href =
-          '/signup/student?error=Verify+your+email+before+completing+your+profile+details.'
+          '/verify-required?next=%2Fsignup%2Fstudent%2Fdetails&action=signup_profile_completion'
         return
       }
 
       const [{ data: userRow }, { data: catalogData, error: catalogError }] = await Promise.all([
-        supabase.from('users').select('role').eq('id', user.id).maybeSingle(),
+        supabase.from('users').select('role, verified').eq('id', user.id).maybeSingle(),
         supabase.from('canonical_majors').select('id, slug, name').order('name', { ascending: true }).limit(500),
       ])
+
+      if (userRow?.verified !== true) {
+        window.location.href =
+          '/verify-required?next=%2Fsignup%2Fstudent%2Fdetails&action=signup_profile_completion'
+        return
+      }
 
       const role = userRow?.role
       if (role === 'employer') {
@@ -171,7 +190,6 @@ export default function StudentSignupDetailsPage() {
           {
             id: user.id,
             role: 'student',
-            verified: false,
           },
           { onConflict: 'id' }
         )
@@ -195,8 +213,18 @@ export default function StudentSignupDetailsPage() {
           .maybeSingle<StudentProfileRow>()
 
         if (profile) {
-          setSchool(profile.school || 'University of Utah')
-          setYear(profile.year || 'Freshman')
+          const profileMajors = parseMajors(profile.majors)
+          const hasExistingMajor = Boolean(profile.major_id) || profileMajors.length > 0
+          const profileSchool = (profile.school ?? '').trim()
+          const profileYear = (profile.year ?? '').trim()
+
+          if (hasExistingMajor && SCHOOL_OPTIONS.includes(profileSchool)) {
+            setSchool(profileSchool)
+            setSchoolQuery(profileSchool)
+          }
+          if (hasExistingMajor && YEAR_OPTIONS.includes(profileYear)) {
+            setYear(profileYear)
+          }
           setGender(profile.gender || '')
           setCoursework(Array.isArray(profile.coursework) ? profile.coursework : [])
           setHoursPerWeek(profile.availability_hours_per_week ? String(profile.availability_hours_per_week) : '15')
@@ -232,6 +260,8 @@ export default function StudentSignupDetailsPage() {
   async function saveProfileDetails() {
     setError(null)
 
+    if (!school.trim()) return setError('Please select your school.')
+    if (!year.trim()) return setError('Please select your year.')
     if (!selectedMajor) return setError('Please select a verified major.')
     if (selectedSecondMajor && selectedSecondMajor.id === selectedMajor.id) {
       return setError('Choose a different second major or leave it blank.')
@@ -258,7 +288,20 @@ export default function StudentSignupDetailsPage() {
     if (!user.email_confirmed_at) {
       setSaving(false)
       window.location.href =
-        '/signup/student?error=Verify+your+email+before+completing+your+profile+details.'
+        '/verify-required?next=%2Fsignup%2Fstudent%2Fdetails&action=signup_profile_completion'
+      return
+    }
+
+    const { data: usersRow } = await supabase
+      .from('users')
+      .select('verified')
+      .eq('id', user.id)
+      .maybeSingle<{ verified: boolean | null }>()
+
+    if (usersRow?.verified !== true) {
+      setSaving(false)
+      window.location.href =
+        '/verify-required?next=%2Fsignup%2Fstudent%2Fdetails&action=signup_profile_completion'
       return
     }
 
@@ -275,7 +318,6 @@ export default function StudentSignupDetailsPage() {
         {
           id: user.id,
           role: 'student',
-          verified: false,
         },
         { onConflict: 'id' }
       ),
@@ -333,23 +375,82 @@ export default function StudentSignupDetailsPage() {
           <div className="grid gap-5 sm:grid-cols-2">
             <div>
               <label className="text-sm font-medium text-slate-700">School</label>
-              <select className={FIELD} value={school} onChange={(e) => setSchool(e.target.value)}>
-                {SCHOOL_OPTIONS.map((schoolOption) => (
-                  <option key={schoolOption} value={schoolOption}>
-                    {schoolOption}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <input
+                  className={FIELD}
+                  value={schoolQuery}
+                  onFocus={() => setSchoolOpen(true)}
+                  onBlur={() => {
+                    setTimeout(() => setSchoolOpen(false), 120)
+                  }}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setSchoolQuery(value)
+                    if (school && value.trim() !== school) {
+                      setSchool('')
+                    }
+                    setSchoolOpen(true)
+                  }}
+                  placeholder="Type to search school"
+                />
+                {showSchoolDropdown ? (
+                  <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    {filteredSchoolOptions.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-slate-600">No results found.</div>
+                    ) : (
+                      filteredSchoolOptions.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onMouseDown={() => {
+                            setSchool(option)
+                            setSchoolQuery(option)
+                            setSchoolOpen(false)
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          {option}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              {!school && schoolQuery.trim().length > 0 ? (
+                <p className="mt-1 text-xs text-amber-700">Choose a school from the dropdown list.</p>
+              ) : null}
             </div>
 
             <div>
               <label className="text-sm font-medium text-slate-700">Year</label>
-              <select className={FIELD} value={year} onChange={(e) => setYear(e.target.value)}>
-                <option>Freshman</option>
-                <option>Sophomore</option>
-                <option>Junior</option>
-                <option>Senior</option>
-              </select>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setYearOpen((open) => !open)}
+                  onBlur={() => setTimeout(() => setYearOpen(false), 120)}
+                  className={`${FIELD} flex items-center justify-between text-left`}
+                >
+                  <span className={year ? 'text-slate-900' : 'text-slate-400'}>{year || 'Select your year'}</span>
+                  <ChevronDown className="h-4 w-4 text-slate-500" />
+                </button>
+                {yearOpen ? (
+                  <div className="absolute z-20 mt-1 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    {YEAR_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onMouseDown={() => {
+                          setYear(option)
+                          setYearOpen(false)
+                        }}
+                        className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div>

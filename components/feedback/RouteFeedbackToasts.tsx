@@ -12,6 +12,12 @@ function decode(value: string) {
   }
 }
 
+function isIgnorableValue(value: string | null) {
+  if (!value) return true
+  const normalized = value.trim().toLowerCase()
+  return normalized.length === 0 || normalized === 'null' || normalized === 'undefined'
+}
+
 export default function RouteFeedbackToasts() {
   const searchParams = useSearchParams()
   const pathname = usePathname()
@@ -34,13 +40,17 @@ export default function RouteFeedbackToasts() {
     if (verified === '1') {
       showToast({ kind: 'success', message: 'Email verified ✓', key: 'verified-1' })
     }
-    if (success) {
+    if (!isIgnorableValue(success) && success) {
       const message = success === '1' ? 'Saved successfully.' : decode(success)
       showToast({ kind: 'success', message, key: `success:${success}` })
     }
-    if (warning) showToast({ kind: 'warning', message: decode(warning), key: `warning:${warning}` })
-    if (error) showToast({ kind: 'error', message: decode(error), key: `error:${error}` })
-    if (toast) {
+    if (!isIgnorableValue(warning) && warning) {
+      showToast({ kind: 'warning', message: decode(warning), key: `warning:${warning}` })
+    }
+    if (!isIgnorableValue(error) && error) {
+      showToast({ kind: 'error', message: decode(error), key: `error:${error}` })
+    }
+    if (!isIgnorableValue(toast) && toast) {
       const kind = toastType === 'warning' || toastType === 'error' || toastType === 'success' ? toastType : 'success'
       showToast({ kind, message: decode(toast), key: `toast:${kind}:${toast}` })
     }
