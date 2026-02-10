@@ -4,22 +4,32 @@ export type InternshipMatchInput = {
   id: string
   title?: string | null
   majors?: string[] | string | null
+  target_graduation_years?: string[] | string | null
   hours_per_week?: number | null
   location?: string | null
   description?: string | null
   work_mode?: string | null
   term?: string | null
+  experience_level?: string | null
   category?: string | null
   required_skills?: string[] | string | null
   preferred_skills?: string[] | string | null
+  recommended_coursework?: string[] | string | null
   required_skill_ids?: string[] | null
   preferred_skill_ids?: string[] | null
+  coursework_item_ids?: string[] | null
+  coursework_category_ids?: string[] | null
+  coursework_category_names?: string[] | null
 }
 
 export type StudentMatchProfile = {
   majors: string[]
+  year?: string | null
+  experience_level?: string | null
   skills?: string[]
   skill_ids?: string[]
+  coursework_item_ids?: string[]
+  coursework_category_ids?: string[]
   coursework?: string[]
   availability_hours_per_week?: number | null
   preferred_terms?: string[]
@@ -31,7 +41,10 @@ export type StudentMatchProfile = {
 export type MatchWeights = {
   skillsRequired: number
   skillsPreferred: number
+  courseworkAlignment: number
   majorCategoryAlignment: number
+  graduationYearAlignment: number
+  experienceAlignment: number
   availability: number
   locationModePreference: number
 }
@@ -39,12 +52,15 @@ export type MatchWeights = {
 export const DEFAULT_MATCHING_WEIGHTS: MatchWeights = {
   skillsRequired: 4,
   skillsPreferred: 2,
+  courseworkAlignment: 1.5,
   majorCategoryAlignment: 3,
+  graduationYearAlignment: 1.5,
+  experienceAlignment: 1.5,
   availability: 2,
   locationModePreference: 1,
 }
 
-export const MATCHING_VERSION = 'v1.0'
+export const MATCHING_VERSION = 'v1.1'
 
 export type InternshipMatchResult = {
   internshipId: string
@@ -133,6 +149,10 @@ function seasonFromTerm(term: string) {
   if (term.includes('fall')) return 'fall'
   if (term.includes('spring')) return 'spring'
   if (term.includes('winter')) return 'winter'
+  if (term.includes('june') || term.includes('july') || term.includes('august') || term.includes('may')) return 'summer'
+  if (term.includes('september') || term.includes('october') || term.includes('november')) return 'fall'
+  if (term.includes('december') || term.includes('january') || term.includes('february')) return 'winter'
+  if (term.includes('march') || term.includes('april')) return 'spring'
   return term
 }
 
@@ -175,6 +195,28 @@ function describeReason(label: string, points: number, details: string) {
 
 function mapGap(text: string) {
   return text.replace(/\s+/g, ' ').trim()
+}
+
+function normalizeGradYearToken(value: string) {
+  return normalizeText(value).replace(/\s+/g, '')
+}
+
+function parseInternshipExperienceLevel(value: string | null | undefined) {
+  if (!value) return null
+  const normalized = normalizeText(value)
+  if (normalized === 'entry') return 0
+  if (normalized === 'mid') return 1
+  if (normalized === 'senior') return 2
+  return null
+}
+
+function parseStudentExperienceLevel(value: string | null | undefined) {
+  if (!value) return null
+  const normalized = normalizeText(value)
+  if (normalized === 'none') return 0
+  if (normalized === 'projects') return 1
+  if (normalized === 'internship') return 2
+  return null
 }
 
 export function evaluateInternshipMatch(
@@ -262,7 +304,11 @@ export function evaluateInternshipMatch(
   }
 
   const studentMajors = profile.majors.map(normalizeText).filter(Boolean)
+  const studentYear = normalizeGradYearToken(profile.year ?? '')
+  const studentExperienceLevel = parseStudentExperienceLevel(profile.experience_level)
   const internshipMajors = parseMajors(internship.majors)
+  const targetGradYears = parseList(internship.target_graduation_years).map(normalizeGradYearToken)
+  const internshipExperienceLevel = parseInternshipExperienceLevel(internship.experience_level)
   const internshipCategory = internship.category ? normalizeText(internship.category) : internshipMajors[0] ?? ''
 
   const studentSkills = [
@@ -273,6 +319,8 @@ export function evaluateInternshipMatch(
     .map(normalizeText)
     .filter(Boolean)
   const studentSkillIds = Array.from(new Set((profile.skill_ids ?? []).filter(Boolean)))
+  const studentCourseworkIds = Array.from(new Set((profile.coursework_item_ids ?? []).filter(Boolean)))
+  const studentCourseworkCategoryIds = Array.from(new Set((profile.coursework_category_ids ?? []).filter(Boolean)))
 
   const { requiredIds, preferredIds, required, preferred } = inferSkills(internship)
 
@@ -332,6 +380,89 @@ export function evaluateInternshipMatch(
         }
       )
     }
+  }
+
+  const recommendedCourseworkCategoryIds = Array.from(new Set((internship.coursework_category_ids ?? []).filter(Boolean)))
+  const recommendedCourseworkCategoryNames = Array.from(new Set(parseList(internship.coursework_category_names)))
+
+  if (recommendedCourseworkCategoryIds.length > 0 && studentCourseworkCategoryIds.length > 0) {
+    const categoryHits = overlapCount(recommendedCourseworkCategoryIds, studentCourseworkCategoryIds)
+    const categoryRatio = ratio(categoryHits, recommendedCourseworkCategoryIds.length)
+    const points = weights.courseworkAlignment * categoryRatio
+    if (categoryHits > 0) {
+      const categoryDetail =
+        recommendedCourseworkCategoryNames.length > 0
+          ? recommendedCourseworkCategoryNames.slice(0, categoryHits).join(', ')
+          : `${categoryHits}/${recommendedCourseworkCategoryIds.length} category matches`
+      reasons.push({
+        text: describeReason('Coursework categories', points, categoryDetail),
+        points,
+      })
+    }
+  } else {
+    const recommendedCourseworkIds = Array.from(new Set((internship.coursework_item_ids ?? []).filter(Boolean)))
+    if (recommendedCourseworkIds.length > 0 && studentCourseworkIds.length > 0) {
+      const courseworkHits = overlapCount(recommendedCourseworkIds, studentCourseworkIds)
+      const courseworkRatio = ratio(courseworkHits, recommendedCourseworkIds.length)
+      const points = weights.courseworkAlignment * courseworkRatio
+      if (courseworkHits > 0) {
+        reasons.push({
+          text: describeReason('Recommended coursework', points, `${courseworkHits}/${recommendedCourseworkIds.length} matched`),
+          points,
+        })
+      }
+    } else {
+      const recommendedCoursework = parseList(internship.recommended_coursework)
+      const studentCoursework = parseList(profile.coursework)
+      if (recommendedCoursework.length > 0 && studentCoursework.length > 0) {
+        const courseworkHits = overlapCount(recommendedCoursework, studentCoursework)
+        const courseworkRatio = ratio(courseworkHits, recommendedCoursework.length)
+        const points = weights.courseworkAlignment * courseworkRatio
+        if (courseworkHits > 0) {
+          reasons.push({
+            text: describeReason('Recommended coursework', points, `${courseworkHits}/${recommendedCoursework.length} matched`),
+            points,
+          })
+        }
+      }
+    }
+  }
+
+  if (targetGradYears.length > 0 && studentYear) {
+    const yearMatch = targetGradYears.includes(studentYear)
+    if (!yearMatch) {
+      return {
+        internshipId: internship.id,
+        score: 0,
+        reasons: [],
+        gaps: [`Graduation year mismatch (${profile.year ?? 'unknown'}).`],
+        eligible: false,
+      }
+    }
+
+    reasons.push({
+      text: describeReason('Graduation year fit', weights.graduationYearAlignment, profile.year ?? studentYear),
+      points: weights.graduationYearAlignment,
+    })
+  }
+
+  if (internshipExperienceLevel !== null && studentExperienceLevel !== null) {
+    if (studentExperienceLevel < internshipExperienceLevel) {
+      return {
+        internshipId: internship.id,
+        score: 0,
+        reasons: [],
+        gaps: [
+          `Experience mismatch (requires ${internship.experience_level}, profile is ${profile.experience_level ?? 'unknown'}).`,
+        ],
+        eligible: false,
+      }
+    }
+
+    reasons.push({
+      text: describeReason('Experience alignment', weights.experienceAlignment, profile.experience_level ?? 'aligned'),
+      points: weights.experienceAlignment,
+    })
   }
 
   if (studentMajors.length > 0) {

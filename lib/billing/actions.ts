@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { requireRole } from '@/lib/auth/requireRole'
-import { getAppUrl, getStripeClient, getVerifiedEmployerPriceId } from '@/lib/billing/stripe'
+import { getAppUrl, getProEmployerPriceId, getStarterEmployerPriceId, getStripeClient } from '@/lib/billing/stripe'
 import { supabaseServer } from '@/lib/supabase/server'
 
 function isNextRedirectError(error: unknown): error is { digest: string } {
@@ -54,7 +54,13 @@ async function getOrCreateStripeCustomerForUser(params: {
   return customer.id
 }
 
-export async function startVerifiedEmployerCheckoutAction() {
+type PaidEmployerPlan = 'starter' | 'pro'
+
+function priceIdForPlan(plan: PaidEmployerPlan) {
+  return plan === 'pro' ? getProEmployerPriceId() : getStarterEmployerPriceId()
+}
+
+export async function startEmployerCheckoutAction(plan: PaidEmployerPlan) {
   try {
     const { user } = await requireRole('employer')
     const supabase = await supabaseServer()
@@ -71,12 +77,13 @@ export async function startVerifiedEmployerCheckoutAction() {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: customerId,
-      line_items: [{ price: getVerifiedEmployerPriceId(), quantity: 1 }],
+      line_items: [{ price: priceIdForPlan(plan), quantity: 1 }],
       success_url: `${getAppUrl()}/upgrade?checkout=success`,
       cancel_url: `${getAppUrl()}/upgrade?checkout=canceled`,
       client_reference_id: user.id,
       metadata: {
         user_id: user.id,
+        plan_id: plan,
       },
       allow_promotion_codes: true,
     })
@@ -93,6 +100,22 @@ export async function startVerifiedEmployerCheckoutAction() {
     const message = error instanceof Error ? error.message : 'Could not start checkout'
     redirect(`/upgrade?error=${encodeURIComponent(message)}`)
   }
+}
+
+export async function startStarterEmployerCheckoutAction() {
+  return startEmployerCheckoutAction('starter')
+}
+
+export async function startProEmployerCheckoutAction() {
+  return startEmployerCheckoutAction('pro')
+}
+
+export async function startGrowthEmployerCheckoutAction() {
+  return startEmployerCheckoutAction('pro')
+}
+
+export async function startVerifiedEmployerCheckoutAction() {
+  return startEmployerCheckoutAction('starter')
 }
 
 export async function createBillingPortalSessionAction() {

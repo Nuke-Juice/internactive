@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation'
 import { supabaseServer } from '@/lib/supabase/server'
 
 function roleLabel(role: string | null) {
@@ -20,7 +21,11 @@ function roleLabel(role: string | null) {
   }
 }
 
-export default async function InboxPage() {
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
+}) {
   const supabase = await supabaseServer()
   const {
     data: { user },
@@ -30,6 +35,20 @@ export default async function InboxPage() {
   if (user) {
     const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle()
     role = typeof userRow?.role === 'string' ? userRow.role : null
+  }
+
+  if (role === 'employer') {
+    const resolvedSearchParams = searchParams ? await searchParams : undefined
+    const forward = new URLSearchParams()
+    if (resolvedSearchParams) {
+      for (const [key, value] of Object.entries(resolvedSearchParams)) {
+        if (typeof value === 'string' && value.trim()) {
+          forward.set(key, value)
+        }
+      }
+    }
+    const suffix = forward.toString()
+    redirect(`/dashboard/employer/applicants${suffix ? `?${suffix}` : ''}`)
   }
 
   const content = roleLabel(role)

@@ -4,6 +4,10 @@ import { createClient } from '@supabase/supabase-js'
 
 let adminClient: any = null
 
+export function hasSupabaseAdminCredentials() {
+  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
+}
+
 export function supabaseAdmin() {
   if (adminClient) {
     return adminClient

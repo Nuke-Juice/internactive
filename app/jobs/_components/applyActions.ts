@@ -6,6 +6,7 @@ import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
 import { buildApplicationMatchSnapshot } from '@/lib/applicationMatchSnapshot'
 import { sendEmployerApplicationAlert } from '@/lib/email/employerAlerts'
+import { guardApplicationSubmit, EMAIL_VERIFICATION_ERROR } from '@/lib/auth/verifiedActionGate'
 
 type ApplyFromMicroOnboardingInput = {
   listingId: string
@@ -37,6 +38,16 @@ export async function applyFromMicroOnboardingAction({
     return { ok: false, code: APPLY_ERROR.AUTH_REQUIRED }
   }
 
+  const verificationGate = guardApplicationSubmit(user, listingId)
+  if (!verificationGate.ok) {
+    await trackAnalyticsEvent({
+      eventName: 'apply_blocked',
+      userId: user.id,
+      properties: { listing_id: listingId, code: EMAIL_VERIFICATION_ERROR, missing: [] },
+    })
+    return { ok: false, code: APPLY_ERROR.EMAIL_NOT_VERIFIED }
+  }
+
   const resumePath =
     typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path.trim() : ''
 
@@ -54,20 +65,22 @@ export async function applyFromMicroOnboardingAction({
     return { ok: false, code: APPLY_ERROR.RESUME_REQUIRED }
   }
 
-  const [{ data: listing }, { data: userRow }, { data: profile }] = await Promise.all([
+  const [{ data: listing }, { data: userRow }, { data: profile }, { data: studentCourseworkCategoryRows }] = await Promise.all([
     supabase
       .from('internships')
       .select(
-        'id, title, majors, hours_per_week, location, description, work_mode, term, role_category, required_skills, preferred_skills'
+        'id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, role_category, required_skills, preferred_skills, recommended_coursework, internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
+      .eq('is_active', true)
       .maybeSingle(),
     supabase.from('users').select('role').eq('id', user.id).maybeSingle(),
     supabase
       .from('student_profiles')
-      .select('school, majors, coursework, availability_start_month, availability_hours_per_week')
+      .select('school, majors, year, experience_level, coursework, interests, availability_start_month, availability_hours_per_week')
       .eq('user_id', user.id)
       .maybeSingle(),
+    supabase.from('student_coursework_category_links').select('category_id').eq('student_id', user.id),
   ])
 
   if (!listing?.id) {
@@ -120,8 +133,24 @@ export async function applyFromMicroOnboardingAction({
   }
 
   const snapshot = buildApplicationMatchSnapshot({
-    internship: listing,
-    profile,
+    internship: {
+      ...listing,
+      coursework_category_ids: (listing.internship_coursework_category_links ?? [])
+        .map((item) => item.category_id)
+        .filter((value): value is string => typeof value === 'string'),
+      coursework_category_names: (listing.internship_coursework_category_links ?? [])
+        .map((item) => {
+          const category = item.category as { name?: string | null } | null
+          return typeof category?.name === 'string' ? category.name : ''
+        })
+        .filter((value): value is string => value.length > 0),
+    },
+    profile: {
+      ...(profile ?? {}),
+      coursework_category_ids: (studentCourseworkCategoryRows ?? [])
+        .map((item) => item.category_id)
+        .filter((value): value is string => typeof value === 'string'),
+    },
   })
 
   const { data: insertedApplication, error: insertError } = await supabase

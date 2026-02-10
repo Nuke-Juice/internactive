@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { isAdminRole, isUserRole } from '@/lib/auth/roles'
 import { supabaseServer } from '@/lib/supabase/server'
 
 export default async function DashboardPage() {
@@ -13,10 +14,12 @@ export default async function DashboardPage() {
     .eq('id', data.user.id)
     .single()
 
-  if (roleError || !userRow) redirect('/')
+  if (roleError || !userRow) redirect('/account')
 
-  if (userRow.role === 'student') redirect('/')
-  if (userRow.role === 'employer') redirect('/dashboard/employer')
+  const role = isUserRole(userRow.role) ? userRow.role : null
+  if (isAdminRole(role)) redirect('/admin/internships')
+  if (role === 'student') redirect('/')
+  if (role === 'employer') redirect('/dashboard/employer')
 
-  redirect('/')
+  redirect('/account')
 }

@@ -2,9 +2,12 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import EmployerAccount from '@/components/account/EmployerAccount'
 import StudentAccount from '@/components/account/StudentAccount'
+import { ensureUserRole } from '@/lib/auth/ensureUserRole'
+import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
+import { isAdminRole, isAppRole, isUserRole, type AppRole, type UserRole } from '@/lib/auth/roles'
 import { supabaseServer } from '@/lib/supabase/server'
 
-type Role = 'student' | 'employer'
+const isDev = process.env.NODE_ENV !== 'production'
 
 type StudentProfileRow = {
   university_id: string | number | null
@@ -16,6 +19,14 @@ type StudentProfileRow = {
   availability_start_month: string | null
   availability_hours_per_week: number | null
   interests: string | null
+  preferred_city: string | null
+  preferred_state: string | null
+  preferred_zip: string | null
+  max_commute_minutes: number | null
+  transport_mode: string | null
+  exact_address_line1: string | null
+  location_lat: number | null
+  location_lng: number | null
 }
 
 type EmployerProfileRow = {
@@ -24,14 +35,48 @@ type EmployerProfileRow = {
   contact_email: string | null
   industry: string | null
   location: string | null
+  location_city: string | null
+  location_state: string | null
+  location_zip: string | null
+  location_address_line1: string | null
+  location_lat: number | null
+  location_lng: number | null
+  overview: string | null
+  avatar_url: string | null
+  header_image_url: string | null
 }
 
 type InternshipRow = {
   id: string
   title: string | null
+  company_name?: string | null
   location: string | null
+  role_category?: string | null
+  category?: string | null
+  description?: string | null
   pay: string | null
   created_at: string | null
+}
+
+function isBlank(value: string | null | undefined) {
+  return !value || value.trim().length === 0
+}
+
+function cleanLocation(value: string | null | undefined) {
+  if (!value) return null
+  return value.replace(/\s*\([^)]*\)\s*$/, '').trim() || null
+}
+
+function parseCityState(value: string | null | undefined) {
+  if (!value) return { city: null as string | null, state: null as string | null }
+  const cleaned = cleanLocation(value)
+  if (!cleaned) return { city: null as string | null, state: null as string | null }
+  const [cityRaw, stateRaw] = cleaned.split(',').map((part) => part.trim())
+  const state = stateRaw ? stateRaw.replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase() : null
+  return {
+    city: cityRaw || null,
+    state: state && state.length === 2 ? state : null,
+  }
 }
 
 export default async function AccountPage() {
@@ -80,15 +125,27 @@ export default async function AccountPage() {
     .eq('id', user.id)
     .maybeSingle()
 
-  const role = userRow?.role as Role | undefined
+  const role: UserRole | null = isUserRole(userRow?.role) ? userRow.role : null
+
+  if (role && isAdminRole(role)) {
+    if (isDev) {
+      console.debug('[RBAC] role chooser bypassed for admin', {
+        userId: user.id,
+        role,
+        route: '/account',
+      })
+    }
+    redirect('/admin/internships')
+  }
 
   async function chooseRole(formData: FormData) {
     'use server'
 
-    const selectedRole = String(formData.get('role') ?? '') as Role
-    if (selectedRole !== 'student' && selectedRole !== 'employer') {
+    const selectedRoleRaw = String(formData.get('role') ?? '')
+    if (selectedRoleRaw !== 'student' && selectedRoleRaw !== 'employer') {
       redirect('/account?error=Choose+an+account+type')
     }
+    const selectedRole = selectedRoleRaw as AppRole
 
     const actionSupabase = await supabaseServer()
     const {
@@ -97,20 +154,26 @@ export default async function AccountPage() {
 
     if (!actionUser) redirect('/login')
 
-    const { error: roleError } = await actionSupabase.from('users').upsert(
-      {
-        id: actionUser.id,
-        role: selectedRole,
-        verified: false,
-      },
-      { onConflict: 'id' }
-    )
-
-    if (roleError) {
-      redirect(`/account?error=${encodeURIComponent(roleError.message)}`)
+    let finalRole: UserRole
+    try {
+      finalRole = await ensureUserRole(actionUser.id, selectedRole, { explicitSwitch: true })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not update role'
+      redirect(`/account?error=${encodeURIComponent(message)}`)
     }
 
-    if (selectedRole === 'student') {
+    if (isAdminRole(finalRole)) {
+      if (isDev) {
+        console.debug('[RBAC] chooser submit ignored for admin role', {
+          userId: actionUser.id,
+          selectedRole,
+          finalRole,
+        })
+      }
+      redirect('/admin/internships')
+    }
+
+    if (finalRole === 'student') {
       const { error: profileError } = await actionSupabase.from('student_profiles').upsert(
         {
           user_id: actionUser.id,
@@ -122,6 +185,14 @@ export default async function AccountPage() {
           availability_start_month: 'May',
           availability_hours_per_week: 20,
           interests: null,
+          preferred_city: null,
+          preferred_state: null,
+          preferred_zip: null,
+          max_commute_minutes: 30,
+          transport_mode: 'driving',
+          exact_address_line1: null,
+          location_lat: null,
+          location_lng: null,
         },
         { onConflict: 'user_id' }
       )
@@ -129,7 +200,7 @@ export default async function AccountPage() {
       if (profileError) redirect(`/account?error=${encodeURIComponent(profileError.message)}`)
     }
 
-    if (selectedRole === 'employer') {
+    if (finalRole === 'employer') {
       const { error: profileError } = await actionSupabase.from('employer_profiles').upsert(
         {
           user_id: actionUser.id,
@@ -138,6 +209,12 @@ export default async function AccountPage() {
           contact_email: actionUser.email ?? null,
           industry: null,
           location: null,
+          location_city: null,
+          location_state: null,
+          location_zip: null,
+          location_address_line1: null,
+          location_lat: null,
+          location_lng: null,
         },
         { onConflict: 'user_id' }
       )
@@ -148,7 +225,7 @@ export default async function AccountPage() {
     redirect('/account?welcome=1')
   }
 
-  if (role !== 'student' && role !== 'employer') {
+  if (!role) {
     return (
       <main className="min-h-screen bg-white px-6 py-16">
         <div className="mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -180,11 +257,15 @@ export default async function AccountPage() {
     )
   }
 
+  if (!isAppRole(role)) {
+    redirect('/')
+  }
+
   if (role === 'student') {
     const { data: profile } = await supabase
       .from('student_profiles')
       .select(
-        'university_id, school, majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week, interests'
+        'university_id, school, majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, exact_address_line1, location_lat, location_lng'
       )
       .eq('user_id', user.id)
       .maybeSingle()
@@ -201,16 +282,100 @@ export default async function AccountPage() {
   const [{ data: employerProfile }, { data: internships }] = await Promise.all([
     supabase
       .from('employer_profiles')
-      .select('company_name, website, contact_email, industry, location')
+      .select('company_name, website, contact_email, industry, location, location_city, location_state, location_zip, location_address_line1, location_lat, location_lng, overview, avatar_url, header_image_url')
       .eq('user_id', user.id)
       .maybeSingle(),
     supabase
       .from('internships')
-      .select('id, title, location, pay, created_at')
+      .select('id, title, company_name, location, role_category, category, description, pay, created_at')
       .eq('employer_id', user.id)
       .order('created_at', { ascending: false })
       .limit(6),
   ])
+  const recentInternships = (internships ?? []) as InternshipRow[]
+  const latestInternship = recentInternships[0] ?? null
+
+  const inferredCompanyName = latestInternship?.company_name?.trim() || null
+  const inferredLocation = cleanLocation(latestInternship?.location ?? null)
+  const inferredCityState = parseCityState(inferredLocation)
+  const inferredIndustry = latestInternship?.role_category?.trim() || latestInternship?.category?.trim() || null
+  const inferredOverview = latestInternship?.description?.trim() || null
+
+  const profileWithFallback: EmployerProfileRow | null = employerProfile
+    ? {
+        ...employerProfile,
+        company_name: isBlank(employerProfile.company_name) ? inferredCompanyName : employerProfile.company_name,
+        location: isBlank(employerProfile.location) ? inferredLocation : employerProfile.location,
+        location_city: isBlank(employerProfile.location_city) ? inferredCityState.city : employerProfile.location_city,
+        location_state: isBlank(employerProfile.location_state) ? inferredCityState.state : employerProfile.location_state,
+        location_zip: employerProfile.location_zip,
+        location_address_line1: employerProfile.location_address_line1,
+        location_lat: employerProfile.location_lat,
+        location_lng: employerProfile.location_lng,
+        industry: isBlank(employerProfile.industry) ? inferredIndustry : employerProfile.industry,
+        overview: isBlank(employerProfile.overview) ? inferredOverview : employerProfile.overview,
+        contact_email: isBlank(employerProfile.contact_email) ? (user.email ?? null) : employerProfile.contact_email,
+      }
+    : latestInternship
+      ? {
+          company_name: inferredCompanyName,
+          website: null,
+          contact_email: user.email ?? null,
+          industry: inferredIndustry,
+          location: inferredLocation,
+          location_city: inferredCityState.city,
+          location_state: inferredCityState.state,
+          location_zip: null,
+          location_address_line1: null,
+          location_lat: null,
+          location_lng: null,
+          overview: inferredOverview,
+          avatar_url: null,
+          header_image_url: null,
+        }
+      : ((employerProfile ?? null) as EmployerProfileRow | null)
+
+  if (profileWithFallback) {
+    const needsSync =
+      !employerProfile ||
+      profileWithFallback.company_name !== employerProfile.company_name ||
+      profileWithFallback.location !== employerProfile.location ||
+      profileWithFallback.location_city !== employerProfile.location_city ||
+      profileWithFallback.location_state !== employerProfile.location_state ||
+      profileWithFallback.location_zip !== employerProfile.location_zip ||
+      profileWithFallback.location_address_line1 !== employerProfile.location_address_line1 ||
+      profileWithFallback.location_lat !== employerProfile.location_lat ||
+      profileWithFallback.location_lng !== employerProfile.location_lng ||
+      profileWithFallback.industry !== employerProfile.industry ||
+      profileWithFallback.overview !== employerProfile.overview ||
+      profileWithFallback.contact_email !== employerProfile.contact_email
+
+    if (needsSync) {
+      await supabase.from('employer_profiles').upsert(
+        {
+          user_id: user.id,
+          company_name: profileWithFallback.company_name,
+          website: profileWithFallback.website,
+          contact_email: profileWithFallback.contact_email,
+          industry: profileWithFallback.industry,
+          location: profileWithFallback.location,
+          location_city: profileWithFallback.location_city,
+          location_state: profileWithFallback.location_state,
+          location_zip: profileWithFallback.location_zip,
+          location_address_line1: profileWithFallback.location_address_line1,
+          location_lat: profileWithFallback.location_lat,
+          location_lng: profileWithFallback.location_lng,
+          overview: profileWithFallback.overview,
+          avatar_url: profileWithFallback.avatar_url,
+          header_image_url: profileWithFallback.header_image_url,
+        },
+        { onConflict: 'user_id' }
+      )
+    }
+  }
+
+  const { planId } = await getEmployerVerificationStatus({ supabase, userId: user.id })
+  const isEmailVerified = Boolean(user.email_confirmed_at)
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10">
@@ -218,8 +383,10 @@ export default async function AccountPage() {
         <EmployerAccount
           userId={user.id}
           userEmail={user.email ?? null}
-          initialProfile={(employerProfile ?? null) as EmployerProfileRow | null}
-          recentInternships={(internships ?? []) as InternshipRow[]}
+          initialProfile={profileWithFallback}
+          recentInternships={recentInternships}
+          planId={planId}
+          isEmailVerified={isEmailVerified}
         />
       </div>
     </main>

@@ -1,10 +1,9 @@
 import { supabaseServer } from '@/lib/supabase/server'
-
-type HeaderRole = 'student' | 'employer'
+import { isAppRole, type AppRole } from '@/lib/auth/roles'
 
 type HeaderContext = {
   isAuthenticated: boolean
-  role?: HeaderRole
+  role?: AppRole
 }
 
 export async function getHeaderContext(): Promise<HeaderContext> {
@@ -20,7 +19,7 @@ export async function getHeaderContext(): Promise<HeaderContext> {
   const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle()
   const role = userRow?.role
 
-  if (role === 'student' || role === 'employer') {
+  if (isAppRole(role)) {
     return { isAuthenticated: true, role }
   }
 

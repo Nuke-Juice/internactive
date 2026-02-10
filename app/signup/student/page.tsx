@@ -23,6 +23,7 @@ export default function StudentSignupPage() {
 
   const [school, setSchool] = useState('University of Utah')
   const [year, setYear] = useState('Freshman')
+  const [gender, setGender] = useState('')
   const [majorsText, setMajorsText] = useState('')
   const [coursework, setCoursework] = useState<string[]>([])
   const experience: 'none' | 'projects' | 'internship' = 'none'
@@ -78,6 +79,7 @@ export default function StudentSignupPage() {
     await supabase.from('student_profiles').insert({
       user_id: userId,
       school,
+      gender: gender || null,
       majors,
       year,
       coursework,
@@ -139,6 +141,17 @@ export default function StudentSignupPage() {
                   <option>Sophomore</option>
                   <option>Junior</option>
                   <option>Senior</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Gender</label>
+                <select className={FIELD} value={gender} onChange={(e) => setGender(e.target.value)}>
+                  <option value="">Prefer not to say</option>
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                  <option value="non-binary">Non-binary</option>
+                  <option value="self-describe">Self-describe</option>
                 </select>
               </div>
 

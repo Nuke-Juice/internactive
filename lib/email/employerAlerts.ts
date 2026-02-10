@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { Resend } from 'resend'
-import { isVerifiedEmployerStatus } from '@/lib/billing/subscriptions'
+import { resolveEmployerPlan } from '@/lib/billing/subscriptions'
 import { getAppUrl } from '@/lib/billing/stripe'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
@@ -33,7 +33,7 @@ export async function sendEmployerApplicationAlert({ applicationId }: SendEmploy
   }
 
   const [{ data: subscription }, { data: employerProfile }] = await Promise.all([
-    supabase.from('subscriptions').select('status').eq('user_id', internship.employer_id).maybeSingle(),
+    supabase.from('subscriptions').select('status, price_id').eq('user_id', internship.employer_id).maybeSingle(),
     supabase
       .from('employer_profiles')
       .select('contact_email, email_alerts_enabled')
@@ -41,7 +41,8 @@ export async function sendEmployerApplicationAlert({ applicationId }: SendEmploy
       .maybeSingle(),
   ])
 
-  if (!isVerifiedEmployerStatus(subscription?.status)) {
+  const plan = resolveEmployerPlan({ status: subscription?.status, priceId: subscription?.price_id })
+  if (!plan.emailAlertsEnabled) {
     return { sent: false, reason: 'employer_not_verified' as const }
   }
 
@@ -60,16 +61,20 @@ export async function sendEmployerApplicationAlert({ applicationId }: SendEmploy
     return { sent: false, reason: 'provider_not_configured' as const }
   }
 
-  const applicantsInboxUrl = `${getAppUrl()}/dashboard/employer/applicants`
+  const applicantsInboxUrl = `${getAppUrl()}/inbox`
   const internshipTitle = internship.title?.trim() || 'your internship'
 
   const resend = new Resend(resendApiKey)
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: resendFromEmail,
     to: recipient,
     subject: `New application for ${internshipTitle}`,
     text: `A new application was submitted for ${internshipTitle}. Review it in your applicants inbox: ${applicantsInboxUrl}`,
   })
+
+  if (error) {
+    return { sent: false, reason: 'provider_error' as const, message: error.message ?? 'Email send failed' }
+  }
 
   return { sent: true as const }
 }

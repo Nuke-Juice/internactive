@@ -5,31 +5,41 @@ import {
   type StudentMatchProfile,
   type WorkMode,
 } from '@/lib/matching'
+import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 
 type SnapshotInternship = {
   id: string
   title?: string | null
   majors?: string[] | string | null
+  target_graduation_years?: string[] | string | null
   hours_per_week?: number | null
   location?: string | null
   description?: string | null
   work_mode?: string | null
   term?: string | null
+  experience_level?: string | null
   role_category?: string | null
   required_skills?: string[] | string | null
   preferred_skills?: string[] | string | null
+  recommended_coursework?: string[] | string | null
+  coursework_category_ids?: string[] | null
+  coursework_category_names?: string[] | null
 }
 
 type SnapshotProfile = {
   majors?: string[] | string | null
+  year?: string | null
+  experience_level?: string | null
   skills?: string[] | string | null
   coursework?: string[] | string | null
+  interests?: string | null
   availability_start_month?: string | null
   availability_hours_per_week?: number | null
   preferred_terms?: string[] | string | null
   preferred_locations?: string[] | string | null
   preferred_work_modes?: string[] | string | null
   remote_only?: boolean | null
+  coursework_category_ids?: string[] | null
 } | null
 
 export type ApplicationMatchSnapshot = {
@@ -82,31 +92,48 @@ export function buildApplicationMatchSnapshot(input: {
     id: input.internship.id,
     title: input.internship.title ?? null,
     majors: input.internship.majors ?? null,
+    target_graduation_years: input.internship.target_graduation_years ?? null,
     hours_per_week: input.internship.hours_per_week ?? null,
     location: input.internship.location ?? null,
     description: input.internship.description ?? null,
     work_mode: input.internship.work_mode ?? null,
     term: input.internship.term ?? null,
+    experience_level: input.internship.experience_level ?? null,
     category: input.internship.role_category ?? null,
     required_skills: input.internship.required_skills ?? null,
     preferred_skills: input.internship.preferred_skills ?? null,
+    recommended_coursework: input.internship.recommended_coursework ?? null,
+    coursework_category_ids: input.internship.coursework_category_ids ?? null,
+    coursework_category_names: input.internship.coursework_category_names ?? null,
   }
+
+  const preferenceSignals = parseStudentPreferenceSignals(input.profile?.interests ?? null)
 
   const profileInput: StudentMatchProfile = {
     // If explicit preferred terms are unavailable, map availability month to a seasonal preference.
     preferred_terms: (() => {
       const explicit = asStringArray(input.profile?.preferred_terms ?? null)
       if (explicit.length > 0) return explicit
+      if (preferenceSignals.preferredTerms.length > 0) return preferenceSignals.preferredTerms
       const fallbackSeason = seasonFromMonth(input.profile?.availability_start_month ?? null)
       return fallbackSeason ? [fallbackSeason] : []
     })(),
     majors: asStringArray(input.profile?.majors ?? null),
-    skills: asStringArray(input.profile?.skills ?? null),
+    year: input.profile?.year ?? null,
+    experience_level: input.profile?.experience_level ?? null,
+    skills: [...asStringArray(input.profile?.skills ?? null), ...preferenceSignals.skills],
     coursework: asStringArray(input.profile?.coursework ?? null),
+    coursework_category_ids: asStringArray(input.profile?.coursework_category_ids ?? null),
     availability_hours_per_week: input.profile?.availability_hours_per_week ?? null,
-    preferred_locations: asStringArray(input.profile?.preferred_locations ?? null),
-    preferred_work_modes: asWorkModes(input.profile?.preferred_work_modes ?? null),
-    remote_only: Boolean(input.profile?.remote_only),
+    preferred_locations: (() => {
+      const explicit = asStringArray(input.profile?.preferred_locations ?? null)
+      return explicit.length > 0 ? explicit : preferenceSignals.preferredLocations
+    })(),
+    preferred_work_modes: (() => {
+      const explicit = asWorkModes(input.profile?.preferred_work_modes ?? null)
+      return explicit.length > 0 ? explicit : preferenceSignals.preferredWorkModes
+    })(),
+    remote_only: Boolean(input.profile?.remote_only ?? preferenceSignals.remoteOnly),
   }
 
   const match = evaluateInternshipMatch(internshipInput, profileInput)

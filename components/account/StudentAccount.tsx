@@ -5,6 +5,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Pencil } from 'lucide-react'
 import UniversityCombobox from '@/components/account/UniversityCombobox'
+import { useToast } from '@/components/feedback/ToastProvider'
+import { normalizeCatalogLabel, normalizeCatalogToken } from '@/lib/catalog/normalization'
+import { normalizeCourseworkClient } from '@/lib/coursework/normalizeCourseworkClient'
 import {
   addRecoverySuccessParam,
   clearStoredReturnTo,
@@ -26,6 +29,14 @@ type StudentProfileRow = {
   availability_start_month: string | null
   availability_hours_per_week: number | string | null
   interests: string | null
+  preferred_city: string | null
+  preferred_state: string | null
+  preferred_zip: string | null
+  max_commute_minutes: number | null
+  transport_mode: string | null
+  exact_address_line1: string | null
+  location_lat: number | null
+  location_lng: number | null
 }
 
 type University = {
@@ -81,6 +92,7 @@ const months = [
   'December',
 ]
 const hoursPerWeekOptions = [5, 10, 15, 20, 25, 30, 35, 40]
+const transportModes = ['driving', 'transit', 'walking', 'cycling'] as const
 const maxProfilePhotoBytes = 2 * 1024 * 1024
 const maxResumeBytes = 5 * 1024 * 1024
 const profilePhotoBuckets = ['avatars', 'profile-photos']
@@ -185,11 +197,11 @@ function parseLegacyInterests(value: string | null) {
 }
 
 function normalizeCourseworkName(value: string) {
-  return value.trim().replace(/\s+/g, ' ')
+  return normalizeCatalogLabel(value)
 }
 
 function normalizeSkillName(value: string) {
-  return value.trim().replace(/\s+/g, ' ')
+  return normalizeCatalogLabel(value)
 }
 
 function initialsForName(firstName: string, lastName: string) {
@@ -207,6 +219,11 @@ function includesCoursework(list: string[], value: string) {
 function includesSkill(list: string[], value: string) {
   const normalized = normalizeSkillName(value).toLowerCase()
   return list.some((item) => normalizeSkillName(item).toLowerCase() === normalized)
+}
+
+function includesCourseworkCategory(list: string[], value: string) {
+  const normalized = normalizeCourseworkName(value).toLowerCase()
+  return list.some((item) => normalizeCourseworkName(item).toLowerCase() === normalized)
 }
 
 export default function StudentAccount({ userId, initialProfile }: Props) {
@@ -233,8 +250,13 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   const [graduationYear, setGraduationYear] = useState(initialProfile?.year ?? '2028')
   const [coursework, setCoursework] = useState<string[]>(getCourseworkText(initialProfile?.coursework ?? null))
   const [courseworkInput, setCourseworkInput] = useState('')
+  const [courseworkCategories, setCourseworkCategories] = useState<string[]>([])
+  const [courseworkCategoryInput, setCourseworkCategoryInput] = useState('')
   const [skills, setSkills] = useState<string[]>([])
   const [skillInput, setSkillInput] = useState('')
+  const [canonicalSkillOptions, setCanonicalSkillOptions] = useState<string[]>([])
+  const [canonicalCourseworkOptions, setCanonicalCourseworkOptions] = useState<string[]>([])
+  const [canonicalCourseworkCategoryOptions, setCanonicalCourseworkCategoryOptions] = useState<string[]>([])
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>(
     normalizeExperienceLevel(initialProfile?.experience_level)
   )
@@ -244,6 +266,16 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   const [availabilityHoursPerWeek, setAvailabilityHoursPerWeek] = useState(
     normalizeHoursPerWeek(initialProfile?.availability_hours_per_week)
   )
+  const [preferredCity, setPreferredCity] = useState(initialProfile?.preferred_city ?? '')
+  const [preferredState, setPreferredState] = useState(initialProfile?.preferred_state ?? '')
+  const [preferredZip, setPreferredZip] = useState(initialProfile?.preferred_zip ?? '')
+  const [maxCommuteMinutes, setMaxCommuteMinutes] = useState(initialProfile?.max_commute_minutes ?? 30)
+  const [transportMode, setTransportMode] = useState(
+    initialProfile?.transport_mode && transportModes.includes(initialProfile.transport_mode as (typeof transportModes)[number])
+      ? (initialProfile.transport_mode as (typeof transportModes)[number])
+      : 'driving'
+  )
+  const [exactAddressLine1, setExactAddressLine1] = useState(initialProfile?.exact_address_line1 ?? '')
   const [availability, setAvailability] = useState<string[]>(
     defaultSeasonFromMonth(initialProfile?.availability_start_month ?? null)
   )
@@ -256,8 +288,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   const [loading, setLoading] = useState(false)
   const [isProfileLoaded, setIsProfileLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [successToast, setSuccessToast] = useState<{ id: number; message: string } | null>(null)
-  const [successToastVisible, setSuccessToastVisible] = useState(false)
+  const { showToast } = useToast()
 
   const hasSavedProfile = useMemo(() => {
     return Boolean(
@@ -357,6 +388,26 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
         .maybeSingle()
 
       if (loadError || !data) {
+        const [{ data: skillCatalogRows }, { data: courseworkCatalogRows }, { data: courseworkCategoryRows }] = await Promise.all([
+          supabase.from('skills').select('label').order('label', { ascending: true }).limit(1200),
+          supabase.from('coursework_items').select('name').order('name', { ascending: true }).limit(1200),
+          supabase.from('coursework_categories').select('name').order('name', { ascending: true }).limit(500),
+        ])
+        setCanonicalSkillOptions(
+          (skillCatalogRows ?? [])
+            .map((item) => (typeof item.label === 'string' ? item.label.trim() : ''))
+            .filter(Boolean)
+        )
+        setCanonicalCourseworkOptions(
+          (courseworkCatalogRows ?? [])
+            .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
+            .filter(Boolean)
+        )
+        setCanonicalCourseworkCategoryOptions(
+          (courseworkCategoryRows ?? [])
+            .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
+            .filter(Boolean)
+        )
         setLoading(false)
         setIsProfileLoaded(true)
         return
@@ -371,10 +422,31 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
           : 'May'
       const parsedPreferences =
         parsePreferences(row.preferences) ?? parseLegacyInterests((row.interests as string) ?? null)
-      const { data: canonicalSkillRows } = await supabase
-        .from('student_skill_items')
-        .select('skill_id, skill:skills(label)')
-        .eq('student_id', userId)
+      const [
+        { data: canonicalSkillRows },
+        { data: canonicalCourseworkRows },
+        { data: canonicalCourseworkCategoryRows },
+        { data: skillCatalogRows },
+        { data: courseworkCatalogRows },
+        { data: courseworkCategoryRows },
+      ] =
+        await Promise.all([
+          supabase
+            .from('student_skill_items')
+            .select('skill_id, skill:skills(label)')
+            .eq('student_id', userId),
+          supabase
+            .from('student_coursework_items')
+            .select('coursework_item_id, coursework:coursework_items(name)')
+            .eq('student_id', userId),
+          supabase
+            .from('student_coursework_category_links')
+            .select('category_id, category:coursework_categories(name)')
+            .eq('student_id', userId),
+          supabase.from('skills').select('label').order('label', { ascending: true }).limit(1200),
+          supabase.from('coursework_items').select('name').order('name', { ascending: true }).limit(1200),
+          supabase.from('coursework_categories').select('name').order('name', { ascending: true }).limit(500),
+        ])
       const { data: authData } = await supabase.auth.getUser()
       const authUser = authData.user
       const authMetadata = (authUser?.user_metadata ?? {}) as {
@@ -400,13 +472,41 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
 
       setMajor(dbMajor || 'Finance')
       setGraduationYear((row.year as string) ?? '2028')
-      setCoursework(dbCoursework)
       const canonicalSkillLabels = (canonicalSkillRows ?? [])
         .map((rowItem) => {
           const skill = rowItem.skill as { label?: string | null } | null
           return typeof skill?.label === 'string' ? skill.label.trim() : ''
         })
         .filter(Boolean)
+      const canonicalCourseworkLabels = (canonicalCourseworkRows ?? [])
+        .map((rowItem) => {
+          const courseworkItem = rowItem.coursework as { name?: string | null } | null
+          return typeof courseworkItem?.name === 'string' ? courseworkItem.name.trim() : ''
+        })
+        .filter(Boolean)
+      const canonicalCourseworkCategoryLabels = (canonicalCourseworkCategoryRows ?? [])
+        .map((rowItem) => {
+          const categoryItem = rowItem.category as { name?: string | null } | null
+          return typeof categoryItem?.name === 'string' ? categoryItem.name.trim() : ''
+        })
+        .filter(Boolean)
+      setCanonicalSkillOptions(
+        (skillCatalogRows ?? [])
+          .map((item) => (typeof item.label === 'string' ? item.label.trim() : ''))
+          .filter(Boolean)
+      )
+      setCanonicalCourseworkOptions(
+        (courseworkCatalogRows ?? [])
+          .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
+          .filter(Boolean)
+      )
+      setCanonicalCourseworkCategoryOptions(
+        (courseworkCategoryRows ?? [])
+          .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
+          .filter(Boolean)
+      )
+      setCoursework(canonicalCourseworkLabels.length > 0 ? canonicalCourseworkLabels : dbCoursework)
+      setCourseworkCategories(canonicalCourseworkCategoryLabels)
       setSkills(canonicalSkillLabels.length > 0 ? canonicalSkillLabels : (parsedPreferences?.skills ?? []))
       setExperienceLevel(normalizeExperienceLevel((row.experience_level as string) ?? null))
       setAvailabilityStartMonth(dbStartMonth)
@@ -418,6 +518,16 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
           ? parsedPreferences.seasons
           : defaultSeasonFromMonth(dbStartMonth)
       )
+      setPreferredCity(typeof row.preferred_city === 'string' ? row.preferred_city : '')
+      setPreferredState(typeof row.preferred_state === 'string' ? row.preferred_state : '')
+      setPreferredZip(typeof row.preferred_zip === 'string' ? row.preferred_zip : '')
+      setMaxCommuteMinutes(typeof row.max_commute_minutes === 'number' ? row.max_commute_minutes : 30)
+      setTransportMode(
+        typeof row.transport_mode === 'string' && transportModes.includes(row.transport_mode as (typeof transportModes)[number])
+          ? (row.transport_mode as (typeof transportModes)[number])
+          : 'driving'
+      )
+      setExactAddressLine1(typeof row.exact_address_line1 === 'string' ? row.exact_address_line1 : '')
       setRemoteOk(Boolean(parsedPreferences?.remoteOk))
       setProfileHeadline(parsedPreferences?.profileHeadline ?? '')
       setFirstName(firstNameValue)
@@ -488,25 +598,6 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       }
     }
   }, [profilePhotoPreviewUrl])
-
-  useEffect(() => {
-    if (!successToast) return
-    const enterTimer = setTimeout(() => {
-      setSuccessToastVisible(true)
-    }, 20)
-    const exitTimer = setTimeout(() => {
-      setSuccessToastVisible(false)
-    }, 5000)
-    const clearTimer = setTimeout(() => {
-      setSuccessToast(null)
-    }, 5300)
-
-    return () => {
-      clearTimeout(enterTimer)
-      clearTimeout(exitTimer)
-      clearTimeout(clearTimer)
-    }
-  }, [successToast])
 
   useEffect(() => {
     if (mode !== 'edit' || !pendingFocusId) return
@@ -599,14 +690,32 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   }, [selectedUniversity, universityQuery])
 
   const addCourseworkOptions = useMemo(() => {
-    return [...new Set([...suggestedCoursework])].filter((course) => !includesCoursework(coursework, course))
-  }, [coursework, suggestedCoursework])
+    return [...new Set([...canonicalCourseworkOptions, ...suggestedCoursework])].filter(
+      (course) => !includesCoursework(coursework, course)
+    )
+  }, [canonicalCourseworkOptions, coursework, suggestedCoursework])
 
   const filteredCourseworkOptions = useMemo(() => {
-    const query = normalizeCourseworkName(courseworkInput).toLowerCase()
+    const query = normalizeCatalogToken(courseworkInput)
     if (!query) return addCourseworkOptions.slice(0, 8)
-    return addCourseworkOptions.filter((course) => course.toLowerCase().includes(query)).slice(0, 8)
+    return addCourseworkOptions.filter((course) => normalizeCatalogToken(course).includes(query)).slice(0, 8)
   }, [addCourseworkOptions, courseworkInput])
+
+  const filteredSkillOptions = useMemo(() => {
+    const query = normalizeCatalogToken(skillInput)
+    const available = canonicalSkillOptions.filter((skill) => !includesSkill(skills, skill))
+    if (!query) return available.slice(0, 8)
+    return available.filter((skill) => normalizeCatalogToken(skill).includes(query)).slice(0, 8)
+  }, [canonicalSkillOptions, skillInput, skills])
+
+  const filteredCourseworkCategoryOptions = useMemo(() => {
+    const query = normalizeCatalogToken(courseworkCategoryInput)
+    const available = canonicalCourseworkCategoryOptions.filter(
+      (category) => !includesCourseworkCategory(courseworkCategories, category)
+    )
+    if (!query) return available.slice(0, 8)
+    return available.filter((category) => normalizeCatalogToken(category).includes(query)).slice(0, 8)
+  }, [canonicalCourseworkCategoryOptions, courseworkCategories, courseworkCategoryInput])
 
   useEffect(() => {
     let active = true
@@ -672,11 +781,24 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
     }
   }, [major, selectedUniversity])
 
-  function addCourseworkItem(value: string) {
+function addCourseworkItem(value: string) {
     const normalized = normalizeCourseworkName(value)
     if (!normalized || includesCoursework(coursework, normalized)) return
     setCoursework((prev) => [...prev, normalized])
     setCourseworkInput('')
+  }
+
+  function addCourseworkCategoryItem(value: string) {
+    const normalized = normalizeCourseworkName(value)
+    if (!normalized || includesCourseworkCategory(courseworkCategories, normalized)) return
+    setCourseworkCategories((prev) => [...prev, normalized])
+    setCourseworkCategoryInput('')
+  }
+
+  function removeCourseworkCategoryItem(value: string) {
+    setCourseworkCategories((prev) =>
+      prev.filter((item) => normalizeCourseworkName(item).toLowerCase() !== normalizeCourseworkName(value).toLowerCase())
+    )
   }
 
   function removeCourseworkItem(value: string) {
@@ -706,7 +828,6 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
 
   async function saveProfile() {
     setError(null)
-    setSuccessToast(null)
     setUniversityError(null)
 
     if (!selectedUniversity) {
@@ -731,10 +852,32 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
     const normalizedCourseworkList = coursework
       .map((course) => normalizeCourseworkName(course))
       .filter(Boolean)
+    const normalizedCourseworkCategoryList = courseworkCategories
+      .map((category) => normalizeCourseworkName(category))
+      .filter(Boolean)
     const normalizedSkillsList = skills.map((skill) => normalizeSkillName(skill)).filter(Boolean)
     const normalizedCourseworkText =
       normalizedCourseworkList.length > 0 ? normalizedCourseworkList.join(', ') : ''
-    const { skillIds: normalizedSkillIds, unknown: unknownSkills } = await normalizeSkillsClient(normalizedSkillsList)
+    const [{ skillIds: normalizedSkillIds, unknown: unknownSkills }, { courseworkItemIds, unknown: unknownCoursework }] =
+      await Promise.all([
+        normalizeSkillsClient(normalizedSkillsList),
+        normalizeCourseworkClient(normalizedCourseworkList),
+      ])
+
+    const { categoryIds: mappedCategoryIdsFromText } = await (async () => {
+      const response = await fetch('/api/coursework/map-categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: normalizedCourseworkList }),
+      })
+      if (!response.ok) return { categoryIds: [] as string[] }
+      const payload = (await response.json()) as { categoryIds?: string[] }
+      return {
+        categoryIds: Array.isArray(payload.categoryIds)
+          ? payload.categoryIds.filter((item): item is string => typeof item === 'string')
+          : [],
+      }
+    })()
     const normalizedMajor = major.trim() || null
     let avatarUrl = profilePhotoUrl.trim()
     let resumePath = resumeStoragePath.trim()
@@ -813,6 +956,12 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       experience_level: safeExperienceLevel,
       availability_start_month: availabilityStartMonth.trim() || null,
       availability_hours_per_week: Number(availabilityHoursPerWeek),
+      preferred_city: preferredCity.trim() || null,
+      preferred_state: preferredState.trim() || null,
+      preferred_zip: preferredZip.trim() || null,
+      max_commute_minutes: Number(maxCommuteMinutes) || 30,
+      transport_mode: transportMode,
+      exact_address_line1: exactAddressLine1.trim() || null,
     }
 
     function buildPayloadVariants(options: {
@@ -934,6 +1083,67 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       }
     }
 
+    const { error: clearCourseworkItemsError } = await supabase
+      .from('student_coursework_items')
+      .delete()
+      .eq('student_id', userId)
+    if (clearCourseworkItemsError) {
+      setError(clearCourseworkItemsError.message)
+      return
+    }
+
+    if (courseworkItemIds.length > 0) {
+      const { error: insertCourseworkItemsError } = await supabase.from('student_coursework_items').insert(
+        courseworkItemIds.map((courseworkItemId) => ({
+          student_id: userId,
+          coursework_item_id: courseworkItemId,
+        }))
+      )
+      if (insertCourseworkItemsError) {
+        setError(insertCourseworkItemsError.message)
+        return
+      }
+    }
+
+    const [{ data: selectedCategoryRows }, { data: itemCategoryRows }, { error: clearCategoryLinksError }] = await Promise.all([
+      normalizedCourseworkCategoryList.length > 0
+        ? supabase.from('coursework_categories').select('id').in('name', normalizedCourseworkCategoryList)
+        : Promise.resolve({ data: [] as Array<{ id: string }> }),
+      courseworkItemIds.length > 0
+        ? supabase
+            .from('coursework_item_category_map')
+            .select('category_id')
+            .in('coursework_item_id', courseworkItemIds)
+        : Promise.resolve({ data: [] as Array<{ category_id: string }> }),
+      supabase.from('student_coursework_category_links').delete().eq('student_id', userId),
+    ])
+
+    if (clearCategoryLinksError) {
+      setError(clearCategoryLinksError.message)
+      return
+    }
+
+    const derivedCategoryIds = Array.from(
+      new Set([
+        ...((selectedCategoryRows ?? []).map((row) => row.id).filter((value): value is string => typeof value === 'string')),
+        ...((itemCategoryRows ?? []).map((row) => row.category_id).filter((value): value is string => typeof value === 'string')),
+        ...mappedCategoryIdsFromText,
+      ])
+    )
+
+    if (derivedCategoryIds.length > 0) {
+      const { error: insertCategoryLinksError } = await supabase.from('student_coursework_category_links').insert(
+        derivedCategoryIds.map((categoryId) => ({
+          student_id: userId,
+          category_id: categoryId,
+        }))
+      )
+      if (insertCategoryLinksError) {
+        setError(insertCategoryLinksError.message)
+        return
+      }
+    }
+
     const recoveryReadyAfterSave =
       getMinimumProfileCompleteness({
         school: selectedUniversity.name,
@@ -963,13 +1173,16 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       return
     }
 
-    setSuccessToastVisible(false)
-    setSuccessToast({
-      id: Date.now(),
+    showToast({
+      kind: 'success',
       message:
-        unknownSkills.length > 0
-          ? `Preferences saved. Stored fallback text for unrecognized skills: ${unknownSkills.join(', ')}`
+        unknownSkills.length > 0 || unknownCoursework.length > 0
+          ? `Preferences saved. Stored fallback text for unrecognized items: ${[
+              ...unknownSkills.map((item) => `skill: ${item}`),
+              ...unknownCoursework.map((item) => `coursework: ${item}`),
+            ].join(', ')}`
           : 'Preferences saved.',
+      key: 'student-preferences-saved',
     })
     setProfilePhotoUrl(avatarUrl)
     setProfilePhotoFile(null)
@@ -984,6 +1197,9 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   }
 
   async function signOut() {
+    const confirmed = window.confirm('Are you sure you want to sign out?')
+    if (!confirmed) return
+
     setSigningOut(true)
     const supabase = supabaseBrowser()
     const { error: signOutError } = await supabase.auth.signOut()
@@ -999,22 +1215,12 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   }
 
   function editField(focusId: string) {
-    setSuccessToast(null)
     setMode('edit')
     setPendingFocusId(focusId)
   }
 
     return (
     <section className="relative rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-      {successToast && (
-        <div
-          className={`pointer-events-none absolute right-4 top-4 z-20 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700 shadow-sm transition-all duration-300 ease-out ${
-            successToastVisible ? 'translate-x-0 opacity-100' : 'translate-x-6 opacity-0'
-          }`}
-        >
-          {successToast.message}
-        </div>
-      )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Student account</h1>
@@ -1026,8 +1232,6 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
           <button
             type="button"
             onClick={() => {
-              setSuccessToast(null)
-              setSuccessToastVisible(false)
               setMode('edit')
             }}
             className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -1241,6 +1445,22 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               <Pencil className="h-4 w-4" />
             </button>
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Coursework</div>
+            <div className="mt-2 text-xs font-medium text-slate-500">Categories</div>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {courseworkCategories.length > 0 ? (
+                courseworkCategories.map((category) => (
+                  <span
+                    key={category}
+                    className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-800"
+                  >
+                    {category}
+                  </span>
+                ))
+              ) : (
+                <span className="text-sm text-slate-700">Not set</span>
+              )}
+            </div>
+            <div className="mt-3 text-xs font-medium text-slate-500">Specific courses</div>
             <div className="mt-2 flex flex-wrap gap-2">
               {coursework.length > 0 ? (
                 coursework.map((course) => (
@@ -1327,6 +1547,32 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               )}
             </div>
             <div className="mt-3 text-sm text-slate-700">Remote OK: {remoteOk ? 'Yes' : 'No'}</div>
+          </div>
+
+          <div className="relative rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
+            <button
+              type="button"
+              aria-label="Edit commute preferences"
+              onClick={() => editField('preferred-city-input')}
+              className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Location preferences</div>
+            <div className="mt-2 flex flex-wrap gap-2 text-sm text-slate-700">
+              {preferredCity || preferredState ? (
+                <span className="rounded-full border border-slate-300 bg-white px-3 py-1">
+                  {preferredCity || 'City'}{preferredState ? `, ${preferredState}` : ''}
+                </span>
+              ) : null}
+              {preferredZip ? (
+                <span className="rounded-full border border-slate-300 bg-white px-3 py-1">ZIP {preferredZip}</span>
+              ) : null}
+              <span className="rounded-full border border-slate-300 bg-white px-3 py-1">
+                Max commute: {maxCommuteMinutes} min
+              </span>
+              <span className="rounded-full border border-slate-300 bg-white px-3 py-1">Mode: {transportMode}</span>
+            </div>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
@@ -1568,6 +1814,128 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
               </select>
             </div>
 
+            <div>
+              <label className="text-sm font-medium text-slate-700">Preferred city</label>
+              <input
+                id="preferred-city-input"
+                className={FIELD}
+                value={preferredCity}
+                onChange={(e) => setPreferredCity(e.target.value)}
+                placeholder="Salt Lake City"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">Preferred state</label>
+              <input
+                className={FIELD}
+                value={preferredState}
+                onChange={(e) => setPreferredState(e.target.value.toUpperCase())}
+                placeholder="UT"
+                maxLength={2}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">Preferred ZIP (optional)</label>
+              <input
+                className={FIELD}
+                value={preferredZip}
+                onChange={(e) => setPreferredZip(e.target.value)}
+                placeholder="84101"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">Max commute (minutes)</label>
+              <input
+                type="number"
+                min={5}
+                max={180}
+                className={FIELD}
+                value={String(maxCommuteMinutes)}
+                onChange={(e) => setMaxCommuteMinutes(Number(e.target.value) || 30)}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">Transportation mode</label>
+              <select
+                className={FIELD}
+                value={transportMode}
+                onChange={(e) => {
+                  const next = e.target.value as (typeof transportModes)[number]
+                  setTransportMode(transportModes.includes(next) ? next : 'driving')
+                }}
+              >
+                {transportModes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium text-slate-700">Exact address (optional advanced)</label>
+              <input
+                className={FIELD}
+                value={exactAddressLine1}
+                onChange={(e) => setExactAddressLine1(e.target.value)}
+                placeholder="Optional, for more precise commute estimates"
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium text-slate-700">Coursework categories (primary)</label>
+              <div className="relative mt-2">
+                <input
+                  id="coursework-category-input"
+                  className={FIELD}
+                  value={courseworkCategoryInput}
+                  onChange={(e) => setCourseworkCategoryInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      addCourseworkCategoryItem(courseworkCategoryInput)
+                    }
+                  }}
+                  placeholder="Add capability area (e.g., Corporate Finance / Valuation)"
+                />
+                {courseworkCategoryInput.trim().length > 0 && filteredCourseworkCategoryOptions.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    {filteredCourseworkCategoryOptions.map((category) => (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() => addCourseworkCategoryItem(category)}
+                        className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                      >
+                        {category}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-slate-500">These categories are the primary coursework matching signal.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {courseworkCategories.length > 0 ? (
+                  courseworkCategories.map((category) => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => removeCourseworkCategoryItem(category)}
+                      className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-800 hover:bg-blue-100"
+                    >
+                      {category} ×
+                    </button>
+                  ))
+                ) : (
+                  <span className="text-sm text-slate-500">No categories selected yet.</span>
+                )}
+              </div>
+            </div>
+
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-slate-700">Coursework</label>
               {(suggestionsLoading || suggestedCoursework.length > 0) && (
@@ -1629,7 +1997,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
                   </div>
                 )}
               </div>
-              <p className="mt-1 text-xs text-slate-500">Press Enter to add custom coursework.</p>
+              <p className="mt-1 text-xs text-slate-500">Type to pick canonical coursework, or press Enter to add custom coursework.</p>
 
               <div className="mt-3 flex flex-wrap gap-2">
                 {coursework.length > 0 ? (
@@ -1651,7 +2019,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
 
             <div id="skills" className="sm:col-span-2">
               <label className="text-sm font-medium text-slate-700">Skills</label>
-              <div className="mt-2 flex gap-2">
+              <div className="relative mt-2 flex gap-2">
                 <input
                   id="skills-input"
                   className={FIELD}
@@ -1672,8 +2040,22 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
                 >
                   Add
                 </button>
+                {skillInput.trim().length > 0 && filteredSkillOptions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    {filteredSkillOptions.map((skill) => (
+                      <button
+                        key={skill}
+                        type="button"
+                        onClick={() => addSkillItem(skill)}
+                        className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                      >
+                        {skill}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              <p className="mt-1 text-xs text-slate-500">Press Enter to add each skill.</p>
+              <p className="mt-1 text-xs text-slate-500">Type to pick canonical skills, or press Enter to add custom text.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {skills.length > 0 ? (
                   skills.map((skill) => (

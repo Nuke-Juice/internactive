@@ -1,63 +1,79 @@
-# Internactive - Browse-first feed + Micro-onboarding + Curated feed
+# Internactive Product Spec (Current)
 
-## Goal
-Make the site feel fast like Indeed:
-- Users can browse jobs immediately (no login wall)
-- Login/profile is required only when clicking Apply (or Save)
-- After signup, feed becomes curated using stored profile fields
+## Product Summary
+Internactive is a browse-first internship marketplace for students and employers.
 
-## Current behavior
-- Home page has CTA buttons that lead to signup
-- Feed is not the primary landing experience
-- Users may be forced to sign up too early
+- Students can browse internships without logging in.
+- Students get best-match ranking after building a profile.
+- Employers can post internships and manage applicants.
+- Paid plan exists for employers: Verified Employer ($49/month).
 
-## Desired behavior
-1) / shows a light job feed preview + category tiles
-2) /jobs shows the browse-first job feed (no login required)
-3) Job detail pages are viewable without login
-4) Clicking Apply triggers micro-onboarding:
-   - Collect school, major, availability
-   - Create or require login
-   - Save fields to user profile
-   - Submit application
-5) After login, /jobs sorts by Best match
+## Current Goals
+1. Keep first visit simple and friendly.
+2. Push profile creation as the step that unlocks better matching.
+3. Keep internship discovery focused on paid, high-fit opportunities.
+4. Ship practical filters that support local launch targeting.
 
-## Routes
-- /
-- /jobs
-- /jobs/[id]
+## Key Routes
+- `/` browse-first internship feed (primary landing page)
+- `/jobs/[id]` public internship detail page
+- `/signup/student` student signup + profile starter
+- `/signup/employer` employer onboarding
+- `/dashboard/employer` employer posting dashboard
+- `/dashboard/employer/applicants` applicant inbox
+- `/upgrade` Verified Employer billing page
 
-## UI requirements
-- Minimal and fast, not overwhelming
-- Category tiles (8–12)
-- Few visible filters
-- Advanced filters hidden behind Refine
-- Apply button on job card and detail
+## Student Experience
+- First-time visitors see a friendly message to create a profile for specialized matching.
+- Students can browse listings immediately without account friction.
+- Student signup now captures:
+  - school
+  - year
+  - gender
+  - majors
+  - coursework
+- Completed profiles improve ranking quality (best-match sort).
 
-## Data model
-User profile:
-- school
-- major
+## Employer Experience
+- Employers can create internships and review applicants in one place.
+- Free plan: 1 active internship.
+- Verified Employer: $49/month for unlimited internships + email alerts.
+
+## Feed and Filtering
+- Default ranking:
+  - Logged out: newest listings
+  - Logged in student with profile signals: best match
+- Filter model (grid layout):
+  - category
+  - pay range
+  - hours per week (max)
+  - experience level
+  - location + radius distance
+  - remote only toggle
+- Work-type filter removed (launch focus is internships only).
+
+## Data Notes
+Student profile stores core targeting fields used for matching:
+- school / university
+- major(s)
+- coursework
+- experience level
 - availability
+- gender
 
-Job fields:
-- category
-- preferred majors
-- preferred availability
+Internship records include:
+- title, company, location
+- category and experience level
+- work mode (remote/hybrid/on-site)
+- term
+- hours
+- pay string/range
+- required/preferred skills
+- deadline
 
-## Matching rules
-- Logged out: sort by newest
-- Logged in: sort by simple match score + newest
-
-## Acceptance tests
-- /jobs loads without login
-- Job detail loads without login
-- Apply opens micro-onboarding
-- Profile fields saved on apply
-- Feed is curated after login
-
-## Out of scope
-- Payments
-- AI features
-- Messaging
-- Notifications
+## Acceptance Criteria
+1. Home page shows a clear first-time CTA to create profile for specialized matches.
+2. Filter panel uses grid layout and includes pay range, location/radius, and hours per week.
+3. Work type filter is removed from browse UI.
+4. Student signup persists gender to `student_profiles`.
+5. Feed still supports best-match ranking after profile completion.

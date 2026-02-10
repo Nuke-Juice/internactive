@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
-import SiteHeader from '@/components/layout/SiteHeader'
+import AppShellClient from '@/components/layout/AppShellClient'
+import { isUserRole, type UserRole } from '@/lib/auth/roles'
 import { supabaseServer } from '@/lib/supabase/server'
 import './globals.css'
 
@@ -18,10 +19,14 @@ export default async function RootLayout({
     data: { user },
   } = await supabase.auth.getUser()
 
-  let role: 'student' | 'employer' | undefined
+  let role: UserRole | undefined
+  let email: string | null = null
+  let isEmailVerified = true
   if (user) {
+    email = user.email ?? null
+    isEmailVerified = Boolean(user.email_confirmed_at)
     const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle()
-    if (userRow?.role === 'student' || userRow?.role === 'employer') {
+    if (isUserRole(userRow?.role)) {
       role = userRow.role
     }
   }
@@ -29,8 +34,14 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <SiteHeader isAuthenticated={Boolean(user)} role={role} />
-        {children}
+        <AppShellClient
+          isAuthenticated={Boolean(user)}
+          role={role}
+          email={email}
+          isEmailVerified={isEmailVerified}
+        >
+          {children}
+        </AppShellClient>
       </body>
     </html>
   )

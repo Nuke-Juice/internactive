@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { parseMajors, rankInternships } from '@/lib/matching'
-import { fetchInternships, formatMajors, getInternshipType } from '@/lib/jobs/internships'
+import { getCommuteMinutesForListings, toGeoPoint } from '@/lib/commute'
+import { fetchInternships, formatMajors } from '@/lib/jobs/internships'
+import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import { supabaseServer } from '@/lib/supabase/server'
 import FiltersPanel from '@/app/jobs/_components/FiltersPanel'
 import JobCard from '@/app/jobs/_components/JobCard'
@@ -21,11 +23,14 @@ const categoryTiles = [
 
 export type JobsQuery = {
   category?: string
-  paid?: string
-  type?: string
+  paymin?: string
   remote?: string
   exp?: string
-  hours?: string
+  hmin?: string
+  hmax?: string
+  hmax_slider?: string
+  loc?: string
+  radius?: string
 }
 
 type JobsViewProps = {
@@ -47,6 +52,30 @@ function seasonFromMonth(value: string | null | undefined) {
 function buildBrowseHref(basePath: string, anchorId?: string) {
   const hash = anchorId ? `#${anchorId}` : ''
   return `${basePath}${hash}`
+}
+
+function parseCityState(value: string | null | undefined) {
+  if (!value) return { city: null as string | null, state: null as string | null }
+  const cleaned = value.replace(/\s*\([^)]*\)\s*$/, '').trim()
+  if (!cleaned) return { city: null as string | null, state: null as string | null }
+  const [cityRaw, stateRaw] = cleaned.split(',').map((part) => part.trim())
+  const state = stateRaw ? stateRaw.replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase() : null
+  return {
+    city: cityRaw || null,
+    state: state && state.length === 2 ? state : null,
+  }
+}
+
+function extractNumericPayRange(pay: string | null | undefined) {
+  if (!pay) return null
+  const matches = pay.match(/(\d+(?:\.\d+)?)/g)
+  if (!matches || matches.length === 0) return null
+  const values = matches.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+  if (values.length === 0) return null
+  return {
+    min: Math.min(...values),
+    max: Math.max(...values),
+  }
 }
 
 function getStudentProfileCompletion(profile: {
@@ -138,16 +167,19 @@ export default async function JobsView({
   basePath = '/jobs',
   anchorId = 'internships',
 }: JobsViewProps) {
+  const showBrowseHeroButton = basePath !== '/'
   const resolvedSearchParams = ((searchParams ? await Promise.resolve(searchParams) : {}) ?? {}) as JobsQuery
   const activeCategory = resolvedSearchParams.category ?? ''
-  const paidOnly = resolvedSearchParams.paid === '1'
-  const selectedType =
-    resolvedSearchParams.type === 'internship' || resolvedSearchParams.type === 'part-time'
-      ? resolvedSearchParams.type
-      : ''
+  const payMin = resolvedSearchParams.paymin ?? ''
   const remoteOnly = resolvedSearchParams.remote === '1'
   const selectedExperience = resolvedSearchParams.exp ?? ''
-  const maxHours = resolvedSearchParams.hours ?? ''
+  const hoursMin = resolvedSearchParams.hmin ?? ''
+  const hoursMax = resolvedSearchParams.hmax?.trim() || resolvedSearchParams.hmax_slider?.trim() || ''
+  const rawLocationQuery = (resolvedSearchParams.loc ?? '').trim()
+  const radius = resolvedSearchParams.radius ?? ''
+  const parsedRadius =
+    radius === '10' || radius === '25' || radius === '50' || radius === '100' ? Number(radius) : 0
+  const parsedPayMin = payMin ? Number(payMin) : null
 
   const supabase = await supabaseServer()
   const {
@@ -156,14 +188,52 @@ export default async function JobsView({
 
   const internships = await fetchInternships()
   const newestInternships = internships.slice(0, 6)
+  const launchVerifiedLocations = [
+    'Salt Lake City, UT',
+    'Provo, UT',
+    'Orem, UT',
+    'Lehi, UT',
+    'Ogden, UT',
+    'Sandy, UT',
+    'Draper, UT',
+    'Park City, UT',
+  ]
+  const verifiedLocations = Array.from(
+    new Set(
+      [
+        ...launchVerifiedLocations,
+        ...internships
+          .map((listing) => {
+            const city = listing.location_city?.trim()
+            const state = listing.location_state?.trim()
+            if (city && state) return `${city}, ${state}`
+            return null
+          })
+          .filter((value): value is string => Boolean(value)),
+      ]
+    )
+  ).sort((a, b) => a.localeCompare(b))
+  const locationQuery = verifiedLocations.includes(rawLocationQuery) ? rawLocationQuery : ''
 
   let sortedInternships = internships
   let isBestMatch = false
   let profileMajors: string[] = []
+  let profileYear: string | null = null
+  let profileExperienceLevel: string | null = null
   let profileAvailability: number | null = null
   let profileCoursework: string[] = []
+  let profileSkills: string[] = []
   let profileSkillIds: string[] = []
+  let studentTransportMode: string | null = null
+  let studentMaxCommuteMinutes: number | null = null
+  let studentLocation: { city: string | null; state: string | null; zip: string | null; point: { lat: number; lng: number } | null } = {
+    city: null,
+    state: null,
+    zip: null,
+    point: null,
+  }
   const matchReasonsById = new Map<string, string[]>()
+  const commuteMinutesById = new Map<string, number>()
   let role: 'student' | 'employer' | undefined
   let showCompleteProfileBanner = false
   let profileCompletionPercent = 0
@@ -181,24 +251,46 @@ export default async function JobsView({
     const { data: profile } = await supabase
       .from('student_profiles')
       .select(
-        'university_id, school, majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week'
+        'university_id, school, majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, location_lat, location_lng'
       )
       .eq('user_id', user.id)
       .maybeSingle()
-    const { data: studentSkillRows } = await supabase
-      .from('student_skill_items')
-      .select('skill_id')
-      .eq('student_id', user.id)
+    const [{ data: studentSkillRows }, { data: studentCourseworkRows }, { data: studentCourseworkCategoryRows }] = await Promise.all([
+      supabase.from('student_skill_items').select('skill_id').eq('student_id', user.id),
+      supabase.from('student_coursework_items').select('coursework_item_id').eq('student_id', user.id),
+      supabase.from('student_coursework_category_links').select('category_id').eq('student_id', user.id),
+    ])
 
     profileMajors = parseMajors(profile?.majors ?? null)
+    profileYear = profile?.year ?? null
+    profileExperienceLevel = profile?.experience_level ?? null
     profileAvailability = profile?.availability_hours_per_week ?? null
     profileCoursework = Array.isArray(profile?.coursework)
       ? profile.coursework.filter(
           (course): course is string => typeof course === 'string' && course.length > 0
         )
       : []
+    const preferenceSignals = parseStudentPreferenceSignals(profile?.interests ?? null)
+    profileSkills = preferenceSignals.skills
+    studentTransportMode = typeof profile?.transport_mode === 'string' ? profile.transport_mode : 'driving'
+    studentMaxCommuteMinutes = typeof profile?.max_commute_minutes === 'number' ? profile.max_commute_minutes : null
+    studentLocation = {
+      city: typeof profile?.preferred_city === 'string' ? profile.preferred_city : null,
+      state: typeof profile?.preferred_state === 'string' ? profile.preferred_state : null,
+      zip: typeof profile?.preferred_zip === 'string' ? profile.preferred_zip : null,
+      point: toGeoPoint(
+        typeof profile?.location_lat === 'number' ? profile.location_lat : null,
+        typeof profile?.location_lng === 'number' ? profile.location_lng : null
+      ),
+    }
     profileSkillIds = (studentSkillRows ?? [])
       .map((row) => row.skill_id)
+      .filter((value): value is string => typeof value === 'string')
+    const profileCourseworkItemIds = (studentCourseworkRows ?? [])
+      .map((row) => row.coursework_item_id)
+      .filter((value): value is string => typeof value === 'string')
+    const profileCourseworkCategoryIds = (studentCourseworkCategoryRows ?? [])
+      .map((row) => row.category_id)
       .filter((value): value is string => typeof value === 'string')
 
     if (role === 'student') {
@@ -209,7 +301,12 @@ export default async function JobsView({
 
     if (
       role === 'student' &&
-      (profileMajors.length > 0 || typeof profileAvailability === 'number' || profileCoursework.length > 0 || profileSkillIds.length > 0)
+      (profileMajors.length > 0 ||
+        typeof profileAvailability === 'number' ||
+        profileCoursework.length > 0 ||
+        profileSkillIds.length > 0 ||
+        Boolean(profileYear) ||
+        Boolean(profileExperienceLevel))
     ) {
       isBestMatch = true
       const ranked = rankInternships(
@@ -218,17 +315,41 @@ export default async function JobsView({
           title: listing.title,
           description: listing.description,
           majors: listing.majors,
+          target_graduation_years: listing.target_graduation_years,
+          experience_level: listing.experience_level,
+          category: listing.role_category ?? listing.category ?? null,
           hours_per_week: listing.hours_per_week,
           location: listing.location,
+          work_mode: listing.work_mode,
+          term: listing.term,
+          required_skills: listing.required_skills,
+          preferred_skills: listing.preferred_skills,
+          recommended_coursework: listing.recommended_coursework,
           required_skill_ids: listing.required_skill_ids,
           preferred_skill_ids: listing.preferred_skill_ids,
+          coursework_item_ids: listing.coursework_item_ids,
+          coursework_category_ids: listing.coursework_category_ids,
+          coursework_category_names: listing.coursework_category_names,
         })),
         {
           majors: profileMajors,
+          year: profileYear,
+          experience_level: profileExperienceLevel,
+          skills: profileSkills,
           skill_ids: profileSkillIds,
+          coursework_item_ids: profileCourseworkItemIds,
+          coursework_category_ids: profileCourseworkCategoryIds,
           coursework: profileCoursework,
           availability_hours_per_week: profileAvailability,
-          preferred_terms: profile?.availability_start_month ? [seasonFromMonth(profile.availability_start_month)] : [],
+          preferred_terms:
+            preferenceSignals.preferredTerms.length > 0
+              ? preferenceSignals.preferredTerms
+              : profile?.availability_start_month
+                ? [seasonFromMonth(profile.availability_start_month)]
+                : [],
+          preferred_locations: preferenceSignals.preferredLocations,
+          preferred_work_modes: preferenceSignals.preferredWorkModes,
+          remote_only: preferenceSignals.remoteOnly,
         }
       )
 
@@ -251,50 +372,160 @@ export default async function JobsView({
     const listingMajors = parseMajors(listing.majors)
     const normalizedTitle = listing.title?.toLowerCase() ?? ''
     const isRemote = (listing.location ?? '').toLowerCase().includes('remote')
-    const listingType = getInternshipType(listing.hours_per_week)
     const listingExperience = (listing.experience_level ?? '').toLowerCase()
-    const isPaid = Boolean(listing.pay && listing.pay.trim() && listing.pay.toLowerCase() !== 'tbd')
-    const parsedMaxHours = maxHours ? Number(maxHours) : null
+    const parsedMinHours = hoursMin ? Number(hoursMin) : null
+    const parsedMaxHours = hoursMax ? Number(hoursMax) : null
+    const listingPayRange = extractNumericPayRange(listing.pay)
+    const normalizedLocationQuery = locationQuery.toLowerCase()
+    const listingCity = (listing.location_city ?? '').toLowerCase()
+    const listingState = (listing.location_state ?? '').toLowerCase()
+    const listingLocation = (listing.location ?? '').toLowerCase()
 
     if (activeCategory) {
       const normalizedCategory = activeCategory.toLowerCase()
+      const listingCategory = (listing.category ?? listing.role_category ?? '').toLowerCase()
       const hasCategoryMatch =
+        listingCategory === normalizedCategory ||
         listingMajors.some((major) => major.includes(normalizedCategory)) ||
         normalizedTitle.includes(normalizedCategory)
       if (!hasCategoryMatch) return false
     }
 
-    if (paidOnly && !isPaid) return false
-    if (selectedType && listingType !== selectedType) return false
+    if (typeof parsedPayMin === 'number' && Number.isFinite(parsedPayMin) && parsedPayMin > 0) {
+      if (!listingPayRange || listingPayRange.max < parsedPayMin) return false
+    }
+
     if (remoteOnly && !isRemote) return false
     if (selectedExperience && listingExperience !== selectedExperience) return false
-    if (typeof parsedMaxHours === 'number' && typeof listing.hours_per_week === 'number') {
-      if (listing.hours_per_week > parsedMaxHours) return false
+    const listingHoursMin = typeof listing.hours_min === 'number' ? listing.hours_min : listing.hours_per_week
+    const listingHoursMax = typeof listing.hours_max === 'number' ? listing.hours_max : listing.hours_per_week
+    if (typeof parsedMinHours === 'number' && Number.isFinite(parsedMinHours) && typeof listingHoursMax === 'number') {
+      if (listingHoursMax < parsedMinHours) return false
+    }
+    if (typeof parsedMaxHours === 'number' && Number.isFinite(parsedMaxHours) && typeof listingHoursMin === 'number') {
+      if (listingHoursMin > parsedMaxHours) return false
+    }
+
+    if (normalizedLocationQuery) {
+      const [queryCityRaw, queryStateRaw] = normalizedLocationQuery.split(',').map((value) => value.trim())
+      const queryCity = queryCityRaw ?? normalizedLocationQuery
+      const queryState = (queryStateRaw ?? '').replace(/[^a-z]/g, '').slice(0, 2)
+      const directMatch =
+        listingLocation.includes(normalizedLocationQuery) ||
+        listingCity.includes(normalizedLocationQuery) ||
+        listingState === normalizedLocationQuery
+      let radiusMatch = false
+
+      if (parsedRadius > 0) {
+        if (queryCity && listingCity && listingCity.includes(queryCity)) {
+          radiusMatch = true
+        }
+        if (!radiusMatch && parsedRadius >= 25 && queryState && listingState === queryState) {
+          radiusMatch = true
+        }
+      }
+
+      if (!directMatch && !radiusMatch) return false
     }
 
     return true
   })
+
+  if (user && role === 'student' && filteredInternships.length > 0) {
+    const employerIds = Array.from(
+      new Set(
+        filteredInternships
+          .map((listing) => listing.employer_id)
+          .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      )
+    )
+    const { data: employerProfiles } =
+      employerIds.length > 0
+        ? await supabase
+            .from('employer_profiles')
+            .select('user_id, location')
+            .in('user_id', employerIds)
+        : { data: [] as Array<{ user_id: string; location: string | null }> }
+
+    const employerLocationById = new Map(
+      (employerProfiles ?? []).map((row) => {
+        const parsed = parseCityState(row.location ?? null)
+        return [
+          row.user_id,
+          {
+            city: parsed.city,
+            state: parsed.state,
+            zip: null as string | null,
+            point: null as { lat: number; lng: number } | null,
+          },
+        ]
+      })
+    )
+
+    const commuteMap = await getCommuteMinutesForListings({
+      supabase,
+      userId: user.id,
+      origin: studentLocation,
+      transportMode: studentTransportMode,
+      destinations: filteredInternships.map((listing) => {
+        const employerLocation = listing.employer_id ? employerLocationById.get(listing.employer_id) : undefined
+        return {
+          internshipId: listing.id,
+          workMode: listing.work_mode,
+          city: listing.location_city ?? null,
+          state: listing.location_state ?? null,
+          zip: null,
+          point: null,
+          fallbackCity: employerLocation?.city ?? listing.location_city,
+          fallbackState: employerLocation?.state ?? listing.location_state,
+          fallbackZip: employerLocation?.zip ?? null,
+          fallbackPoint: employerLocation?.point ?? null,
+        }
+      }),
+    })
+
+    for (const [internshipId, minutes] of commuteMap.entries()) {
+      commuteMinutesById.set(internshipId, minutes)
+    }
+  }
   const listingsTitle = filteredInternships.length === 0 ? 'Browse internships' : 'Internships hiring now'
+  const compactStudentHero = showHero && role === 'student'
 
   return (
     <>
       {showHero ? (
         <section className="border-b border-blue-100 bg-gradient-to-b from-blue-50 to-slate-50">
-          <div className="mx-auto max-w-6xl px-6 py-10">
+          <div className={`mx-auto max-w-6xl px-6 ${compactStudentHero ? 'py-6' : 'py-10'}`}>
             <div className="mx-auto max-w-3xl text-center">
-              <h1 className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
-                Find internships that fit your major and schedule.
+              <h1 className={`font-semibold tracking-tight text-slate-900 ${compactStudentHero ? 'text-2xl sm:text-3xl' : 'text-3xl sm:text-4xl'}`}>
+                {user
+                  ? role === 'student'
+                    ? 'Internships made for you.'
+                    : 'Find internships that fit your major and schedule.'
+                  : 'Create profile to get specialized internships matched to you.'}
               </h1>
-              <p className="mt-3 text-sm text-slate-600 sm:text-base">
-                Filter fast and start with roles you can actually apply to this term.
+              <p className={`${compactStudentHero ? 'mt-2' : 'mt-3'} text-sm text-slate-600 sm:text-base`}>
+                {user
+                  ? 'Filter fast and start with roles you can actually apply to this term.'
+                  : 'Browse first, then create your profile for better match ranking.'}
               </p>
-              <div className="mt-6">
-                <Link
-                  href={`#${anchorId}`}
-                  className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  Browse internships
-                </Link>
+              <div className={`${compactStudentHero ? 'mt-4' : 'mt-6'} flex flex-wrap items-center justify-center gap-2`}>
+                {showBrowseHeroButton && (
+                  <Link
+                    href={`#${anchorId}`}
+                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Browse internships
+                  </Link>
+                )}
+                {!user && (
+                  <Link
+                    href="/signup/student"
+                    className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-6 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Create profile
+                  </Link>
+                )}
               </div>
             </div>
           </div>
@@ -302,6 +533,20 @@ export default async function JobsView({
       ) : null}
 
       <section id={anchorId} className="mx-auto max-w-6xl scroll-mt-24 px-6 py-8">
+        {!user && (
+          <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p>Create profile to get specialized internships matched to you.</p>
+              <Link
+                href="/signup/student"
+                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+              >
+                Create profile
+              </Link>
+            </div>
+          </div>
+        )}
+
         {showCompleteProfileBanner && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -331,16 +576,19 @@ export default async function JobsView({
           </div>
         </div>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[280px_1fr]">
+        <div className="mt-6 grid gap-6 lg:grid-cols-[290px_1fr]">
           <FiltersPanel
             categories={categoryTiles}
+            verifiedLocations={verifiedLocations}
             state={{
               category: activeCategory,
-              paidOnly,
-              jobType: selectedType,
+              payMin,
               remoteOnly,
               experience: selectedExperience,
-              maxHours,
+              hoursMin,
+              hoursMax,
+              locationQuery,
+              radius,
             }}
             basePath={basePath}
             anchorId={anchorId}
@@ -409,7 +657,8 @@ export default async function JobsView({
                           listing={{
                             ...listing,
                             majorsText: formatMajors(listing.majors),
-                            jobType: getInternshipType(listing.hours_per_week),
+                            commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
+                            maxCommuteMinutes: studentMaxCommuteMinutes,
                           }}
                           isAuthenticated={Boolean(user)}
                           userRole={role ?? null}
@@ -434,7 +683,8 @@ export default async function JobsView({
                     listing={{
                       ...listing,
                       majorsText: formatMajors(listing.majors),
-                      jobType: getInternshipType(listing.hours_per_week),
+                      commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
+                      maxCommuteMinutes: studentMaxCommuteMinutes,
                     }}
                     isAuthenticated={Boolean(user)}
                     userRole={role ?? null}

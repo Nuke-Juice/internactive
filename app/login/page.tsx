@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
+import { isAdminRole, isAppRole, isUserRole } from '@/lib/auth/roles'
 import { supabaseServer } from '@/lib/supabase/server'
 
 function getErrorMessage(message: string) {
@@ -11,16 +12,25 @@ function getErrorMessage(message: string) {
   return message
 }
 
+function normalizeNextPath(value: string | undefined) {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('/')) return null
+  if (trimmed.startsWith('//')) return null
+  return trimmed
+}
+
 export default function LoginPage({
   searchParams,
 }: {
-  searchParams?: { error?: string }
+  searchParams?: { error?: string; next?: string }
 }) {
   async function signIn(formData: FormData) {
     'use server'
 
     const email = String(formData.get('email') ?? '').trim()
     const password = String(formData.get('password') ?? '').trim()
+    const nextPath = normalizeNextPath(String(formData.get('next') ?? '').trim() || undefined)
 
     if (!email || !password) {
       redirect('/login?error=Email+and+password+are+required.')
@@ -34,7 +44,8 @@ export default function LoginPage({
 
     if (error) {
       const message = encodeURIComponent(getErrorMessage(error.message))
-      redirect(`/login?error=${message}`)
+      const nextParam = nextPath ? `&next=${encodeURIComponent(nextPath)}` : ''
+      redirect(`/login?error=${message}${nextParam}`)
     }
 
     const { data: user } = await supabase.auth.getUser()
@@ -44,13 +55,21 @@ export default function LoginPage({
       .from('users')
       .select('role')
       .eq('id', user.user.id)
-      .single()
+      .maybeSingle()
 
-    if (userRow?.role === 'student') redirect('/')
-    if (userRow?.role === 'employer') redirect('/dashboard/employer')
+    if (nextPath) redirect(nextPath)
 
-    redirect('/')
+    const role = isUserRole(userRow?.role) ? userRow.role : null
+    if (isAdminRole(role)) redirect('/admin/internships')
+    if (isAppRole(role)) {
+      if (role === 'student') redirect('/')
+      if (role === 'employer') redirect('/dashboard/employer')
+    }
+
+    redirect('/account')
   }
+
+  const nextPath = normalizeNextPath(searchParams?.next)
 
   return (
     <main className="min-h-screen bg-white px-6 py-12">
@@ -68,6 +87,7 @@ export default function LoginPage({
 
         <div className="mt-6 border-t border-slate-200 pt-6">
         <form action={signIn} className="space-y-4 rounded-2xl border border-slate-300 bg-white p-6 shadow-md">
+          {nextPath ? <input type="hidden" name="next" value={nextPath} /> : null}
           <div>
             <label className="text-sm font-medium text-slate-700">Email</label>
             <input

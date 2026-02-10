@@ -196,6 +196,13 @@ export default function ApplyButton({ listingId, isAuthenticated, userRole = nul
         return setError('Please sign in to continue.')
       }
 
+      if (applicationResult.code === APPLY_ERROR.EMAIL_NOT_VERIFIED) {
+        setOpen(false)
+        router.push(`/verify-required?next=${encodeURIComponent(`/apply/${listingId}`)}&action=application_submit`)
+        router.refresh()
+        return
+      }
+
       return setError('Could not submit application right now. Please try again.')
     }
 

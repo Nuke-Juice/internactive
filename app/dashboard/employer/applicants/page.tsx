@@ -2,12 +2,21 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { trackAnalyticsEvent } from '@/lib/analytics'
+import { startVerifiedEmployerCheckoutAction } from '@/lib/billing/actions'
+import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
 import ApplicantsInboxGroup from '@/app/dashboard/employer/_components/ApplicantsInboxGroup'
 import ApplicantsSortControls, { type ApplicantsSort } from '@/app/dashboard/employer/_components/ApplicantsSortControls'
 
-type SearchParams = Promise<{ sort?: string; updated?: string; error?: string }>
+type SearchParams = Promise<{
+  sort?: string
+  updated?: string
+  error?: string
+  claimed?: string
+  dismiss_claimed?: string
+  internship_id?: string
+}>
 
 type ApplicationStatus = 'submitted' | 'reviewing' | 'interview' | 'rejected' | 'accepted'
 
@@ -52,7 +61,13 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
   const { user } = await requireRole('employer')
   const resolvedSearchParams = searchParams ? await searchParams : undefined
   const sort = normalizeSort(resolvedSearchParams?.sort)
+  const selectedInternshipId = String(resolvedSearchParams?.internship_id ?? '').trim()
   const supabase = await supabaseServer()
+  const { isVerifiedEmployer } = await getEmployerVerificationStatus({ supabase, userId: user.id })
+  const showClaimedBanner =
+    resolvedSearchParams?.claimed === '1' &&
+    resolvedSearchParams?.dismiss_claimed !== '1' &&
+    !isVerifiedEmployer
 
   await trackAnalyticsEvent({
     eventName: 'employer_open_applicants_inbox',
@@ -66,14 +81,17 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
     .eq('employer_id', user.id)
     .order('created_at', { ascending: false })
 
-  const internshipIds = (internships ?? []).map((row) => row.id)
+  const availableInternships = internships ?? []
+  const internshipIds = availableInternships.map((row) => row.id)
+  const scopedInternshipIds =
+    selectedInternshipId && internshipIds.includes(selectedInternshipId) ? [selectedInternshipId] : internshipIds
 
   let applications: ApplicationRow[] = []
-  if (internshipIds.length > 0) {
+  if (scopedInternshipIds.length > 0) {
     let query = supabase
       .from('applications')
       .select('id, internship_id, student_id, created_at, match_score, match_reasons, resume_url, status, reviewed_at, notes')
-      .in('internship_id', internshipIds)
+      .in('internship_id', scopedInternshipIds)
 
     if (sort === 'match_score') {
       query = query.order('match_score', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
@@ -111,7 +129,9 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
   )
   const signedResumeUrlByPath = new Map(signedResumeEntries)
 
-  const groups = (internships ?? []).map((internship) => {
+  const groups = availableInternships
+    .filter((internship) => scopedInternshipIds.includes(internship.id))
+    .map((internship) => {
     const applicants = applications
       .filter((application) => application.internship_id === internship.id)
       .map((application) => {
@@ -138,7 +158,7 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
       internshipTitle: internship.title ?? 'Internship',
       applicants,
     }
-  })
+    })
 
   async function updateApplication(formData: FormData) {
     'use server'
@@ -194,7 +214,9 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
       properties: { internship_id: internshipId, application_id: applicationId, status: nextStatus },
     })
 
-    redirect(`/dashboard/employer/applicants?sort=${sort}&updated=1`)
+    const next = new URLSearchParams({ sort, updated: '1' })
+    if (selectedInternshipId) next.set('internship_id', selectedInternshipId)
+    redirect(`/dashboard/employer/applicants?${next.toString()}`)
   }
 
   return (
@@ -225,6 +247,33 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
         {resolvedSearchParams?.updated ? (
           <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
             Application updated.
+          </div>
+        ) : null}
+        {showClaimedBanner ? (
+          <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p>You&rsquo;re claimed ✅ Want unlimited postings + email alerts? Upgrade to Verified Employer.</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <form action={startVerifiedEmployerCheckoutAction}>
+                  <button
+                    type="submit"
+                    className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700"
+                  >
+                    Upgrade
+                  </button>
+                </form>
+                <Link
+                  href={`/dashboard/employer/applicants?${new URLSearchParams({
+                    sort,
+                    dismiss_claimed: '1',
+                    ...(selectedInternshipId ? { internship_id: selectedInternshipId } : {}),
+                  }).toString()}`}
+                  className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                >
+                  Dismiss
+                </Link>
+              </div>
+            </div>
           </div>
         ) : null}
 

@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation'
 import { supabaseServer } from '@/lib/supabase/server'
+import { type UserRole } from '@/lib/auth/roles'
 
-type Role = 'student' | 'employer'
-
-export async function requireRole(role: Role) {
+export async function requireRole<T extends UserRole>(role: T) {
   const supabase = await supabaseServer()
 
   const { data, error } = await supabase.auth.getUser()
@@ -17,5 +16,5 @@ export async function requireRole(role: Role) {
 
   if (roleError || !userRow || userRow.role !== role) redirect('/')
 
-  return { user: data.user, role: userRow.role as Role }
+  return { user: data.user, role: userRow.role as T }
 }

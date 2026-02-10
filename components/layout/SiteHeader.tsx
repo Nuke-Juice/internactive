@@ -3,23 +3,25 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
-import { useState } from 'react'
-import { Bell, FileText, LayoutDashboard, LogIn, Mail, Star, User, Users } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Bell, FileText, LayoutDashboard, LogIn, Mail, ShieldCheck, User } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
-
-type UserRole = 'student' | 'employer'
+import { isAdminRole, type UserRole } from '@/lib/auth/roles'
+import { useToast } from '@/components/feedback/ToastProvider'
 
 type SiteHeaderProps = {
   isAuthenticated: boolean
   role?: UserRole
+  email?: string | null
+  isEmailVerified?: boolean
 }
 
 function navClasses(isActive: boolean) {
   if (isActive) {
-    return 'rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700'
+    return 'inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-50 px-4 text-sm font-medium text-slate-700'
   }
 
-  return 'rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50'
+  return 'inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50'
 }
 
 function primaryButtonClasses(isActive: boolean) {
@@ -32,33 +34,49 @@ function primaryButtonClasses(isActive: boolean) {
 
 function iconNavClasses(isActive: boolean) {
   if (isActive) {
-    return 'inline-flex items-center justify-center p-1 text-slate-800'
+    return 'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-300 bg-slate-50 text-slate-800'
   }
 
-  return 'inline-flex items-center justify-center p-1 text-slate-600 transition-colors hover:text-slate-700'
+  return 'inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-700'
 }
 
 function textLinkClasses(isActive: boolean) {
   return `text-sm font-medium transition-colors ${isActive ? 'text-slate-900' : 'text-slate-600 hover:text-slate-900'}`
 }
 
-export default function SiteHeader({ isAuthenticated, role }: SiteHeaderProps) {
+export default function SiteHeader({ isAuthenticated, role, email, isEmailVerified = true }: SiteHeaderProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [showEmployerModal, setShowEmployerModal] = useState(false)
   const [pendingEmployerPath, setPendingEmployerPath] = useState('/dashboard/employer')
   const [signingOut, setSigningOut] = useState(false)
+  const [resendingVerification, setResendingVerification] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const { showToast } = useToast()
 
   const homeActive = pathname === '/' || pathname.startsWith('/jobs')
   const notificationsActive = pathname.startsWith('/notifications')
-  const inboxActive = pathname.startsWith('/inbox')
+  const inboxActive = pathname.startsWith('/inbox') || pathname.startsWith('/dashboard/employer/applicants')
   const profileActive = pathname.startsWith('/account')
+  const profilePageActive = pathname.startsWith('/profile')
+  const adminActive = pathname.startsWith('/admin')
   const applicationsActive = pathname.startsWith('/applications')
   const dashboardActive = pathname.startsWith('/dashboard/employer')
   const applicantsActive = pathname.startsWith('/dashboard/employer/applicants')
   const employersActive = pathname.startsWith('/signup/employer')
   const loginActive = pathname.startsWith('/login')
   const upgradeActive = pathname.startsWith('/upgrade')
+  const isAdmin = isAdminRole(role)
+  const showVerificationBanner = isAuthenticated && !isEmailVerified
+  const inboxHref = role === 'employer' ? '/dashboard/employer/applicants' : '/inbox'
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const timer = setTimeout(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1))
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [resendCooldown])
 
   function handleEmployerTarget(path: string) {
     if (isAuthenticated && role === 'student') {
@@ -78,6 +96,57 @@ export default function SiteHeader({ isAuthenticated, role }: SiteHeaderProps) {
     router.push(`${pendingEmployerPath}?intent=employer`)
     router.refresh()
   }
+
+  async function resendVerification(nextPath: string) {
+    if (!email || resendCooldown > 0) return
+    setResendingVerification(true)
+
+    try {
+      const response = await fetch('/api/auth/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ next: nextPath }),
+      })
+      const payload = (await response.json()) as { ok?: boolean; message?: string; error?: string }
+      if (!response.ok || !payload.ok) {
+        showToast({
+          kind: 'error',
+          message: payload.error ?? 'Could not resend verification email.',
+          key: `resend-verification-error:${payload.error ?? 'unknown'}`,
+        })
+      } else {
+        showToast({
+          kind: 'success',
+          message: payload.message ?? 'Verification email sent.',
+          key: 'resend-verification-success',
+        })
+        setResendCooldown(30)
+      }
+    } catch {
+      showToast({ kind: 'error', message: 'Could not resend verification email.', key: 'resend-verification-network' })
+    } finally {
+      setResendingVerification(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!showVerificationBanner) return
+    const storageKey = `verify-warning-shown:${email ?? 'unknown'}`
+    const seen = typeof window !== 'undefined' ? sessionStorage.getItem(storageKey) : null
+    if (seen) return
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(storageKey, '1')
+    }
+    showToast({
+      kind: 'warning',
+      message: 'Verify your email to apply/post.',
+      key: storageKey,
+      actionLabel: 'Resend email',
+      onAction: async () => {
+        await resendVerification(pathname || '/')
+      },
+    })
+  }, [email, pathname, showToast, showVerificationBanner])
 
   return (
     <>
@@ -101,56 +170,22 @@ export default function SiteHeader({ isAuthenticated, role }: SiteHeaderProps) {
               <Link href="/signup/employer" className={textLinkClasses(employersActive)}>
                 For Employers
               </Link>
+            ) : isAdmin ? (
+              <Link href="/admin/internships" className={textLinkClasses(adminActive)}>
+                Admin Dashboard
+              </Link>
             ) : role === 'student' ? (
               <button type="button" onClick={() => handleEmployerTarget('/dashboard/employer')} className={textLinkClasses(false)}>
                 For Employers
               </button>
-            ) : role === 'employer' ? (
-              <Link href="/dashboard/employer" className={textLinkClasses(dashboardActive || applicantsActive || upgradeActive)}>
-                For Employers
-              </Link>
             ) : null}
           </div>
 
           <nav className="flex items-center gap-2">
-            {isAuthenticated && role === 'student' ? (
-              <Link href="/applications" className={iconNavClasses(applicationsActive)} aria-label="Applications" title="Applications">
-                <FileText className="h-5 w-5" />
-              </Link>
-            ) : null}
-
-            <Link href="/inbox" className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
-              <Mail className="h-5 w-5" />
-            </Link>
-            <Link
-              href="/notifications"
-              className={iconNavClasses(notificationsActive)}
-              aria-label="Notifications"
-              title="Notifications"
-            >
-              <Bell className="h-5 w-5" />
-            </Link>
-
             {isAuthenticated && role === 'employer' ? (
-              <>
-                <Link href="/dashboard/employer" className={navClasses(dashboardActive)}>
-                  <span className="inline-flex items-center gap-1.5">
-                    <LayoutDashboard className="h-4 w-4" />
-                    Dashboard
-                  </span>
-                </Link>
-                <Link href="/dashboard/employer/applicants" className={navClasses(applicantsActive)}>
-                  <span className="inline-flex items-center gap-1.5">
-                    <Users className="h-4 w-4" />
-                    Applicants
-                  </span>
-                </Link>
-              </>
-            ) : null}
-
-            {isAuthenticated ? (
-              <Link href="/account" className={iconNavClasses(profileActive)} aria-label="Profile" title="Profile">
-                <User className="h-5 w-5" />
+              <Link href="/dashboard/employer" className={navClasses(dashboardActive)}>
+                <LayoutDashboard className="h-4 w-4" />
+                Dashboard
               </Link>
             ) : null}
 
@@ -163,12 +198,42 @@ export default function SiteHeader({ isAuthenticated, role }: SiteHeaderProps) {
 
             {isAuthenticated && role === 'employer' ? (
               <Link href="/upgrade" className={navClasses(upgradeActive)}>
-                <span className="inline-flex items-center gap-1.5">
-                  <Star className="h-4 w-4" />
-                  Upgrade
-                </span>
+                <ShieldCheck className="h-4 w-4 text-amber-500" />
+                Upgrade
               </Link>
             ) : null}
+
+            <div className="flex items-center gap-2">
+              {isAuthenticated && role === 'student' ? (
+                <Link href="/applications" className={iconNavClasses(applicationsActive)} aria-label="Applications" title="Applications">
+                  <FileText className="h-5 w-5" />
+                </Link>
+              ) : null}
+              <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
+                <Mail className="h-5 w-5" />
+              </Link>
+              <Link
+                href="/notifications"
+                className={iconNavClasses(notificationsActive)}
+                aria-label="Notifications"
+                title="Notifications"
+              >
+                <Bell className="h-5 w-5" />
+              </Link>
+            </div>
+
+            {isAuthenticated ? (
+              <Link href="/profile" className={iconNavClasses(profilePageActive || profileActive)} aria-label="Profile" title="Profile">
+                <User className="h-5 w-5" />
+              </Link>
+            ) : null}
+
+            {isAuthenticated && isAdmin ? (
+              <span className="hidden items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 md:inline-flex">
+                Admin
+              </span>
+            ) : null}
+
           </nav>
         </div>
       </header>

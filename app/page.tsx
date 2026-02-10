@@ -9,7 +9,7 @@ export default async function HomePage({
   return (
     <main className="min-h-screen bg-slate-50">
       <Suspense fallback={<JobsViewSkeleton />}>
-        <JobsView searchParams={searchParams} basePath="/" anchorId="internships" />
+        <JobsView searchParams={searchParams} showHero basePath="/" anchorId="internships" />
       </Suspense>
     </main>
   )

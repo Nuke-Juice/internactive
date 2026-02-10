@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireRole } from '@/lib/auth/requireRole'
-import { startVerifiedEmployerCheckoutAction } from '@/lib/billing/actions'
+import { startStarterEmployerCheckoutAction } from '@/lib/billing/actions'
+import { getRemainingCapacity, isUnlimitedInternships } from '@/lib/billing/plan'
 import { isPlanLimitReachedCode, PLAN_LIMIT_REACHED } from '@/lib/billing/plan'
 import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import {
@@ -9,7 +10,11 @@ import {
   type InternshipValidationErrorCode,
   validateInternshipInput,
 } from '@/lib/internshipValidation'
+import { deriveTermFromRange, getEndYearOptions, getMonthOptions, getStartYearOptions } from '@/lib/internships/term'
+import { isVerifiedCityForState, normalizeStateCode } from '@/lib/locations/usLocationCatalog'
 import { supabaseServer } from '@/lib/supabase/server'
+import { guardEmployerInternshipPublish } from '@/lib/auth/verifiedActionGate'
+import InternshipLocationFields from '@/components/forms/InternshipLocationFields'
 
 function normalizeList(value: string) {
   return value
@@ -31,14 +36,14 @@ function formatMajors(value: unknown) {
   return value ? String(value) : ''
 }
 
-function getCreateInternshipError(searchParams?: { code?: string; error?: string }) {
+function getCreateInternshipError(searchParams?: { code?: string; error?: string; limit?: string; current?: string }) {
   const code = searchParams?.code as InternshipValidationErrorCode | string | undefined
 
   if (code === INTERNSHIP_VALIDATION_ERROR.WORK_MODE_REQUIRED) {
     return { message: 'Work mode is required.', field: 'work_mode' as const }
   }
   if (code === INTERNSHIP_VALIDATION_ERROR.TERM_REQUIRED) {
-    return { message: 'Term is required.', field: 'term' as const }
+    return { message: 'Start month/year and end month/year are required.', field: 'term' as const }
   }
   if (code === INTERNSHIP_VALIDATION_ERROR.INVALID_HOURS_RANGE) {
     return { message: 'Hours range is invalid. Use values between 1 and 80 with min <= max.', field: 'hours' as const }
@@ -53,8 +58,14 @@ function getCreateInternshipError(searchParams?: { code?: string; error?: string
     return { message: 'Application deadline must be today or later.', field: 'application_deadline' as const }
   }
   if (code === PLAN_LIMIT_REACHED) {
+    const limit = Number.parseInt(String(searchParams?.limit ?? ''), 10)
+    const current = Number.parseInt(String(searchParams?.current ?? ''), 10)
+    const fallback = 'Plan limit reached. Upgrade to post more active internships.'
+    if (!Number.isFinite(limit) || !Number.isFinite(current)) {
+      return { message: fallback, field: null }
+    }
     return {
-      message: 'Free employers can have one active internship. Upgrade to Verified Employer to post unlimited internships.',
+      message: `Plan limit reached: ${current} active internships, limit ${limit}. Upgrade to increase your capacity.`,
       field: null,
     }
   }
@@ -67,11 +78,14 @@ function getCreateInternshipError(searchParams?: { code?: string; error?: string
 export default async function EmployerDashboardPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ error?: string; success?: string; code?: string }>
+  searchParams?: Promise<{ error?: string; success?: string; code?: string; create?: string; limit?: string; current?: string }>
 }) {
   const { user } = await requireRole('employer')
   const resolvedSearchParams = searchParams ? await searchParams : undefined
   const supabase = await supabaseServer()
+  const monthOptions = getMonthOptions()
+  const startYearOptions = getStartYearOptions()
+  const endYearOptions = getEndYearOptions()
 
   const { data: employerProfile } = await supabase
     .from('employer_profiles')
@@ -81,10 +95,12 @@ export default async function EmployerDashboardPage({
 
   const { data: internships } = await supabase
     .from('internships')
-    .select('id, title, location, experience_level, majors, created_at')
+    .select('id, title, location, experience_level, majors, created_at, is_active')
     .eq('employer_id', user.id)
     .order('created_at', { ascending: false })
-  const { isVerifiedEmployer } = await getEmployerVerificationStatus({ supabase, userId: user.id })
+  const { plan } = await getEmployerVerificationStatus({ supabase, userId: user.id })
+  const activeInternshipsCount = (internships ?? []).filter((internship) => internship.is_active).length
+  const remainingCapacity = getRemainingCapacity(plan, activeInternshipsCount)
 
   async function createInternship(formData: FormData) {
     'use server'
@@ -92,23 +108,33 @@ export default async function EmployerDashboardPage({
     const { user: currentUser } = await requireRole('employer')
     const supabaseAction = await supabaseServer()
 
-    const verification = await getEmployerVerificationStatus({ supabase: supabaseAction, userId: currentUser.id })
-    if (!verification.isVerifiedEmployer) {
-      const { count } = await supabaseAction
-        .from('internships')
-        .select('id', { count: 'exact', head: true })
-        .eq('employer_id', currentUser.id)
+    const verificationGate = guardEmployerInternshipPublish(currentUser)
+    if (!verificationGate.ok) {
+      redirect(verificationGate.redirectTo)
+    }
 
-      if ((count ?? 0) >= 1) {
-        redirect(`/dashboard/employer?code=${PLAN_LIMIT_REACHED}`)
-      }
+    const verification = await getEmployerVerificationStatus({ supabase: supabaseAction, userId: currentUser.id })
+    const { count } = await supabaseAction
+      .from('internships')
+      .select('id', { count: 'exact', head: true })
+      .eq('employer_id', currentUser.id)
+      .eq('is_active', true)
+
+    const currentActive = count ?? 0
+    const limit = verification.plan.maxActiveInternships
+    if (limit !== null && currentActive >= limit) {
+      redirect(`/dashboard/employer?code=${PLAN_LIMIT_REACHED}&limit=${limit}&current=${currentActive}`)
     }
 
     const title = String(formData.get('title') ?? '').trim()
     const locationCity = String(formData.get('location_city') ?? '').trim()
-    const locationState = String(formData.get('location_state') ?? '').trim().toUpperCase()
+    const locationState = normalizeStateCode(String(formData.get('location_state') ?? ''))
     const workMode = String(formData.get('work_mode') ?? '').trim().toLowerCase()
-    const term = String(formData.get('term') ?? '').trim()
+    const startMonth = String(formData.get('start_month') ?? '').trim()
+    const startYear = String(formData.get('start_year') ?? '').trim()
+    const endMonth = String(formData.get('end_month') ?? '').trim()
+    const endYear = String(formData.get('end_year') ?? '').trim()
+    const term = deriveTermFromRange(startMonth, startYear, endMonth, endYear) ?? ''
     const hoursMin = Number(String(formData.get('hours_min') ?? '').trim())
     const hoursMax = Number(String(formData.get('hours_max') ?? '').trim())
     const requiredSkillsRaw = String(formData.get('required_skills') ?? '').trim()
@@ -137,6 +163,9 @@ export default async function EmployerDashboardPage({
     if (!validation.ok) {
       redirect(`/dashboard/employer?code=${validation.code}`)
     }
+    if (locationCity && locationState && !isVerifiedCityForState(locationCity, locationState)) {
+      redirect('/dashboard/employer?error=Select+a+verified+city+and+state+combination')
+    }
 
     const normalizedLocation =
       workMode === 'remote'
@@ -152,10 +181,12 @@ export default async function EmployerDashboardPage({
       description,
       experience_level: experienceLevel,
       work_mode: workMode,
+      location_type: workMode,
       term,
       hours_min: hoursMin,
       hours_max: hoursMax,
       hours_per_week: hoursMax,
+      employer_verification_tier: verification.plan.id,
       required_skills: parseCommaList(requiredSkillsRaw),
       application_deadline: applicationDeadline || null,
       majors: majorsRaw ? normalizeList(majorsRaw) : null,
@@ -170,6 +201,8 @@ export default async function EmployerDashboardPage({
 
   const createInternshipError = getCreateInternshipError(resolvedSearchParams)
   const showUpgradeModal = isPlanLimitReachedCode(resolvedSearchParams?.code)
+  const showCreateInternshipForm =
+    resolvedSearchParams?.create === '1' || Boolean(createInternshipError) || (internships?.length ?? 0) === 0
 
   return (
     <main className="min-h-screen bg-white">
@@ -181,43 +214,109 @@ export default async function EmployerDashboardPage({
               Create internships and track what you have posted.
             </p>
           </div>
-          <Link
-            href="/dashboard/employer/applicants"
-            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            View applicant inbox
-          </Link>
         </div>
 
         <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          Plan:{' '}
-          <span className="font-semibold text-slate-900">
-            {isVerifiedEmployer ? 'Verified Employer' : 'Free Employer'}
-          </span>
-          {!isVerifiedEmployer ? ' (1 active internship limit)' : ' (unlimited internships + email alerts)'}
+          Plan: <span className="font-semibold text-slate-900">{plan.name}</span>
+          {!isUnlimitedInternships(plan) ? ` (${plan.maxActiveInternships} active internship limit)` : ' (unlimited internships + email alerts)'}
+          {`. You have ${activeInternshipsCount} active internships`}
+          {remainingCapacity === null ? ' (unlimited remaining).' : ` (${remainingCapacity} remaining).`}
           <Link href="/upgrade" className="ml-2 font-medium text-blue-700 hover:underline">
-            {isVerifiedEmployer ? 'Manage subscription' : 'Upgrade'}
+            {plan.id === 'free' ? 'Upgrade' : 'Manage plan'}
           </Link>
         </div>
 
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-900">Create internship</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Share the basics so students can quickly see fit.
-          </p>
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-slate-900">Your internships</h2>
+            <span className="text-xs text-slate-500">{internships?.length ?? 0} total</span>
+          </div>
 
-          {createInternshipError && (
-            <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {createInternshipError.message}
+          {!internships || internships.length === 0 ? (
+            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              You have not created any internships yet.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3">
+              {internships.map((internship) => (
+                <div key={internship.id} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">{internship.title}</div>
+                      <div className="text-xs text-slate-500">{internship.location}</div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {internship.experience_level ? `Level: ${internship.experience_level}` : 'Level: n/a'}
+                    </div>
+                  </div>
+                  {internship.majors && (
+                    <div className="mt-2 text-xs text-slate-500">
+                      Majors: {formatMajors(internship.majors)}
+                    </div>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link
+                      href={`/jobs/${internship.id}`}
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      View details
+                    </Link>
+                    <Link
+                      href={`/inbox?internship_id=${encodeURIComponent(internship.id)}`}
+                      className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                      Applicants
+                    </Link>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-          {resolvedSearchParams?.success && (
-            <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              Internship created.
-            </div>
-          )}
+        </div>
 
-          <form action={createInternship} className="mt-5 grid gap-4 sm:grid-cols-2">
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-700">
+              Need another listing? Create one in under 2 minutes.
+            </p>
+            <Link
+              href="/dashboard/employer?create=1"
+              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700"
+            >
+              + New internship
+            </Link>
+          </div>
+        </div>
+
+        {showCreateInternshipForm ? (
+          <div id="new-internship" className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Create internship</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Share the basics so students can quickly see fit.
+                </p>
+              </div>
+              <Link
+                href="/dashboard/employer"
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Hide form
+              </Link>
+            </div>
+
+            {createInternshipError && (
+              <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {createInternshipError.message}
+              </div>
+            )}
+            {resolvedSearchParams?.success && (
+              <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                Internship created.
+              </div>
+            )}
+
+            <form action={createInternship} className="mt-5 grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-slate-700">Title</label>
               <input
@@ -276,38 +375,88 @@ export default async function EmployerDashboardPage({
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700">Term</label>
-              <input
-                name="term"
+              <label className="text-sm font-medium text-slate-700">Start month</label>
+              <select
+                name="start_month"
                 required
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400"
-                placeholder="e.g., Summer 2026"
-              />
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Select start month
+                </option>
+                {monthOptions.map((monthOption) => (
+                  <option key={`start-${monthOption}`} value={monthOption}>
+                    {monthOption}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">Start year</label>
+              <select
+                name="start_year"
+                required
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Select start year
+                </option>
+                {startYearOptions.map((yearOption) => (
+                  <option key={`year-${yearOption}`} value={yearOption}>
+                    {yearOption}
+                  </option>
+                ))}
+              </select>
               {createInternshipError?.field === 'term' && (
                 <p className="mt-1 text-xs text-red-600">{createInternshipError.message}</p>
               )}
             </div>
-
             <div>
-              <label className="text-sm font-medium text-slate-700">City</label>
-              <input
-                name="location_city"
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400"
-                placeholder="e.g., Salt Lake City"
-              />
+              <label className="text-sm font-medium text-slate-700">End month</label>
+              <select
+                name="end_month"
+                required
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Select end month
+                </option>
+                {monthOptions.map((monthOption) => (
+                  <option key={`end-${monthOption}`} value={monthOption}>
+                    {monthOption}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">End year</label>
+              <select
+                name="end_year"
+                required
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                defaultValue=""
+              >
+                <option value="" disabled>
+                  Select end year
+                </option>
+                {endYearOptions.map((yearOption) => (
+                  <option key={`end-year-${yearOption}`} value={yearOption}>
+                    {yearOption}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-slate-700">State</label>
-              <input
-                name="location_state"
-                maxLength={2}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400"
-                placeholder="e.g., UT"
+            <div className="sm:col-span-2">
+              <InternshipLocationFields
+                labelClassName="text-sm font-medium text-slate-700"
+                selectClassName="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                errorMessage={createInternshipError?.field === 'location' ? createInternshipError.message : null}
               />
-              {createInternshipError?.field === 'location' && (
-                <p className="mt-1 text-xs text-red-600">{createInternshipError.message}</p>
-              )}
             </div>
 
             <div>
@@ -393,44 +542,9 @@ export default async function EmployerDashboardPage({
                 Create internship
               </button>
             </div>
-          </form>
-        </div>
-
-        <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-900">Your internships</h2>
-            <span className="text-xs text-slate-500">{internships?.length ?? 0} total</span>
+            </form>
           </div>
-
-          {!internships || internships.length === 0 ? (
-            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              You have not created any internships yet.
-            </div>
-          ) : (
-            <div className="mt-4 grid gap-3">
-              {internships.map((internship) => (
-                <div key={internship.id} className="rounded-xl border border-slate-200 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900">{internship.title}</div>
-                      <div className="text-xs text-slate-500">
-                        {internship.location}
-                      </div>
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {internship.experience_level ? `Level: ${internship.experience_level}` : 'Level: n/a'}
-                    </div>
-                  </div>
-                  {internship.majors && (
-                    <div className="mt-2 text-xs text-slate-500">
-                      Majors: {formatMajors(internship.majors)}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        ) : null}
       </section>
 
       {showUpgradeModal && (
@@ -441,12 +555,12 @@ export default async function EmployerDashboardPage({
               Free employers can keep one active internship. Upgrade to Verified Employer to publish unlimited internships and receive email alerts.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
-              <form action={startVerifiedEmployerCheckoutAction}>
+              <form action={startStarterEmployerCheckoutAction}>
                 <button
                   type="submit"
                   className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 >
-                  Upgrade for $49/mo
+                  Upgrade to Starter
                 </button>
               </form>
               <Link

@@ -2,7 +2,8 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #0f172a;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -12,15 +13,23 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.admin-readable input,
+.admin-readable select,
+.admin-readable textarea {
+  color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
+  background-color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+.admin-readable input::placeholder,
+.admin-readable textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
 }

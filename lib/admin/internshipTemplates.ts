@@ -1,0 +1,178 @@
+export const INTERNSHIP_CATEGORIES = [
+  'Finance',
+  'Accounting',
+  'Data',
+  'Marketing',
+  'Operations',
+  'Product',
+  'Design',
+  'Sales',
+  'HR',
+  'Engineering',
+] as const
+
+export type InternshipCategory = (typeof INTERNSHIP_CATEGORIES)[number]
+
+export type InternshipTemplate = {
+  key: string
+  label: string
+  title: string
+  category: InternshipCategory
+  experience_level: 'entry' | 'mid' | 'senior'
+  description: string
+  responsibilities: string[]
+  qualifications: string[]
+  required_skills: string[]
+  preferred_skills: string[]
+  recommended_coursework_categories: string[]
+  pay_min_hourly: number
+  pay_max_hourly: number
+  hours_per_week_min: number
+  hours_per_week_max: number
+}
+
+export const INTERNSHIP_TEMPLATES: readonly InternshipTemplate[] = [
+  {
+    key: 'finance_intern',
+    label: 'Finance Intern',
+    title: 'Finance Intern',
+    category: 'Finance',
+    experience_level: 'entry',
+    description:
+      'Support FP&A workflows by maintaining weekly reporting, variance analysis, and forecasting materials for business partners.',
+    responsibilities: [
+      'Build and maintain weekly KPI tracking reports',
+      'Support monthly budget vs. actual variance analysis',
+      'Prepare deck materials for finance and operations reviews',
+    ],
+    qualifications: ['Pursuing a Finance, Accounting, Economics, or related degree', 'Authorized to work in the U.S. for internship period'],
+    required_skills: ['Excel', 'Financial statement literacy', 'Written communication'],
+    preferred_skills: ['Financial modeling', 'PowerPoint', 'Stakeholder communication'],
+    recommended_coursework_categories: ['Corporate Finance / Valuation', 'Financial Accounting', 'Financial Modeling (Excel)'],
+    pay_min_hourly: 20,
+    pay_max_hourly: 26,
+    hours_per_week_min: 15,
+    hours_per_week_max: 30,
+  },
+  {
+    key: 'accounting_intern',
+    label: 'Accounting Intern',
+    title: 'Accounting Intern',
+    category: 'Accounting',
+    experience_level: 'entry',
+    description: 'Assist with daily accounting operations including reconciliations, journal support, and close preparation.',
+    responsibilities: ['Support AP/AR reconciliations', 'Prepare close support schedules', 'Maintain audit-ready documentation'],
+    qualifications: ['Pursuing an Accounting, Finance, or related degree', 'Authorized to work in the U.S. for internship period'],
+    required_skills: ['Attention to detail', 'Spreadsheets', 'Written communication'],
+    preferred_skills: ['GAAP basics', 'ERP familiarity', 'Audit readiness'],
+    recommended_coursework_categories: ['Financial Accounting', 'Managerial Accounting'],
+    pay_min_hourly: 19,
+    pay_max_hourly: 24,
+    hours_per_week_min: 15,
+    hours_per_week_max: 30,
+  },
+  {
+    key: 'data_analyst_intern',
+    label: 'Data Analyst Intern',
+    title: 'Data Analyst Intern',
+    category: 'Data',
+    experience_level: 'entry',
+    description: 'Help analyze growth and user behavior data to deliver clear recommendations to product and ops stakeholders.',
+    responsibilities: ['Write SQL queries for reporting', 'Build dashboard views for core metrics', 'Present weekly insights and recommendations'],
+    qualifications: ['Pursuing Data Science, Statistics, Computer Science, or related degree', 'Authorized to work in the U.S. for internship period'],
+    required_skills: ['SQL', 'Analytical thinking', 'Data communication'],
+    preferred_skills: ['Python', 'Tableau', 'Experimentation basics'],
+    recommended_coursework_categories: ['SQL / Databases', 'Statistics / Probability', 'Data Visualization (Tableau/Power BI)'],
+    pay_min_hourly: 22,
+    pay_max_hourly: 30,
+    hours_per_week_min: 15,
+    hours_per_week_max: 35,
+  },
+  {
+    key: 'marketing_intern',
+    label: 'Marketing Intern',
+    title: 'Marketing Intern',
+    category: 'Marketing',
+    experience_level: 'entry',
+    description: 'Support campaign operations, content publishing, and performance reporting across core growth channels.',
+    responsibilities: ['Coordinate campaign calendars', 'Draft and publish channel content', 'Track campaign KPIs and test outcomes'],
+    qualifications: ['Pursuing Marketing, Business, Communications, or related degree', 'Authorized to work in the U.S. for internship period'],
+    required_skills: ['Writing', 'Project coordination', 'Communication'],
+    preferred_skills: ['Marketing analytics', 'A/B testing', 'Social channel operations'],
+    recommended_coursework_categories: ['Marketing Analytics', 'Data Visualization (Tableau/Power BI)'],
+    pay_min_hourly: 18,
+    pay_max_hourly: 24,
+    hours_per_week_min: 15,
+    hours_per_week_max: 30,
+  },
+  {
+    key: 'ops_intern',
+    label: 'Ops Intern',
+    title: 'Operations Intern',
+    category: 'Operations',
+    experience_level: 'entry',
+    description: 'Partner with operations leads to improve process efficiency, documentation quality, and cross-team coordination.',
+    responsibilities: ['Map existing workflows and bottlenecks', 'Own small process improvement projects', 'Document SOP updates'],
+    qualifications: ['Pursuing Business, Operations, Supply Chain, or related degree', 'Authorized to work in the U.S. for internship period'],
+    required_skills: ['Organization', 'Process documentation', 'Cross-functional communication'],
+    preferred_skills: ['Process improvement', 'Spreadsheet analysis', 'Project tracking'],
+    recommended_coursework_categories: ['Operations / Supply Chain', 'Statistics / Probability'],
+    pay_min_hourly: 20,
+    pay_max_hourly: 26,
+    hours_per_week_min: 15,
+    hours_per_week_max: 30,
+  },
+  {
+    key: 'product_intern',
+    label: 'Product Intern',
+    title: 'Product Intern',
+    category: 'Product',
+    experience_level: 'entry',
+    description: 'Support product discovery and delivery by synthesizing feedback, documenting requirements, and tracking feature health.',
+    responsibilities: ['Gather and synthesize customer feedback', 'Draft product requirement documents', 'Monitor post-launch metrics'],
+    qualifications: ['Pursuing Product, Business, Computer Science, or related degree', 'Authorized to work in the U.S. for internship period'],
+    required_skills: ['Structured problem-solving', 'Communication', 'Requirements writing'],
+    preferred_skills: ['User research', 'Roadmapping', 'SQL'],
+    recommended_coursework_categories: ['Product Management Fundamentals', 'Software Engineering Fundamentals', 'Data Visualization (Tableau/Power BI)'],
+    pay_min_hourly: 23,
+    pay_max_hourly: 32,
+    hours_per_week_min: 15,
+    hours_per_week_max: 35,
+  },
+  {
+    key: 'design_intern',
+    label: 'Design Intern',
+    title: 'Design Intern',
+    category: 'Design',
+    experience_level: 'entry',
+    description: 'Contribute to product and marketing design by creating polished UI mocks and iterating from stakeholder feedback.',
+    responsibilities: ['Design UI flows and component mockups', 'Prepare production-ready assets', 'Support usability testing synthesis'],
+    qualifications: ['Portfolio with UI/UX work', 'Authorized to work in the U.S. for internship period'],
+    required_skills: ['Figma', 'Visual communication', 'Interaction design basics'],
+    preferred_skills: ['Prototyping', 'Usability testing', 'Design systems'],
+    recommended_coursework_categories: ['Product Management Fundamentals', 'Data Visualization (Tableau/Power BI)'],
+    pay_min_hourly: 21,
+    pay_max_hourly: 29,
+    hours_per_week_min: 15,
+    hours_per_week_max: 35,
+  },
+  {
+    key: 'sales_intern',
+    label: 'Sales Intern',
+    title: 'Sales Intern',
+    category: 'Sales',
+    experience_level: 'entry',
+    description: 'Support outbound prospecting and pipeline hygiene for the sales team while learning core GTM motions.',
+    responsibilities: ['Research target accounts and contacts', 'Support outbound sequencing and follow-ups', 'Maintain CRM notes and hygiene'],
+    qualifications: ['Pursuing Business, Marketing, Communications, or related degree', 'Authorized to work in the U.S. for internship period'],
+    required_skills: ['Communication', 'CRM hygiene', 'Follow-through'],
+    preferred_skills: ['Outbound prospecting', 'Objection handling', 'Presentation skills'],
+    recommended_coursework_categories: ['Marketing Analytics', 'Product Management Fundamentals'],
+    pay_min_hourly: 18,
+    pay_max_hourly: 25,
+    hours_per_week_min: 15,
+    hours_per_week_max: 30,
+  },
+]
+
+export const INTERNSHIP_TEMPLATE_BY_KEY = new Map(INTERNSHIP_TEMPLATES.map((template) => [template.key, template] as const))

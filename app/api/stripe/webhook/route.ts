@@ -1,6 +1,6 @@
 import Stripe from 'stripe'
 import { getStripeClient } from '@/lib/billing/stripe'
-import { isVerifiedEmployerStatus } from '@/lib/billing/subscriptions'
+import { isVerifiedEmployerStatus, resolveEmployerPlan } from '@/lib/billing/subscriptions'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -52,9 +52,17 @@ async function upsertSubscription(params: {
     throw new Error(error.message)
   }
 
-  if (isVerifiedEmployerStatus(status)) {
-    await supabase.from('employer_profiles').update({ email_alerts_enabled: true }).eq('user_id', userId)
-  }
+  const plan = resolveEmployerPlan({ status, priceId })
+  const employerVerificationTier = isVerifiedEmployerStatus(status) ? plan.id : 'free'
+  await supabase
+    .from('employer_profiles')
+    .update({ email_alerts_enabled: isVerifiedEmployerStatus(status) && plan.emailAlertsEnabled })
+    .eq('user_id', userId)
+
+  await supabase
+    .from('internships')
+    .update({ employer_verification_tier: employerVerificationTier })
+    .eq('employer_id', userId)
 }
 
 async function handleCheckoutSessionCompleted(event: Stripe.Event) {

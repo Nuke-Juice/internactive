@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { normalizeCatalogLabel, normalizeCatalogToken, slugifyCatalogLabel } from '@/lib/catalog/normalization'
 import { supabaseServer } from '@/lib/supabase/server'
 
 export type NormalizeSkillsResult = {
@@ -7,32 +8,19 @@ export type NormalizeSkillsResult = {
   unknown: string[]
 }
 
-function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/['’]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-}
-
-function compact(value: string) {
-  return value.replace(/[^a-z0-9]/g, '')
-}
-
-function normalizeLabel(value: string) {
-  return value.trim().replace(/\s+/g, ' ')
-}
+export const normalizeSkillLabel = normalizeCatalogLabel
+export const normalizeSkillToken = normalizeCatalogToken
+export const slugifySkillLabel = slugifyCatalogLabel
 
 export async function normalizeSkills(input: string[]): Promise<NormalizeSkillsResult> {
-  const cleaned = input.map(normalizeLabel).filter(Boolean)
+  const cleaned = input.map(normalizeSkillLabel).filter(Boolean)
   if (cleaned.length === 0) {
     return { skillIds: [], unknown: [] }
   }
 
   const tokensByInput = cleaned.map((item) => {
-    const slug = slugify(item)
-    const compactToken = compact(item.toLowerCase())
+    const slug = slugifySkillLabel(item)
+    const compactToken = normalizeSkillToken(item)
     const rawToken = item.toLowerCase()
     return {
       original: item,
