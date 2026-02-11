@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import EmployerAccount from '@/components/account/EmployerAccount'
 import StudentAccount from '@/components/account/StudentAccount'
+import ConfirmSignOutButton from '@/components/auth/ConfirmSignOutButton'
 import { ensureUserRole } from '@/lib/auth/ensureUserRole'
 import { buildVerifyRequiredHref } from '@/lib/auth/emailVerification'
 import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
@@ -124,7 +125,29 @@ export default async function AccountPage() {
   }
 
   if (!user.email_confirmed_at) {
-    redirect(buildVerifyRequiredHref('/account', 'signup_continue'))
+    const verifyHref = `${buildVerifyRequiredHref('/account', 'signup_continue')}&email=${encodeURIComponent(user.email ?? '')}`
+    return (
+      <main className="min-h-screen bg-white px-6 py-16">
+        <div className="mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <h1 className="text-2xl font-semibold text-slate-900">Verify your email to continue</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            Your account is signed in but email verification is still required before profile access.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Link
+              href={verifyHref}
+              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Open verification page
+            </Link>
+            <ConfirmSignOutButton
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              confirmMessage="Sign out and return to login?"
+            />
+          </div>
+        </div>
+      </main>
+    )
   }
 
   const { data: userRow } = await supabase
@@ -137,7 +160,29 @@ export default async function AccountPage() {
   const isVerificationComplete = userRow?.verified === true
 
   if (!isVerificationComplete) {
-    redirect(buildVerifyRequiredHref('/account', 'signup_email_verification_pending'))
+    const verifyHref = `${buildVerifyRequiredHref('/account', 'signup_email_verification_pending')}&email=${encodeURIComponent(user.email ?? '')}`
+    return (
+      <main className="min-h-screen bg-white px-6 py-16">
+        <div className="mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <h1 className="text-2xl font-semibold text-slate-900">Verification in progress</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            Your email is confirmed but final verification is still processing for this account.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Link
+              href={verifyHref}
+              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Open verification page
+            </Link>
+            <ConfirmSignOutButton
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              confirmMessage="Sign out and return to login?"
+            />
+          </div>
+        </div>
+      </main>
+    )
   }
 
   if (role && isAdminRole(role)) {
