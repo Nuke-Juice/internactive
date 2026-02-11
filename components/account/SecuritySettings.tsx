@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { supabaseBrowser } from '@/lib/supabase/client'
+import PressRevealPasswordField from '@/components/forms/PressRevealPasswordField'
 
 type Props = {
   email: string
@@ -18,6 +19,7 @@ function getPasswordError(password: string) {
 export default function SecuritySettings({ email }: Props) {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [revealingPasswords, setRevealingPasswords] = useState(false)
   const [updatingPassword, setUpdatingPassword] = useState(false)
   const [deletingAccount, setDeletingAccount] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
@@ -80,22 +82,24 @@ export default function SecuritySettings({ email }: Props) {
         <div className="mt-4 grid gap-4 sm:max-w-md">
           <div>
             <label className="text-sm font-medium text-slate-700">New password</label>
-            <input
-              type="password"
+            <PressRevealPasswordField
               className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="At least 8 characters"
+              revealed={revealingPasswords}
+              onRevealChange={setRevealingPasswords}
             />
           </div>
           <div>
             <label className="text-sm font-medium text-slate-700">Confirm new password</label>
-            <input
-              type="password"
+            <PressRevealPasswordField
               className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               placeholder="Re-enter password"
+              revealed={revealingPasswords}
+              onRevealChange={setRevealingPasswords}
             />
           </div>
 

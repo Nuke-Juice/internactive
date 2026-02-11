@@ -165,6 +165,9 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
       <p className="mt-2 text-sm text-slate-600">
         This page will unlock automatically after you click the verification link.
       </p>
+      <p className="mt-1 text-xs text-slate-500">
+        If you do not see it in your inbox, check your junk or spam folder.
+      </p>
 
       <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
         <li>Applying to internships</li>
@@ -191,7 +194,14 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
           {refreshing ? 'Refreshing...' : 'I verified, refresh'}
         </button>
       </form>
-      {checking ? <p className="mt-3 text-xs text-slate-500">Checking verification status...</p> : null}
+      <p className="mt-3 text-xs text-slate-500" aria-live="polite">
+        Checking verification status
+        <span className="inline-flex w-4 items-end justify-start">
+          <span className="animate-pulse [animation-delay:0ms]">.</span>
+          <span className="animate-pulse [animation-delay:150ms]">.</span>
+          <span className="animate-pulse [animation-delay:300ms]">.</span>
+        </span>
+      </p>
 
       {state.message ? (
         <div

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
+import PressRevealPasswordField from '@/components/forms/PressRevealPasswordField'
 
 function getPasswordError(password: string) {
   if (password.length < 8) return 'Password must be at least 8 characters.'
@@ -18,6 +19,7 @@ export default function ResetPasswordPage() {
   const searchParams = useSearchParams()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [revealingPasswords, setRevealingPasswords] = useState(false)
   const [loading, setLoading] = useState(false)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -91,20 +93,22 @@ export default function ResetPasswordPage() {
             <>
               <div>
                 <label className="text-sm font-medium text-slate-700">New password</label>
-                <input
-                  type="password"
+                <PressRevealPasswordField
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                  revealed={revealingPasswords}
+                  onRevealChange={setRevealingPasswords}
                 />
               </div>
               <div className="mt-3">
                 <label className="text-sm font-medium text-slate-700">Confirm new password</label>
-                <input
-                  type="password"
+                <PressRevealPasswordField
                   value={confirmPassword}
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900"
+                  revealed={revealingPasswords}
+                  onRevealChange={setRevealingPasswords}
                 />
               </div>
 

@@ -7,6 +7,7 @@ import { ArrowLeft } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import TurnstileWidget from '@/components/security/TurnstileWidget'
 import OAuthButtons from '@/components/auth/OAuthButtons'
+import PressRevealPasswordField from '@/components/forms/PressRevealPasswordField'
 import { resolveClientAppOrigin } from '@/lib/url/origin'
 
 const FIELD =
@@ -27,6 +28,7 @@ export default function EmployerSignupPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [revealingPasswords, setRevealingPasswords] = useState(false)
   const [turnstileToken, setTurnstileToken] = useState('')
   const [turnstileKey, setTurnstileKey] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -48,7 +50,6 @@ export default function EmployerSignupPage() {
     return trimmed
   }, [searchParams])
   const verifyNextPath = requestedNextPath ?? roleStep2Path
-  const verifyRequiredPath = `/verify-required?next=${encodeURIComponent(verifyNextPath)}&action=signup_profile_completion`
 
   async function createAccount() {
     setError(null)
@@ -122,8 +123,9 @@ export default function EmployerSignupPage() {
       return setError('Signup succeeded but no user was returned.')
     }
 
+    const normalizedEmail = email.trim().toLowerCase()
+    const verifyRequiredPath = `/verify-required?next=${encodeURIComponent(verifyNextPath)}&action=signup_profile_completion&email=${encodeURIComponent(normalizedEmail)}`
     setLoading(false)
-    setSuccess('Verification email sent. Verify your email before continuing to profile details.')
     window.location.href = verifyRequiredPath
   }
 
@@ -167,23 +169,25 @@ export default function EmployerSignupPage() {
 
             <div>
               <label className="text-sm font-medium text-slate-700">Password</label>
-              <input
-                type="password"
+              <PressRevealPasswordField
                 className={FIELD}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="At least 8 characters"
+                revealed={revealingPasswords}
+                onRevealChange={setRevealingPasswords}
               />
             </div>
 
             <div>
               <label className="text-sm font-medium text-slate-700">Confirm password</label>
-              <input
-                type="password"
+              <PressRevealPasswordField
                 className={FIELD}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Re-enter password"
+                revealed={revealingPasswords}
+                onRevealChange={setRevealingPasswords}
               />
             </div>
           </div>

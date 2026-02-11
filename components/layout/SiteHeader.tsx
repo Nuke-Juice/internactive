@@ -48,7 +48,6 @@ export default function SiteHeader({ isAuthenticated, role, email, isEmailVerifi
   const pathname = usePathname()
   const router = useRouter()
   const [showEmployerModal, setShowEmployerModal] = useState(false)
-  const [pendingEmployerPath, setPendingEmployerPath] = useState('/dashboard/employer')
   const [signingOut, setSigningOut] = useState(false)
   const [resendingVerification, setResendingVerification] = useState(false)
   const [resendCooldown, setResendCooldown] = useState(0)
@@ -80,7 +79,6 @@ export default function SiteHeader({ isAuthenticated, role, email, isEmailVerifi
 
   function handleEmployerTarget(path: string) {
     if (isAuthenticated && role === 'student') {
-      setPendingEmployerPath(path)
       setShowEmployerModal(true)
       return
     }
@@ -90,11 +88,18 @@ export default function SiteHeader({ isAuthenticated, role, email, isEmailVerifi
   async function signOutToContinue() {
     setSigningOut(true)
     const supabase = supabaseBrowser()
-    await supabase.auth.signOut()
+    const { error: signOutError } = await supabase.auth.signOut()
     setSigningOut(false)
+    if (signOutError) {
+      showToast({
+        kind: 'error',
+        message: signOutError.message || 'Could not sign out. Please try again.',
+        key: `sign-out-error:${signOutError.message ?? 'unknown'}`,
+      })
+      return
+    }
     setShowEmployerModal(false)
-    router.push(`${pendingEmployerPath}?intent=employer`)
-    router.refresh()
+    window.location.href = '/signup/employer?intent=employer'
   }
 
   async function resendVerification(nextPath: string) {
@@ -242,7 +247,9 @@ export default function SiteHeader({ isAuthenticated, role, email, isEmailVerifi
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
             <h2 className="text-lg font-semibold text-slate-900">You&rsquo;re signed in as a student</h2>
-            <p className="mt-2 text-sm text-slate-600">Continue as employer?</p>
+            <p className="mt-2 text-sm text-slate-600">
+              Employer tools require an employer account. Sign out first, then continue.
+            </p>
             <div className="mt-5 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -251,14 +258,6 @@ export default function SiteHeader({ isAuthenticated, role, email, isEmailVerifi
                 className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
               >
                 {signingOut ? 'Signing out...' : 'Sign out to continue'}
-              </button>
-              <button
-                type="button"
-                disabled
-                title="Direct role switching is not supported yet."
-                className="cursor-not-allowed rounded-md border border-slate-300 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-500"
-              >
-                Continue (Coming soon)
               </button>
               <button
                 type="button"

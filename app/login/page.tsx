@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import { normalizeNextPath, resolvePostAuthRedirect } from '@/lib/auth/postAuthRedirect'
 import { supabaseServer } from '@/lib/supabase/server'
 import OAuthButtons from '@/components/auth/OAuthButtons'
+import PressRevealPasswordField from '@/components/forms/PressRevealPasswordField'
 
 function getErrorMessage(message: string) {
   const normalized = message.toLowerCase()
@@ -89,8 +90,7 @@ export default async function LoginPage({
 
           <div>
             <label className="text-sm font-medium text-slate-700">Password</label>
-            <input
-              type="password"
+            <PressRevealPasswordField
               name="password"
               className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm font-medium text-slate-900 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
               placeholder="********"

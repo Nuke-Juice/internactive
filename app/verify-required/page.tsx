@@ -8,6 +8,7 @@ import { resendVerificationEmailAction } from '@/lib/auth/emailVerificationServe
 type SearchParams = Promise<{
   next?: string
   action?: string
+  email?: string
 }>
 
 function normalizeNext(value: string | undefined) {
@@ -17,10 +18,19 @@ function normalizeNext(value: string | undefined) {
   return next
 }
 
+function normalizeEmailHint(value: string | undefined) {
+  const email = (value ?? '').trim().toLowerCase()
+  if (!email) return null
+  if (email.length > 254) return null
+  if (!email.includes('@')) return null
+  return email
+}
+
 export default async function VerifyRequiredPage({ searchParams }: { searchParams?: SearchParams }) {
   const resolved = searchParams ? await searchParams : undefined
   const nextUrl = normalizeNext(resolved?.next)
   const actionName = (resolved?.action ?? 'protected_action').trim() || 'protected_action'
+  const hintedEmail = normalizeEmailHint(resolved?.email)
 
   const supabase = await supabaseServer()
   const {
@@ -28,7 +38,49 @@ export default async function VerifyRequiredPage({ searchParams }: { searchParam
   } = await supabase.auth.getUser()
 
   if (!user) {
-    redirect('/login')
+    if (!hintedEmail) {
+      redirect('/login')
+    }
+
+    return (
+      <main className="min-h-screen bg-slate-50 px-6 py-12">
+        <section className="mx-auto max-w-2xl space-y-4">
+          <Link
+            href="/login"
+            aria-label="Go back"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h1 className="text-2xl font-semibold text-slate-900">Verify your email to continue</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              We sent a confirmation email to <strong>{hintedEmail}</strong>.
+            </p>
+            <p className="mt-2 text-sm text-slate-600">
+              If you entered the wrong address, create a new account with the correct email.
+            </p>
+            <p className="mt-2 text-sm text-slate-600">
+              If you used the correct email, open the verification link from your inbox and continue.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Link
+                href="/signup/student"
+                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Use different email
+              </Link>
+              <Link
+                href="/login"
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Go to login
+              </Link>
+            </div>
+          </div>
+        </section>
+      </main>
+    )
   }
 
   const { data: usersRow } = await supabase
