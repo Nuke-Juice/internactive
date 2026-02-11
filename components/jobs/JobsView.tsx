@@ -37,6 +37,7 @@ export type JobsQuery = {
   state?: string
   loc?: string
   radius?: string
+  page?: string
 }
 
 type JobsViewProps = {
@@ -330,6 +331,8 @@ export default async function JobsView({
   const locationCity = (resolvedSearchParams.city ?? legacyLocation.city ?? '').trim()
   const locationState = normalizeStateCode(resolvedSearchParams.state ?? legacyLocation.state ?? '')
   const radius = resolvedSearchParams.radius ?? ''
+  const parsedPage = Number.parseInt((resolvedSearchParams.page ?? '1').trim(), 10)
+  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
   const parsedPayMin = payMin ? Number(payMin) : null
 
   const supabase = await supabaseServer()
@@ -337,7 +340,20 @@ export default async function JobsView({
     data: { user },
   } = await supabase.auth.getUser()
 
-  const internships = await fetchInternships()
+  const internshipsResult = await fetchInternships({
+    page,
+    limit: 60,
+    filters: {
+      searchQuery,
+      category: activeCategory,
+      remoteOnly,
+      experience: selectedExperience,
+      locationCity,
+      locationState,
+    },
+  })
+  const internships = internshipsResult.rows
+  const hasMoreResults = internshipsResult.hasMore
   const newestInternships = internships.slice(0, 6)
   const filters: JobsFilterState = {
     searchQuery,
@@ -668,6 +684,22 @@ export default async function JobsView({
   if (locationState) preservedQueryParams.set('state', locationState)
   if (radius) preservedQueryParams.set('radius', radius)
 
+  const previousPageHref = (() => {
+    const params = new URLSearchParams(preservedQueryParams)
+    if (activeSortMode === 'best_match') params.set('sort', 'best_match')
+    if (activeSortMode === 'newest') params.set('sort', 'newest')
+    const previousPage = Math.max(1, page - 1)
+    if (previousPage > 1) params.set('page', String(previousPage))
+    return withSearchParams(basePath, params, anchorId)
+  })()
+  const nextPageHref = (() => {
+    const params = new URLSearchParams(preservedQueryParams)
+    if (activeSortMode === 'best_match') params.set('sort', 'best_match')
+    if (activeSortMode === 'newest') params.set('sort', 'newest')
+    params.set('page', String(page + 1))
+    return withSearchParams(basePath, params, anchorId)
+  })()
+
   const clearSuggestedFiltersHref = (() => {
     if (suggestedNoResultFilters.length === 0) return withSearchParams(basePath, preservedQueryParams, anchorId)
     const params = new URLSearchParams(preservedQueryParams)
@@ -834,6 +866,21 @@ export default async function JobsView({
               </div>
             ) : null}
             <div className="mt-1">{filteredInternships.length} results</div>
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <Link
+                href={previousPageHref}
+                className={`inline-flex items-center rounded-md border px-2.5 py-1 ${page <= 1 ? 'pointer-events-none border-slate-200 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+              >
+                Prev
+              </Link>
+              <span className="text-xs text-slate-500">Page {page}</span>
+              <Link
+                href={nextPageHref}
+                className={`inline-flex items-center rounded-md border px-2.5 py-1 ${!hasMoreResults ? 'pointer-events-none border-slate-200 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+              >
+                Next
+              </Link>
+            </div>
           </div>
         </div>
 

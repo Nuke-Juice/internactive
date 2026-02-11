@@ -6,6 +6,7 @@ import { supabaseServer } from '@/lib/supabase/server'
 import { resendVerificationEmailAction } from '@/lib/auth/emailVerificationServer'
 import { normalizeNextPathOrDefault } from '@/lib/auth/nextPath'
 import { normalizeAuthError } from '@/lib/auth/normalizeAuthError'
+import { maskEmail } from '@/lib/auth/maskEmail'
 
 type SearchParams = Promise<{
   next?: string
@@ -26,6 +27,7 @@ export default async function VerifyRequiredPage({ searchParams }: { searchParam
   const nextUrl = normalizeNextPathOrDefault(resolved?.next)
   const actionName = (resolved?.action ?? 'protected_action').trim() || 'protected_action'
   const hintedEmail = normalizeEmailHint(resolved?.email)
+  const maskedHintedEmail = hintedEmail ? maskEmail(hintedEmail) : null
 
   const supabase = await supabaseServer()
   const {
@@ -33,7 +35,7 @@ export default async function VerifyRequiredPage({ searchParams }: { searchParam
   } = await supabase.auth.getUser()
 
   if (!user) {
-    if (!hintedEmail) {
+    if (!maskedHintedEmail) {
       redirect('/login')
     }
 
@@ -50,7 +52,7 @@ export default async function VerifyRequiredPage({ searchParams }: { searchParam
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h1 className="text-2xl font-semibold text-slate-900">Verify your email to continue</h1>
             <p className="mt-2 text-sm text-slate-600">
-              We sent a confirmation email to <strong>{hintedEmail}</strong>.
+              We sent a confirmation email to <strong>{maskedHintedEmail}</strong>.
             </p>
             <p className="mt-2 text-sm text-slate-600">
               If you entered the wrong address, create a new account with the correct email.

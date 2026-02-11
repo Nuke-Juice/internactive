@@ -43,12 +43,16 @@ export default function EmployerStep2({
 
       <div>
         <label className="text-sm font-medium text-slate-700">Typical internship duration</label>
-        <input
-          className={fieldClassName}
-          value={typicalDuration}
-          onChange={(e) => onTypicalDurationChange(e.target.value)}
-          placeholder="e.g., 10-12 weeks"
-        />
+        <select className={fieldClassName} value={typicalDuration} onChange={(e) => onTypicalDurationChange(e.target.value)}>
+          <option value="">Select duration</option>
+          <option value="8 Weeks">8 Weeks</option>
+          <option value="10 Weeks">10 Weeks</option>
+          <option value="12 Weeks">12 Weeks</option>
+          <option value="14 Weeks">14 Weeks</option>
+          <option value="16 Weeks">16 Weeks</option>
+          <option value="Semester-long">Semester-long</option>
+          <option value="Flexible">Flexible</option>
+        </select>
       </div>
 
       <div className="sm:col-span-2">

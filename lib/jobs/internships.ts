@@ -110,18 +110,67 @@ const INTERNSHIP_SELECT_BASE =
 const INTERNSHIP_SELECT_LEGACY =
   'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, description, experience_level, role_category, category, work_mode, term, hours_min, hours_max, required_skills, preferred_skills, recommended_coursework, target_graduation_years, resume_required, application_deadline, apply_deadline, majors, hours_per_week, pay, created_at, is_active, source'
 
-export async function fetchInternships(options?: { limit?: number }) {
+type InternshipFilters = {
+  searchQuery?: string
+  category?: string
+  remoteOnly?: boolean
+  experience?: string
+  locationCity?: string
+  locationState?: string
+}
+
+type FetchInternshipsOptions = {
+  limit?: number
+  page?: number
+  filters?: InternshipFilters
+}
+
+function escapeIlikeInput(value: string) {
+  return value.replace(/[%_]/g, '').trim()
+}
+
+export async function fetchInternships(options?: FetchInternshipsOptions) {
   const supabase = await supabaseServer()
   const today = new Date().toISOString().slice(0, 10)
+  const rawLimit = Number(options?.limit ?? 60)
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 120) : 60
+  const rawPage = Number(options?.page ?? 1)
+  const page = Number.isFinite(rawPage) ? Math.max(Math.trunc(rawPage), 1) : 1
+  const start = (page - 1) * limit
+  const end = start + limit
+  const filters = options?.filters
+
   let query = supabase
     .from('internships')
     .select(INTERNSHIP_SELECT)
     .eq('is_active', true)
     .or(`application_deadline.is.null,application_deadline.gte.${today}`)
     .order('created_at', { ascending: false })
+    .range(start, end)
 
-  if (options?.limit) {
-    query = query.limit(options.limit)
+  const searchQuery = escapeIlikeInput(filters?.searchQuery ?? '')
+  if (searchQuery.length >= 2) {
+    const prefix = `${searchQuery}%`
+    query = query.or(
+      `title.ilike.${prefix},company_name.ilike.${prefix},category.ilike.${prefix},role_category.ilike.${prefix}`
+    )
+  }
+  if (filters?.category?.trim()) {
+    const normalizedCategory = filters.category.trim()
+    query = query.or(`category.eq.${normalizedCategory},role_category.eq.${normalizedCategory}`)
+  }
+  if (filters?.remoteOnly) {
+    query = query.eq('work_mode', 'remote')
+  }
+  if (filters?.experience?.trim()) {
+    query = query.eq('experience_level', filters.experience.trim())
+  }
+  if (filters?.locationState?.trim()) {
+    query = query.eq('location_state', filters.locationState.trim())
+  }
+  const locationCity = escapeIlikeInput(filters?.locationCity ?? '')
+  if (locationCity.length >= 2) {
+    query = query.ilike('location_city', `${locationCity}%`)
   }
 
   const { data, error } = await query
@@ -138,9 +187,29 @@ export async function fetchInternships(options?: { limit?: number }) {
       .eq('is_active', true)
       .or(`application_deadline.is.null,application_deadline.gte.${today}`)
       .order('created_at', { ascending: false })
+      .range(start, end)
 
-    if (options?.limit) {
-      fallbackQuery = fallbackQuery.limit(options.limit)
+    if (searchQuery.length >= 2) {
+      const prefix = `${searchQuery}%`
+      fallbackQuery = fallbackQuery.or(
+        `title.ilike.${prefix},company_name.ilike.${prefix},category.ilike.${prefix},role_category.ilike.${prefix}`
+      )
+    }
+    if (filters?.category?.trim()) {
+      const normalizedCategory = filters.category.trim()
+      fallbackQuery = fallbackQuery.or(`category.eq.${normalizedCategory},role_category.eq.${normalizedCategory}`)
+    }
+    if (filters?.remoteOnly) {
+      fallbackQuery = fallbackQuery.eq('work_mode', 'remote')
+    }
+    if (filters?.experience?.trim()) {
+      fallbackQuery = fallbackQuery.eq('experience_level', filters.experience.trim())
+    }
+    if (filters?.locationState?.trim()) {
+      fallbackQuery = fallbackQuery.eq('location_state', filters.locationState.trim())
+    }
+    if (locationCity.length >= 2) {
+      fallbackQuery = fallbackQuery.ilike('location_city', `${locationCity}%`)
     }
 
     const { data: fallbackData, error: fallbackError } = await fallbackQuery
@@ -149,7 +218,7 @@ export async function fetchInternships(options?: { limit?: number }) {
 
       const missingColumn = fallbackError.message.toLowerCase().includes('does not exist')
       if (!missingColumn) {
-        return []
+        return { rows: [], hasMore: false }
       }
 
       let legacyQuery = supabase
@@ -158,22 +227,42 @@ export async function fetchInternships(options?: { limit?: number }) {
         .eq('is_active', true)
         .or(`application_deadline.is.null,application_deadline.gte.${today}`)
         .order('created_at', { ascending: false })
+        .range(start, end)
 
-      if (options?.limit) {
-        legacyQuery = legacyQuery.limit(options.limit)
+      if (searchQuery.length >= 2) {
+        const prefix = `${searchQuery}%`
+        legacyQuery = legacyQuery.or(
+          `title.ilike.${prefix},company_name.ilike.${prefix},category.ilike.${prefix},role_category.ilike.${prefix}`
+        )
+      }
+      if (filters?.category?.trim()) {
+        const normalizedCategory = filters.category.trim()
+        legacyQuery = legacyQuery.or(`category.eq.${normalizedCategory},role_category.eq.${normalizedCategory}`)
+      }
+      if (filters?.remoteOnly) {
+        legacyQuery = legacyQuery.eq('work_mode', 'remote')
+      }
+      if (filters?.experience?.trim()) {
+        legacyQuery = legacyQuery.eq('experience_level', filters.experience.trim())
+      }
+      if (filters?.locationState?.trim()) {
+        legacyQuery = legacyQuery.eq('location_state', filters.locationState.trim())
+      }
+      if (locationCity.length >= 2) {
+        legacyQuery = legacyQuery.ilike('location_city', `${locationCity}%`)
       }
 
       const { data: legacyData, error: legacyError } = await legacyQuery
       if (legacyError) {
         console.error('[jobs] fetchInternships legacy query failed', legacyError.message)
-        return []
+        return { rows: [], hasMore: false }
       }
 
       rows =
         (legacyData ?? []) as unknown as Array<
           Omit<Internship, 'required_skill_ids' | 'preferred_skill_ids' | 'coursework_item_ids' | 'coursework_category_ids' | 'coursework_category_names'>
         >
-      return rows.map((row) => ({
+      const mappedRows = rows.map((row) => ({
         ...row,
         short_summary: row.short_summary ?? null,
         remote_eligibility: row.remote_eligibility ?? null,
@@ -197,6 +286,10 @@ export async function fetchInternships(options?: { limit?: number }) {
           })
           .filter((item): item is string => typeof item === 'string' && item.length > 0),
       }))
+      return {
+        rows: mappedRows.slice(0, limit),
+        hasMore: mappedRows.length > limit,
+      }
     }
 
     rows =
@@ -205,7 +298,7 @@ export async function fetchInternships(options?: { limit?: number }) {
       >
   }
 
-  return rows.map((row) => ({
+  const mappedRows = rows.map((row) => ({
     ...row,
     short_summary: row.short_summary ?? null,
     remote_eligibility: row.remote_eligibility ?? null,
@@ -229,6 +322,11 @@ export async function fetchInternships(options?: { limit?: number }) {
       })
       .filter((item): item is string => typeof item === 'string' && item.length > 0),
   }))
+
+  return {
+    rows: mappedRows.slice(0, limit),
+    hasMore: mappedRows.length > limit,
+  }
 }
 
 export function formatMajors(value: Internship['majors']) {

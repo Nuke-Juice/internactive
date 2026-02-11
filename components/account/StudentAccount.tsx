@@ -258,6 +258,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   const [canonicalSkillOptions, setCanonicalSkillOptions] = useState<string[]>([])
   const [canonicalCourseworkOptions, setCanonicalCourseworkOptions] = useState<string[]>([])
   const [canonicalCourseworkCategoryOptions, setCanonicalCourseworkCategoryOptions] = useState<string[]>([])
+  const [catalogOptionsLoaded, setCatalogOptionsLoaded] = useState(false)
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>(
     normalizeExperienceLevel(initialProfile?.experience_level)
   )
@@ -405,39 +406,13 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       setLoading(true)
       const { data, error: loadError } = await supabase
         .from('student_profiles')
-        .select('*')
+        .select(
+          'user_id, university_id, school, major_id, major:canonical_majors(id, slug, name), majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week, interests, preferences, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, exact_address_line1'
+        )
         .eq('user_id', userId)
         .maybeSingle()
 
       if (loadError || !data) {
-        const [{ data: skillCatalogRows }, { data: courseworkCatalogRows }, { data: courseworkCategoryRows }, { data: majorCatalogRows }] =
-          await Promise.all([
-            supabase.from('skills').select('label').order('label', { ascending: true }).limit(1200),
-            supabase.from('coursework_items').select('name').order('name', { ascending: true }).limit(1200),
-            supabase.from('coursework_categories').select('name').order('name', { ascending: true }).limit(500),
-            supabase.from('canonical_majors').select('id, slug, name').order('name', { ascending: true }).limit(500),
-          ])
-        setCanonicalSkillOptions(
-          (skillCatalogRows ?? [])
-            .map((item) => (typeof item.label === 'string' ? item.label.trim() : ''))
-            .filter(Boolean)
-        )
-        setCanonicalCourseworkOptions(
-          (courseworkCatalogRows ?? [])
-            .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
-            .filter(Boolean)
-        )
-        setCanonicalCourseworkCategoryOptions(
-          (courseworkCategoryRows ?? [])
-            .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
-            .filter(Boolean)
-        )
-        setMajorCatalog(
-          (majorCatalogRows ?? []).filter(
-            (item): item is CanonicalMajor =>
-              typeof item.id === 'string' && typeof item.slug === 'string' && typeof item.name === 'string'
-          )
-        )
         setLoading(false)
         setIsProfileLoaded(true)
         return
@@ -457,10 +432,6 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
         { data: canonicalSkillRows },
         { data: canonicalCourseworkRows },
         { data: canonicalCourseworkCategoryRows },
-        { data: skillCatalogRows },
-        { data: courseworkCatalogRows },
-        { data: courseworkCategoryRows },
-        { data: majorCatalogRows },
       ] =
         await Promise.all([
           supabase
@@ -475,10 +446,6 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
             .from('student_coursework_category_links')
             .select('category_id, category:coursework_categories(name)')
             .eq('student_id', userId),
-          supabase.from('skills').select('label').order('label', { ascending: true }).limit(1200),
-          supabase.from('coursework_items').select('name').order('name', { ascending: true }).limit(1200),
-          supabase.from('coursework_categories').select('name').order('name', { ascending: true }).limit(500),
-          supabase.from('canonical_majors').select('id, slug, name').order('name', { ascending: true }).limit(500),
         ])
       const { data: authData } = await supabase.auth.getUser()
       const authUser = authData.user
@@ -525,34 +492,6 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
           return typeof categoryItem?.name === 'string' ? categoryItem.name.trim() : ''
         })
         .filter(Boolean)
-      setCanonicalSkillOptions(
-        (skillCatalogRows ?? [])
-          .map((item) => (typeof item.label === 'string' ? item.label.trim() : ''))
-          .filter(Boolean)
-      )
-      setCanonicalCourseworkOptions(
-        (courseworkCatalogRows ?? [])
-          .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
-          .filter(Boolean)
-      )
-      setCanonicalCourseworkCategoryOptions(
-        (courseworkCategoryRows ?? [])
-          .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
-          .filter(Boolean)
-      )
-      const majorsCatalog = (majorCatalogRows ?? []).filter(
-        (item): item is CanonicalMajor =>
-          typeof item.id === 'string' && typeof item.slug === 'string' && typeof item.name === 'string'
-      )
-      setMajorCatalog(majorsCatalog)
-      if (!dbMajorId && dbMajor) {
-        const matchedByName = majorsCatalog.find((item) => item.name.toLowerCase() === dbMajor.toLowerCase())
-        if (matchedByName) {
-          setSelectedMajorId(matchedByName.id)
-          setMajor(matchedByName.name)
-          setMajorQuery(matchedByName.name)
-        }
-      }
       setCoursework(canonicalCourseworkLabels.length > 0 ? canonicalCourseworkLabels : dbCoursework)
       setCourseworkCategories(canonicalCourseworkCategoryLabels)
       setSkills(canonicalSkillLabels.length > 0 ? canonicalSkillLabels : (parsedPreferences?.skills ?? []))
@@ -638,6 +577,58 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
 
     void loadLatestProfile()
   }, [userId])
+
+  useEffect(() => {
+    if (mode !== 'edit' || catalogOptionsLoaded) return
+    const supabase = supabaseBrowser()
+    let cancelled = false
+
+    ;(async () => {
+      const [{ data: skillCatalogRows }, { data: courseworkCatalogRows }, { data: courseworkCategoryRows }, { data: majorCatalogRows }] =
+        await Promise.all([
+          supabase.from('skills').select('label').order('label', { ascending: true }).limit(1200),
+          supabase.from('coursework_items').select('name').order('name', { ascending: true }).limit(1200),
+          supabase.from('coursework_categories').select('name').order('name', { ascending: true }).limit(500),
+          supabase.from('canonical_majors').select('id, slug, name').order('name', { ascending: true }).limit(500),
+        ])
+      if (cancelled) return
+      setCanonicalSkillOptions(
+        (skillCatalogRows ?? [])
+          .map((item) => (typeof item.label === 'string' ? item.label.trim() : ''))
+          .filter(Boolean)
+      )
+      setCanonicalCourseworkOptions(
+        (courseworkCatalogRows ?? [])
+          .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
+          .filter(Boolean)
+      )
+      setCanonicalCourseworkCategoryOptions(
+        (courseworkCategoryRows ?? [])
+          .map((item) => (typeof item.name === 'string' ? item.name.trim() : ''))
+          .filter(Boolean)
+      )
+      setMajorCatalog(
+        (majorCatalogRows ?? []).filter(
+          (item): item is CanonicalMajor =>
+            typeof item.id === 'string' && typeof item.slug === 'string' && typeof item.name === 'string'
+        )
+      )
+      setCatalogOptionsLoaded(true)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [catalogOptionsLoaded, mode])
+
+  useEffect(() => {
+    if (selectedMajorId || !major.trim() || majorCatalog.length === 0) return
+    const matchedByName = majorCatalog.find((item) => item.name.toLowerCase() === major.trim().toLowerCase())
+    if (!matchedByName) return
+    setSelectedMajorId(matchedByName.id)
+    setMajor(matchedByName.name)
+    setMajorQuery(matchedByName.name)
+  }, [major, majorCatalog, selectedMajorId])
 
   useEffect(() => {
     return () => {

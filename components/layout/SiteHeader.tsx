@@ -131,7 +131,7 @@ export default function SiteHeader({
   useEffect(() => {
     let cancelled = false
     const query = menuSearchQuery.trim()
-    if (!query) {
+    if (!query || query.length < 2) {
       setSearchSuggestions([])
       setSearchSuggestionsLoading(false)
       return
@@ -142,7 +142,7 @@ export default function SiteHeader({
       const supabase = supabaseBrowser()
       try {
         const normalizedQuery = query.replace(/[%_]/g, '')
-        if (!normalizedQuery) {
+        if (!normalizedQuery || normalizedQuery.length < 2) {
           if (!cancelled) {
             setSearchSuggestions([])
             setSearchSuggestionsLoading(false)
@@ -162,31 +162,70 @@ export default function SiteHeader({
           return Array.from(dedup.values()).slice(0, 8)
         }
 
+        const prefixQuery = `${normalizedQuery}%`
         const [{ data: internshipRows }, { data: employerRows }] = await Promise.all([
           supabase
             .from('internships')
             .select('id, title')
             .eq('is_active', true)
-            .ilike('title', `%${normalizedQuery}%`)
+            .ilike('title', prefixQuery)
             .limit(5),
           supabase
             .from('employer_public_profiles')
             .select('employer_id, company_name')
-            .ilike('company_name', `%${normalizedQuery}%`)
+            .ilike('company_name', prefixQuery)
+            .limit(8),
+        ])
+
+        const baseResults = makeRows([
+          ...(internshipRows ?? [])
+            .filter((row): row is { id: string; title: string | null } => typeof row.id === 'string')
+            .map((row) => ({
+              value: row.title ?? '',
+              kind: 'internship' as const,
+              href: `/jobs/${encodeURIComponent(row.id)}`,
+            })),
+          ...(employerRows ?? [])
+            .filter((row): row is { employer_id: string; company_name: string | null } => typeof row.employer_id === 'string')
+            .map((row) => ({
+              value: row.company_name ?? '',
+              kind: 'employer' as const,
+              href: `/employers/${encodeURIComponent(row.employer_id)}`,
+            })),
+        ])
+
+        if (cancelled) return
+        if (baseResults.length >= 4) {
+          setSearchSuggestions(baseResults)
+          return
+        }
+
+        const containsQuery = `%${normalizedQuery}%`
+        const [{ data: internshipContainsRows }, { data: employerContainsRows }] = await Promise.all([
+          supabase
+            .from('internships')
+            .select('id, title')
+            .eq('is_active', true)
+            .ilike('title', containsQuery)
+            .limit(5),
+          supabase
+            .from('employer_public_profiles')
+            .select('employer_id, company_name')
+            .ilike('company_name', containsQuery)
             .limit(8),
         ])
 
         if (cancelled) return
         setSearchSuggestions(
           makeRows([
-            ...(internshipRows ?? [])
+            ...(internshipContainsRows ?? [])
               .filter((row): row is { id: string; title: string | null } => typeof row.id === 'string')
               .map((row) => ({
                 value: row.title ?? '',
                 kind: 'internship' as const,
                 href: `/jobs/${encodeURIComponent(row.id)}`,
               })),
-            ...(employerRows ?? [])
+            ...(employerContainsRows ?? [])
               .filter((row): row is { employer_id: string; company_name: string | null } => typeof row.employer_id === 'string')
               .map((row) => ({
                 value: row.company_name ?? '',
@@ -204,7 +243,7 @@ export default function SiteHeader({
           setSearchSuggestionsLoading(false)
         }
       }
-    }, 150)
+    }, 350)
 
     return () => {
       cancelled = true
@@ -328,7 +367,7 @@ export default function SiteHeader({
                     aria-label="Search"
                     className="h-9 w-72 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   />
-                  {searchSuggestionsOpen && menuSearchQuery.trim().length > 0 ? (
+                  {searchSuggestionsOpen && menuSearchQuery.trim().length >= 2 ? (
                     <div className="absolute left-0 z-30 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
                       {searchSuggestionsLoading ? (
                         <div className="px-3 py-2 text-sm text-slate-500">Searching...</div>
@@ -408,11 +447,13 @@ export default function SiteHeader({
                     title="Profile"
                   >
                     {headerAvatarUrl ? (
-                      <img
+                      <Image
                         src={headerAvatarUrl}
                         alt="Profile"
+                        width={28}
+                        height={28}
                         className="h-7 w-7 rounded-full object-cover"
-                        referrerPolicy="no-referrer"
+                        unoptimized
                       />
                     ) : (
                       <User className="h-5 w-5" />

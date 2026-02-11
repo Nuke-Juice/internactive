@@ -2,10 +2,12 @@
 
 import { useRef, useState } from 'react'
 import Link from 'next/link'
-import { Cog, Pencil } from 'lucide-react'
+import Image from 'next/image'
+import { Pencil } from 'lucide-react'
 import { useToast } from '@/components/feedback/ToastProvider'
 import EmployerVerificationBadge from '@/components/badges/EmployerVerificationBadge'
 import ConfirmSignOutButton from '@/components/auth/ConfirmSignOutButton'
+import SecuritySettings from '@/components/account/SecuritySettings'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import type { EmployerPlanId } from '@/lib/billing/plan'
 
@@ -370,7 +372,7 @@ export default function EmployerAccount({
                   : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
               }`}
             >
-              Account settings
+              Settings
             </button>
           </div>
           <Link
@@ -387,8 +389,7 @@ export default function EmployerAccount({
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="relative h-40 w-full overflow-hidden rounded-t-2xl border-b border-slate-200 bg-slate-100">
             {headerImageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={headerImageUrl} alt="Company header" className="h-full w-full object-cover" />
+              <Image src={headerImageUrl} alt="Company header" width={1200} height={320} className="h-full w-full object-cover" unoptimized />
             ) : (
               <div className="h-full w-full bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100" />
             )}
@@ -407,8 +408,7 @@ export default function EmployerAccount({
             <div className="flex flex-wrap items-start gap-4">
               <div className="h-16 w-16 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
                 {avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={avatarUrl} alt="Employer logo" className="h-full w-full object-cover" />
+                  <Image src={avatarUrl} alt="Employer logo" width={64} height={64} className="h-full w-full object-cover" unoptimized />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-xs font-medium text-slate-500">Logo</div>
                 )}
@@ -489,8 +489,8 @@ export default function EmployerAccount({
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">Account settings</h2>
-                <p className="mt-1 text-sm text-slate-600">Private owner and contact details.</p>
+                <h2 className="text-lg font-semibold text-slate-900">Settings</h2>
+                <p className="mt-1 text-sm text-slate-600">Private owner details, contact information, and security controls.</p>
               </div>
               <button
                 type="button"
@@ -537,8 +537,7 @@ export default function EmployerAccount({
                 aria-label="Add company header image"
               >
                 {headerImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={headerImageUrl} alt="Company header" className="h-full w-full object-cover" />
+                  <Image src={headerImageUrl} alt="Company header" width={1200} height={320} className="h-full w-full object-cover" unoptimized />
                 ) : null}
                 <div className="absolute inset-0 flex items-center justify-center bg-slate-900/0 group-hover:bg-slate-900/5">
                   <span className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-slate-300 bg-white/95 text-2xl font-semibold leading-none text-slate-600">
@@ -576,8 +575,7 @@ export default function EmployerAccount({
               <div className="mt-2 flex items-center gap-3">
                 <div className="h-14 w-14 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
                   {avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={avatarUrl} alt="Employer profile" className="h-full w-full object-cover" />
+                    <Image src={avatarUrl} alt="Employer profile" width={56} height={56} className="h-full w-full object-cover" unoptimized />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-xs font-medium text-slate-500">Logo</div>
                   )}
@@ -693,6 +691,8 @@ export default function EmployerAccount({
         </div>
       )}
 
+      {!isEditing && activeTab === 'settings' ? <SecuritySettings email={contactEmail.trim() || userEmail || ''} /> : null}
+
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -700,7 +700,7 @@ export default function EmployerAccount({
             <p className="mt-1 text-sm text-slate-600">Use the employer dashboard to create and manage postings.</p>
           </div>
           <Link
-            href="/dashboard/employer?create=1"
+            href="/dashboard/employer/new"
             className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
             + New internship
@@ -741,13 +741,6 @@ export default function EmployerAccount({
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Account controls</h2>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Link
-            href="/account/security"
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <Cog className="h-4 w-4" />
-            Security settings
-          </Link>
           <ConfirmSignOutButton className="inline-flex h-10 items-center justify-center rounded-md border border-red-300 bg-red-50 px-4 text-sm font-medium text-red-700 hover:bg-red-100" />
         </div>
       </div>

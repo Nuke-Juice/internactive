@@ -1,5 +1,18 @@
 'use client'
 
+const INDUSTRY_OPTIONS = [
+  'Finance',
+  'Accounting',
+  'Data',
+  'Marketing',
+  'Operations',
+  'Product',
+  'Design',
+  'Sales',
+  'HR',
+  'Engineering',
+]
+
 type Props = {
   fieldClassName: string
   firstName: string
@@ -51,7 +64,18 @@ export default function EmployerStep1({
 
       <div>
         <label className="text-sm font-medium text-slate-700">Industry</label>
-        <input className={fieldClassName} value={industry} onChange={(e) => onIndustryChange(e.target.value)} placeholder="e.g., Finance" />
+        <input
+          className={fieldClassName}
+          value={industry}
+          onChange={(e) => onIndustryChange(e.target.value)}
+          placeholder="Select or type industry"
+          list="employer-industry-options"
+        />
+        <datalist id="employer-industry-options">
+          {INDUSTRY_OPTIONS.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
       </div>
 
       <div>

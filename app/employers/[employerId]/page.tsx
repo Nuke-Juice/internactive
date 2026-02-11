@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Image from 'next/image'
 import { ArrowLeft } from 'lucide-react'
 import EmployerVerificationBadge from '@/components/badges/EmployerVerificationBadge'
 import { supabaseServer } from '@/lib/supabase/server'
@@ -156,8 +157,7 @@ export default async function PublicEmployerProfilePage({ params }: { params: Pa
         <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="relative h-36 w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
             {headerImageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={headerImageUrl} alt={`${companyName} header`} className="h-full w-full object-cover" />
+              <Image src={headerImageUrl} alt={`${companyName} header`} width={1200} height={288} className="h-full w-full object-cover" unoptimized />
             ) : (
               <div className="h-full w-full bg-gradient-to-r from-slate-100 via-slate-50 to-slate-100" />
             )}
@@ -165,8 +165,7 @@ export default async function PublicEmployerProfilePage({ params }: { params: Pa
           <div className="mt-4 flex flex-wrap items-start gap-3">
             <div className="h-14 w-14 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
               {avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatarUrl} alt={`${companyName} logo`} className="h-full w-full object-cover" />
+                <Image src={avatarUrl} alt={`${companyName} logo`} width={56} height={56} className="h-full w-full object-cover" unoptimized />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-slate-500">Logo</div>
               )}

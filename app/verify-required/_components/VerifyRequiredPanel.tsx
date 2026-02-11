@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { normalizeAuthError } from '@/lib/auth/normalizeAuthError'
+import { maskEmail } from '@/lib/auth/maskEmail'
 
 type ResendState = {
   ok: boolean
@@ -28,6 +29,7 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
   const [signingOut, setSigningOut] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
+  const maskedEmail = maskEmail(email)
   const { showToast } = useToast()
 
   useEffect(() => {
@@ -172,7 +174,7 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <h1 className="text-2xl font-semibold text-slate-900">Verify your email to continue</h1>
       <p className="mt-2 text-sm text-slate-600">
-        We sent a confirmation email to <strong>{email}</strong>. This protects employers and students from spam.
+        We sent a confirmation email to <strong>{maskedEmail}</strong>. This protects employers and students from spam.
       </p>
       <p className="mt-2 text-sm text-slate-600">
         Locked action: <span className="font-medium text-slate-900">{actionName.replace(/_/g, ' ')}</span>.

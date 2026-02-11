@@ -1,9 +1,10 @@
 import Link from 'next/link'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
 import { startStarterEmployerCheckoutAction } from '@/lib/billing/actions'
-import { getRemainingCapacity, isUnlimitedInternships } from '@/lib/billing/plan'
+import { isUnlimitedInternships } from '@/lib/billing/plan'
 import { isPlanLimitReachedCode, PLAN_LIMIT_REACHED } from '@/lib/billing/plan'
 import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import { buildVerifyRequiredHref } from '@/lib/auth/emailVerification'
@@ -142,6 +143,7 @@ function getCreateInternshipError(searchParams?: { code?: string; error?: string
 
 export default async function EmployerDashboardPage({
   searchParams,
+  createOnly = false,
 }: {
   searchParams?: Promise<{
     error?: string
@@ -155,6 +157,7 @@ export default async function EmployerDashboardPage({
     limit?: string
     current?: string
   }>
+  createOnly?: boolean
 }) {
   const { user } = await requireRole('employer', { requestedPath: '/dashboard/employer' })
   if (!user.email_confirmed_at) {
@@ -177,11 +180,13 @@ export default async function EmployerDashboardPage({
     redirect('/signup/employer/details')
   }
 
-  const { data: internships } = await supabase
-    .from('internships')
-    .select('id, title, location, experience_level, majors, created_at, is_active, work_mode')
-    .eq('employer_id', user.id)
-    .order('created_at', { ascending: false })
+  const { data: internships } = createOnly
+    ? { data: [] as Array<{ id: string; title: string; location: string; experience_level: string; majors: unknown; created_at: string; is_active: boolean; work_mode: string }> }
+    : await supabase
+        .from('internships')
+        .select('id, title, location, experience_level, majors, created_at, is_active, work_mode')
+        .eq('employer_id', user.id)
+        .order('created_at', { ascending: false })
   const editingInternshipId = String(resolvedSearchParams?.edit ?? '').trim()
   const { data: editingInternship } = editingInternshipId
     ? await supabase
@@ -218,7 +223,7 @@ export default async function EmployerDashboardPage({
         ? editingInternship.required_skills
         : []
   const { plan } = await getEmployerVerificationStatus({ supabase, userId: user.id })
-  const { data: conciergeRequests } = launchConciergeEnabled
+  const { data: conciergeRequests } = launchConciergeEnabled && !createOnly
     ? await supabase
         .from('employer_concierge_requests')
         .select('id, role_title, status, created_at')
@@ -227,7 +232,6 @@ export default async function EmployerDashboardPage({
         .limit(5)
     : { data: [] as Array<{ id: string; role_title: string | null; status: string | null; created_at: string | null }> }
   const activeInternshipsCount = (internships ?? []).filter((internship) => internship.is_active).length
-  const remainingCapacity = getRemainingCapacity(plan, activeInternshipsCount)
 
   async function createInternship(formData: FormData) {
     'use server'
@@ -497,10 +501,11 @@ export default async function EmployerDashboardPage({
 
   const createInternshipError = getCreateInternshipError(resolvedSearchParams)
   const showUpgradeModal = isPlanLimitReachedCode(resolvedSearchParams?.code)
+  const internshipTotal = internships?.length ?? 0
   const showCreateInternshipForm =
+    createOnly ||
     resolvedSearchParams?.create === '1' ||
     Boolean(createInternshipError) ||
-    (internships?.length ?? 0) === 0 ||
     Boolean(editingInternshipId)
   const editingTermRange = inferRangeFromTerm(editingInternship?.term ?? '')
   const isEditingListing = Boolean(editingInternship?.id)
@@ -513,32 +518,68 @@ export default async function EmployerDashboardPage({
   return (
     <main className="min-h-screen bg-white">
       <section className="mx-auto max-w-5xl px-6 py-10">
+        <div className="mb-3">
+          <Link
+            href={createOnly ? '/dashboard/employer' : '/'}
+            aria-label="Go back"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+        </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Employer dashboard</h1>
+            <h1 className="text-2xl font-semibold text-slate-900">{createOnly ? (isEditingListing ? 'Edit internship' : 'Create new internship') : 'Employer dashboard'}</h1>
             <p className="mt-1 text-slate-600">
-              Create internships and track what you have posted.
+              {createOnly ? 'Share the core fields students scan first: work mode, pay, hours, timeline, and fit summary.' : 'Create internships and track what you have posted.'}
             </p>
           </div>
         </div>
 
-        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          Plan: <span className="font-semibold text-slate-900">{plan.name}</span>
-          {!isUnlimitedInternships(plan) ? ` (${plan.maxActiveInternships} active internship limit)` : ' (no posting cap)'}
-          {`. You have ${activeInternshipsCount} active internships`}
-          {remainingCapacity === null ? ' (unlimited remaining).' : ` (${remainingCapacity} remaining).`}
-          <Link href="/upgrade" className="ml-2 font-medium text-blue-700 hover:underline">
-            {plan.id === 'free' ? 'Upgrade' : 'Manage plan'}
+        {!createOnly ? (
+        <div className="mt-5 grid gap-2 sm:grid-cols-4">
+          <Link
+            href="/dashboard/employer/new"
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Create new internship
           </Link>
-          <div className="mt-1 text-xs text-slate-600">
-            Free covers core posting + inbox workflow. Paid plans unlock faster hiring with ranked matching and advanced filters.
-          </div>
+          <Link
+            href="/dashboard/employer"
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Manage internships
+          </Link>
+          <Link
+            href="/dashboard/employer/applicants"
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            View applicants
+          </Link>
+          <Link
+            href="/dashboard/employer/analytics"
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Analytics
+          </Link>
         </div>
+        ) : null}
 
+        {!createOnly ? (
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-900">Your internships</h2>
-            <span className="text-xs text-slate-500">{internships?.length ?? 0} total</span>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Your internships</h2>
+              <p className="mt-1 text-xs text-slate-600">
+                {isUnlimitedInternships(plan)
+                  ? `Plan: ${plan.name}. Active internships: ${activeInternshipsCount}.`
+                  : `Plan: ${plan.name}. Active: ${activeInternshipsCount}/${plan.maxActiveInternships}.`}
+                <Link href="/upgrade" className="ml-1 font-medium text-slate-700 hover:underline">
+                  {plan.id === 'free' ? 'Upgrade for more capacity.' : 'Manage plan.'}
+                </Link>
+              </p>
+            </div>
+            <span className="text-xs text-slate-500">{internshipTotal} total</span>
           </div>
 
           {!internships || internships.length === 0 ? (
@@ -580,7 +621,7 @@ export default async function EmployerDashboardPage({
                       Applicants
                     </Link>
                     <Link
-                      href={`/dashboard/employer?create=1&edit=${encodeURIComponent(internship.id)}`}
+                      href={`/dashboard/employer/new?edit=${encodeURIComponent(internship.id)}`}
                       className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                     >
                       Edit
@@ -591,15 +632,17 @@ export default async function EmployerDashboardPage({
             </div>
           )}
         </div>
+        ) : null}
 
+        {!createOnly ? (
         <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-slate-700">
-              Need another listing? Create one in under 2 minutes.
+              {internshipTotal > 0 ? 'Create another listing in under 2 minutes.' : 'Create your first listing in under 2 minutes.'}
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <Link
-                href="/dashboard/employer?create=1"
+                href="/dashboard/employer/new"
                 className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700"
               >
                 + New internship
@@ -615,8 +658,9 @@ export default async function EmployerDashboardPage({
             </div>
           </div>
         </div>
+        ) : null}
 
-        {showConciergeForm ? (
+        {!createOnly && showConciergeForm ? (
           <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
@@ -626,7 +670,7 @@ export default async function EmployerDashboardPage({
                 </p>
               </div>
               <Link
-                href="/dashboard/employer"
+                href={createOnly ? '/dashboard/employer' : '/dashboard/employer'}
                 className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
               >
                 Hide form
