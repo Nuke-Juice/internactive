@@ -45,6 +45,22 @@ export async function resendVerificationEmailAction(
     return { ok: false, error: 'Email does not match the signed-in account.' }
   }
 
+  // If Auth already has confirmed email, heal the app-level verified flag
+  // instead of pretending to send another verification email.
+  if (user.email_confirmed_at) {
+    const { error: verifySyncError } = await supabase
+      .from('users')
+      .update({ verified: true })
+      .eq('id', user.id)
+      .eq('verified', false)
+
+    if (verifySyncError) {
+      return { ok: false, error: 'Email is confirmed, but verification sync failed. Please refresh and try again.' }
+    }
+
+    return { ok: true, message: 'Email is already verified. Verification status has been synced.' }
+  }
+
   const appOrigin = await resolveAppOrigin()
   const callback = new URL('/auth/callback', appOrigin)
   callback.searchParams.set('next', normalizeNext(nextUrl))

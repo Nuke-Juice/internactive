@@ -89,7 +89,19 @@ export default async function VerifyRequiredPage({ searchParams }: { searchParam
     .eq('id', user.id)
     .maybeSingle<{ verified: boolean | null }>()
 
-  if (user.email_confirmed_at && usersRow?.verified === true) {
+  let isVerified = usersRow?.verified === true
+  if (user.email_confirmed_at && !isVerified) {
+    const { error: verifySyncError } = await supabase
+      .from('users')
+      .update({ verified: true })
+      .eq('id', user.id)
+      .eq('verified', false)
+    if (!verifySyncError) {
+      isVerified = true
+    }
+  }
+
+  if (user.email_confirmed_at && isVerified) {
     redirect(nextUrl)
   }
 
