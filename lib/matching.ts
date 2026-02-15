@@ -1,4 +1,4 @@
-export type WorkMode = 'remote' | 'hybrid' | 'on-site'
+export type WorkMode = 'remote' | 'hybrid' | 'in_person'
 
 export type InternshipMatchInput = {
   id: string
@@ -10,6 +10,9 @@ export type InternshipMatchInput = {
   description?: string | null
   work_mode?: string | null
   term?: string | null
+  start_date?: string | null
+  application_deadline?: string | null
+  created_at?: string | null
   experience_level?: string | null
   target_student_year?: string | null
   desired_coursework_strength?: string | null
@@ -35,32 +38,37 @@ export type StudentMatchProfile = {
   coursework_category_ids?: string[]
   coursework?: string[]
   availability_hours_per_week?: number | null
+  availability_start_month?: string | null
   preferred_terms?: string[]
   preferred_locations?: string[]
   preferred_work_modes?: WorkMode[]
   remote_only?: boolean
+  strict_preferences?: boolean
+  strict_term_only?: boolean
 }
 
 export type MatchWeights = {
   skillsRequired: number
-  skillsPreferred: number
-  courseworkAlignment: number
   majorCategoryAlignment: number
-  graduationYearAlignment: number
+  courseworkAlignment: number
+  skillsPreferred: number
   experienceAlignment: number
   availability: number
-  locationModePreference: number
+  startDateFit: number
+  termAlignment: number
+  preferenceAlignment: number
 }
 
 export const MATCH_SIGNAL_KEYS = [
   'skillsRequired',
-  'skillsPreferred',
-  'courseworkAlignment',
   'majorCategoryAlignment',
-  'graduationYearAlignment',
+  'courseworkAlignment',
+  'skillsPreferred',
   'experienceAlignment',
   'availability',
-  'locationModePreference',
+  'startDateFit',
+  'termAlignment',
+  'preferenceAlignment',
 ] as const
 
 export type MatchSignalKey = (typeof MATCH_SIGNAL_KEYS)[number]
@@ -70,21 +78,17 @@ export const MATCH_SIGNAL_DEFINITIONS: Record<MatchSignalKey, { label: string; d
     label: 'Required skills',
     description: 'Core required skills overlap (canonical IDs first, then text fallback).',
   },
-  skillsPreferred: {
-    label: 'Preferred skills',
-    description: 'Optional preferred skills overlap (canonical IDs first, then text fallback).',
+  majorCategoryAlignment: {
+    label: 'Major/category alignment',
+    description: 'Student major alignment with internship majors or category text.',
   },
   courseworkAlignment: {
     label: 'Coursework alignment',
     description: 'Coursework category/item overlap (category IDs first, then item IDs, then text fallback).',
   },
-  majorCategoryAlignment: {
-    label: 'Major/category alignment',
-    description: 'Student major alignment with internship majors or category text.',
-  },
-  graduationYearAlignment: {
-    label: 'Graduation year fit',
-    description: 'Target graduation year compatibility (hard filter when target years are set).',
+  skillsPreferred: {
+    label: 'Preferred skills',
+    description: 'Optional preferred skills overlap (canonical IDs first, then text fallback).',
   },
   experienceAlignment: {
     label: 'Experience alignment',
@@ -94,24 +98,33 @@ export const MATCH_SIGNAL_DEFINITIONS: Record<MatchSignalKey, { label: string; d
     label: 'Availability fit',
     description: 'Hours per week closeness to student availability.',
   },
-  locationModePreference: {
-    label: 'Location/mode fit',
-    description: 'Work mode preference match (includes remote-only and location hard filters).',
+  startDateFit: {
+    label: 'Start date fit',
+    description: 'Alignment between internship start date and student availability month.',
+  },
+  termAlignment: {
+    label: 'Term alignment',
+    description: 'Soft alignment between preferred terms and internship term.',
+  },
+  preferenceAlignment: {
+    label: 'Preference alignment',
+    description: 'Soft alignment between preferred location/work mode and internship setup.',
   },
 }
 
 export const DEFAULT_MATCHING_WEIGHTS: MatchWeights = {
   skillsRequired: 4,
+  majorCategoryAlignment: 3,
+  courseworkAlignment: 2,
   skillsPreferred: 2,
-  courseworkAlignment: 1.5,
-  majorCategoryAlignment: 3.5,
-  graduationYearAlignment: 1.5,
   experienceAlignment: 1.5,
   availability: 2,
-  locationModePreference: 1,
+  startDateFit: 1,
+  termAlignment: 1,
+  preferenceAlignment: 1,
 }
 
-export const MATCHING_VERSION = 'v1.1'
+export const MATCHING_VERSION = 'v1.2'
 
 export type MatchReason = {
   reasonKey: string
@@ -128,9 +141,10 @@ export type MatchSignalContribution = {
 }
 
 export type InternshipMatchBreakdown = {
-  totalScore: number
-  maxScore: number
+  totalScoreRaw: number
+  maxScoreRaw: number
   normalizedScore: number
+  score100: number
   perSignalContributions: MatchSignalContribution[]
   reasons: MatchReason[]
 }
@@ -191,8 +205,14 @@ function parseWorkMode(value: string | null | undefined): WorkMode | null {
 
   if (normalized.includes('remote')) return 'remote'
   if (normalized.includes('hybrid')) return 'hybrid'
-  if (normalized.includes('on-site') || normalized.includes('onsite') || normalized.includes('in person')) {
-    return 'on-site'
+  if (
+    normalized === 'in person' ||
+    normalized === 'in_person' ||
+    normalized.includes('on site') ||
+    normalized.includes('onsite') ||
+    normalized.includes('on-site')
+  ) {
+    return 'in_person'
   }
 
   return null
@@ -319,6 +339,44 @@ function courseworkStrengthMinimumCount(value: string | null | undefined) {
   return 1
 }
 
+function parseDateOnly(value: string | null | undefined) {
+  const normalized = (value ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null
+  const parsed = new Date(`${normalized}T00:00:00.000Z`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function currentOrNextYearAvailabilityStart(monthLabel: string | null | undefined, now = new Date()) {
+  const normalized = normalizeText(monthLabel ?? '')
+  if (!normalized) return null
+
+  const monthIndex = [
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december',
+  ].findIndex((month) => month.startsWith(normalized.slice(0, 3)))
+
+  if (monthIndex < 0) return null
+
+  const year = now.getUTCFullYear()
+  const thisYearDate = new Date(Date.UTC(year, monthIndex, 1))
+  const today = new Date(Date.UTC(year, now.getUTCMonth(), now.getUTCDate()))
+  if (thisYearDate.getTime() >= today.getTime()) return thisYearDate
+
+  return new Date(Date.UTC(year + 1, monthIndex, 1))
+}
+
+function addDays(date: Date, days: number) {
+  const copy = new Date(date.getTime())
+  copy.setUTCDate(copy.getUTCDate() + days)
+  return copy
+}
+
+function clamp01(value: number) {
+  if (value <= 0) return 0
+  if (value >= 1) return 1
+  return value
+}
+
 export function getMatchMaxScore(weights: MatchWeights = DEFAULT_MATCHING_WEIGHTS) {
   return MATCH_SIGNAL_KEYS.reduce((sum, signalKey) => sum + Math.max(0, weights[signalKey]), 0)
 }
@@ -332,9 +390,9 @@ function emptySignalContributions(weights: MatchWeights): Record<MatchSignalKey,
       pointsAwarded: 0,
       evidence: [],
     },
-    skillsPreferred: {
-      signalKey: 'skillsPreferred',
-      weight: weights.skillsPreferred,
+    majorCategoryAlignment: {
+      signalKey: 'majorCategoryAlignment',
+      weight: weights.majorCategoryAlignment,
       rawMatchValue: 0,
       pointsAwarded: 0,
       evidence: [],
@@ -346,16 +404,9 @@ function emptySignalContributions(weights: MatchWeights): Record<MatchSignalKey,
       pointsAwarded: 0,
       evidence: [],
     },
-    majorCategoryAlignment: {
-      signalKey: 'majorCategoryAlignment',
-      weight: weights.majorCategoryAlignment,
-      rawMatchValue: 0,
-      pointsAwarded: 0,
-      evidence: [],
-    },
-    graduationYearAlignment: {
-      signalKey: 'graduationYearAlignment',
-      weight: weights.graduationYearAlignment,
+    skillsPreferred: {
+      signalKey: 'skillsPreferred',
+      weight: weights.skillsPreferred,
       rawMatchValue: 0,
       pointsAwarded: 0,
       evidence: [],
@@ -374,14 +425,40 @@ function emptySignalContributions(weights: MatchWeights): Record<MatchSignalKey,
       pointsAwarded: 0,
       evidence: [],
     },
-    locationModePreference: {
-      signalKey: 'locationModePreference',
-      weight: weights.locationModePreference,
+    startDateFit: {
+      signalKey: 'startDateFit',
+      weight: weights.startDateFit,
+      rawMatchValue: 0,
+      pointsAwarded: 0,
+      evidence: [],
+    },
+    termAlignment: {
+      signalKey: 'termAlignment',
+      weight: weights.termAlignment,
+      rawMatchValue: 0,
+      pointsAwarded: 0,
+      evidence: [],
+    },
+    preferenceAlignment: {
+      signalKey: 'preferenceAlignment',
+      weight: weights.preferenceAlignment,
       rawMatchValue: 0,
       pointsAwarded: 0,
       evidence: [],
     },
   }
+}
+
+function gapSeverity(gap: string) {
+  const normalized = gap.toLowerCase()
+  if (normalized.includes('missing required skills')) return 100
+  if (normalized.includes('experience mismatch')) return 90
+  if (normalized.includes('hours exceed availability')) return 80
+  if (normalized.includes('start before')) return 70
+  if (normalized.includes('term mismatch')) return 60
+  if (normalized.includes('work mode mismatch') || normalized.includes('location mismatch') || normalized.includes('preference')) return 50
+  if (normalized.includes('no major/category alignment')) return 40
+  return 10
 }
 
 function finalizeMatchResult(params: {
@@ -393,34 +470,40 @@ function finalizeMatchResult(params: {
   signalContributions: Record<MatchSignalKey, MatchSignalContribution>
   weights: MatchWeights
 }) {
-  const totalScore = MATCH_SIGNAL_KEYS.reduce((sum, signalKey) => sum + params.signalContributions[signalKey].pointsAwarded, 0)
-  const maxScore = getMatchMaxScore(params.weights)
-  const normalizedScore = maxScore > 0 ? totalScore / maxScore : 0
+  const totalScoreRaw = MATCH_SIGNAL_KEYS.reduce((sum, signalKey) => sum + params.signalContributions[signalKey].pointsAwarded, 0)
+  const maxScoreRaw = getMatchMaxScore(params.weights)
+  const normalizedScore = maxScoreRaw > 0 ? clamp01(totalScoreRaw / maxScoreRaw) : 0
 
   const sortedReasons = [...params.reasonsWithPoints].sort((a, b) => b.points - a.points)
+  const score100 = Math.max(0, Math.min(100, Math.round(normalizedScore * 100)))
+
+  const dedupedGaps = Array.from(new Set(params.gaps.map(mapGap).filter(Boolean)))
+    .sort((a, b) => gapSeverity(b) - gapSeverity(a))
+    .slice(0, 2)
 
   const result: InternshipMatchResult = {
     internshipId: params.internshipId,
-    score: Number(totalScore.toFixed(3)),
-    reasons: sortedReasons.map((reason) => reason.text),
-    gaps: params.gaps.map(mapGap),
+    score: score100,
+    reasons: sortedReasons.slice(0, 3).map((reason) => reason.text),
+    gaps: dedupedGaps,
     eligible: params.eligible,
     matchingVersion: MATCHING_VERSION,
-    maxScore: Number(maxScore.toFixed(3)),
+    maxScore: 100,
     normalizedScore: Number(normalizedScore.toFixed(4)),
   }
 
   if (params.explain) {
-    const breakdownReasons: MatchReason[] = sortedReasons.map((reason) => ({
+    const breakdownReasons: MatchReason[] = sortedReasons.slice(0, 3).map((reason) => ({
       reasonKey: reason.reasonKey,
       humanText: reason.text,
       evidence: reason.evidence,
     }))
 
     result.breakdown = {
-      totalScore: Number(totalScore.toFixed(3)),
-      maxScore: Number(maxScore.toFixed(3)),
+      totalScoreRaw: Number(totalScoreRaw.toFixed(3)),
+      maxScoreRaw: Number(maxScoreRaw.toFixed(3)),
       normalizedScore: Number(normalizedScore.toFixed(4)),
+      score100,
       perSignalContributions: MATCH_SIGNAL_KEYS.map((signalKey) => ({
         ...params.signalContributions[signalKey],
         pointsAwarded: Number(params.signalContributions[signalKey].pointsAwarded.toFixed(3)),
@@ -449,42 +532,17 @@ export function evaluateInternshipMatch(
   const locationName = deriveLocationName(internship)
 
   const preferredModes = profile.preferred_work_modes ?? []
-  const preferredTerms = (profile.preferred_terms ?? []).map((value) => seasonFromTerm(normalizeText(value)))
-  const preferredLocations = (profile.preferred_locations ?? []).map(normalizeText)
+  const preferredTerms = (profile.preferred_terms ?? []).map((value) => seasonFromTerm(normalizeText(value))).filter(Boolean)
+  const preferredLocations = (profile.preferred_locations ?? []).map(normalizeText).filter(Boolean)
 
-  const internshipIsInPerson = workMode === 'on-site' || workMode === 'hybrid'
+  const internshipIsInPerson = workMode === 'in_person' || workMode === 'hybrid'
 
-  if (profile.remote_only && internshipIsInPerson) {
-    gaps.push('Requires in-person work but your profile is remote-only.')
-    return finalizeMatchResult({
-      internshipId: internship.id,
-      reasonsWithPoints,
-      gaps,
-      eligible: false,
-      explain,
-      signalContributions,
-      weights,
-    })
-  }
-
-  if (preferredModes.length > 0 && workMode && !preferredModes.includes(workMode)) {
-    gaps.push(`Work mode mismatch (${workMode}).`)
-    return finalizeMatchResult({
-      internshipId: internship.id,
-      reasonsWithPoints,
-      gaps,
-      eligible: false,
-      explain,
-      signalContributions,
-      weights,
-    })
-  }
-
-  if (preferredTerms.length > 0 && term) {
-    const internshipSeason = seasonFromTerm(term)
-    const hasTermOverlap = preferredTerms.includes(internshipSeason)
-    if (!hasTermOverlap) {
-      gaps.push(`Term mismatch (${term}).`)
+  const deadlineDate = parseDateOnly(internship.application_deadline)
+  if (deadlineDate) {
+    const now = new Date()
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    if (deadlineDate.getTime() < today.getTime()) {
+      gaps.push('Application deadline has passed.')
       return finalizeMatchResult({
         internshipId: internship.id,
         reasonsWithPoints,
@@ -495,6 +553,19 @@ export function evaluateInternshipMatch(
         weights,
       })
     }
+  }
+
+  if (profile.remote_only && workMode !== 'remote') {
+    gaps.push('Requires in-person or hybrid work but your profile is remote-only.')
+    return finalizeMatchResult({
+      internshipId: internship.id,
+      reasonsWithPoints,
+      gaps,
+      eligible: false,
+      explain,
+      signalContributions,
+      weights,
+    })
   }
 
   if (
@@ -514,13 +585,44 @@ export function evaluateInternshipMatch(
     })
   }
 
-  if (internshipIsInPerson && preferredLocations.length > 0 && locationName) {
+  const strictPreferences = profile.strict_preferences === true
+  const strictTermOnly = profile.strict_term_only === true
+
+  if (strictPreferences && preferredModes.length > 0 && workMode && !preferredModes.includes(workMode)) {
+    gaps.push(`Work mode mismatch (${workMode}).`)
+    return finalizeMatchResult({
+      internshipId: internship.id,
+      reasonsWithPoints,
+      gaps,
+      eligible: false,
+      explain,
+      signalContributions,
+      weights,
+    })
+  }
+
+  if (strictPreferences && internshipIsInPerson && preferredLocations.length > 0 && locationName) {
     const matchesPreferredLocation = preferredLocations.some(
       (preferred) => locationName.includes(preferred) || preferred.includes(locationName)
     )
-
     if (!matchesPreferredLocation) {
       gaps.push(`In-person location mismatch (${locationName}).`)
+      return finalizeMatchResult({
+        internshipId: internship.id,
+        reasonsWithPoints,
+        gaps,
+        eligible: false,
+        explain,
+        signalContributions,
+        weights,
+      })
+    }
+  }
+
+  if (strictTermOnly && preferredTerms.length > 0 && term) {
+    const internshipSeason = seasonFromTerm(term)
+    if (!preferredTerms.includes(internshipSeason)) {
+      gaps.push(`Term mismatch (${term}).`)
       return finalizeMatchResult({
         internshipId: internship.id,
         reasonsWithPoints,
@@ -666,7 +768,10 @@ export function evaluateInternshipMatch(
       weight: weights.courseworkAlignment,
       rawMatchValue: categoryRatio,
       pointsAwarded: points,
-      evidence: [`${categoryHits}/${recommendedCourseworkCategoryIds.length} coursework categories matched`, `strength=${internship.desired_coursework_strength ?? 'low'}`],
+      evidence: [
+        `${categoryHits}/${recommendedCourseworkCategoryIds.length} coursework categories matched`,
+        `strength=${internship.desired_coursework_strength ?? 'low'}`,
+      ],
     }
 
     if (categoryHits > 0) {
@@ -732,14 +837,6 @@ export function evaluateInternshipMatch(
 
   if (targetGradYears.length > 0 && studentYear) {
     const yearMatch = targetGradYears.includes(studentYear)
-    signalContributions.graduationYearAlignment = {
-      signalKey: 'graduationYearAlignment',
-      weight: weights.graduationYearAlignment,
-      rawMatchValue: yearMatch ? 1 : 0,
-      pointsAwarded: yearMatch ? weights.graduationYearAlignment : 0,
-      evidence: [`student_year=${profile.year ?? studentYear}`, `target_years=${targetGradYears.join('|')}`],
-    }
-
     if (!yearMatch) {
       gaps.push(`Graduation year mismatch (${profile.year ?? 'unknown'}).`)
       return finalizeMatchResult({
@@ -752,13 +849,6 @@ export function evaluateInternshipMatch(
         weights,
       })
     }
-
-    reasonsWithPoints.push({
-      reasonKey: 'graduation_year.fit',
-      text: describeReason('Graduation year fit', weights.graduationYearAlignment, profile.year ?? studentYear),
-      points: weights.graduationYearAlignment,
-      evidence: [`student_year=${profile.year ?? studentYear}`],
-    })
   }
 
   if (internshipExperienceLevel !== null && studentExperienceLevel !== null) {
@@ -805,7 +895,12 @@ export function evaluateInternshipMatch(
       weight: weights.majorCategoryAlignment,
       rawMatchValue: alignmentRatio,
       pointsAwarded: points,
-      evidence: majorHits > 0 ? [`major_hits=${majorHits}/${Math.max(1, internshipMajors.length)}`] : categoryHit ? [`category_hit=${internshipCategory}`] : [],
+      evidence:
+        majorHits > 0
+          ? [`major_hits=${majorHits}/${Math.max(1, internshipMajors.length)}`]
+          : categoryHit
+            ? [`category_hit=${internshipCategory}`]
+            : [],
     }
 
     if (points > 0) {
@@ -849,24 +944,108 @@ export function evaluateInternshipMatch(
     }
   }
 
-  if (workMode) {
-    const modePreferenceHit = preferredModes.length === 0 || preferredModes.includes(workMode)
-    const points = modePreferenceHit ? weights.locationModePreference : 0
-    signalContributions.locationModePreference = {
-      signalKey: 'locationModePreference',
-      weight: weights.locationModePreference,
-      rawMatchValue: modePreferenceHit ? 1 : 0,
+  const internshipSeason = seasonFromTerm(term)
+  if (preferredTerms.length > 0 && internshipSeason) {
+    const termAligned = preferredTerms.includes(internshipSeason)
+    const rawValue = termAligned ? 1 : -1
+    const points = weights.termAlignment * rawValue
+    signalContributions.termAlignment = {
+      signalKey: 'termAlignment',
+      weight: weights.termAlignment,
+      rawMatchValue: rawValue,
       pointsAwarded: points,
-      evidence: [`work_mode=${workMode}`],
+      evidence: [`preferred_terms=${preferredTerms.join('|')}`, `internship_term=${internshipSeason}`],
     }
 
-    if (points > 0) {
+    if (termAligned) {
       reasonsWithPoints.push({
-        reasonKey: 'location_mode.fit',
-        text: describeReason('Work mode fit', points, workMode),
+        reasonKey: 'term.aligned',
+        text: describeReason('Term alignment', points, internshipSeason),
         points,
-        evidence: [`work_mode=${workMode}`],
+        evidence: [`internship_term=${internshipSeason}`],
       })
+    } else {
+      gaps.push(`Term mismatch (${internshipSeason}).`)
+    }
+  }
+
+  let hasComparablePreference = false
+  let hasPreferenceMismatch = false
+  let hasPreferenceAlignment = false
+
+  if (preferredModes.length > 0 && workMode) {
+    hasComparablePreference = true
+    if (preferredModes.includes(workMode)) {
+      hasPreferenceAlignment = true
+    } else {
+      hasPreferenceMismatch = true
+      gaps.push(`Work mode mismatch (${workMode}).`)
+    }
+  }
+
+  if (preferredLocations.length > 0 && internshipIsInPerson && locationName) {
+    hasComparablePreference = true
+    const matchesPreferredLocation = preferredLocations.some(
+      (preferred) => locationName.includes(preferred) || preferred.includes(locationName)
+    )
+    if (matchesPreferredLocation) {
+      hasPreferenceAlignment = true
+    } else {
+      hasPreferenceMismatch = true
+      gaps.push(`In-person location mismatch (${locationName}).`)
+    }
+  }
+
+  if (hasComparablePreference) {
+    const rawValue = hasPreferenceMismatch ? -1 : hasPreferenceAlignment ? 1 : 0
+    const points = weights.preferenceAlignment * rawValue
+    signalContributions.preferenceAlignment = {
+      signalKey: 'preferenceAlignment',
+      weight: weights.preferenceAlignment,
+      rawMatchValue: rawValue,
+      pointsAwarded: points,
+      evidence: [`work_mode=${workMode ?? 'unknown'}`, `location=${locationName || 'unknown'}`],
+    }
+
+    if (rawValue > 0) {
+      reasonsWithPoints.push({
+        reasonKey: 'preferences.aligned',
+        text: describeReason('Preference alignment', points, 'work mode/location match'),
+        points,
+        evidence: [`work_mode=${workMode ?? 'unknown'}`, `location=${locationName || 'unknown'}`],
+      })
+    }
+  }
+
+  const internshipStartDate = parseDateOnly(internship.start_date)
+  const availabilityStartDate = currentOrNextYearAvailabilityStart(profile.availability_start_month)
+  if (internshipStartDate && availabilityStartDate) {
+    const threshold = addDays(availabilityStartDate, -14)
+    let rawValue = 0
+    if (internshipStartDate.getTime() < threshold.getTime()) rawValue = -1
+    else if (internshipStartDate.getTime() >= availabilityStartDate.getTime()) rawValue = 1
+
+    const points = weights.startDateFit * rawValue
+    signalContributions.startDateFit = {
+      signalKey: 'startDateFit',
+      weight: weights.startDateFit,
+      rawMatchValue: rawValue,
+      pointsAwarded: points,
+      evidence: [
+        `internship_start=${internship.start_date ?? ''}`,
+        `availability_start=${availabilityStartDate.toISOString().slice(0, 10)}`,
+      ],
+    }
+
+    if (rawValue > 0) {
+      reasonsWithPoints.push({
+        reasonKey: 'start_date.after_availability',
+        text: describeReason('Start date fit', points, "Starts after your availability"),
+        points,
+        evidence: [`internship_start=${internship.start_date ?? ''}`],
+      })
+    } else if (rawValue < 0) {
+      gaps.push("May start before you're available")
     }
   }
 
@@ -897,6 +1076,7 @@ export function rankInternships(
       if (right.match.score !== left.match.score) return right.match.score - left.match.score
       const leftCreatedAt = new Date((left.internship as { created_at?: string | null }).created_at ?? 0).getTime()
       const rightCreatedAt = new Date((right.internship as { created_at?: string | null }).created_at ?? 0).getTime()
-      return rightCreatedAt - leftCreatedAt
+      if (rightCreatedAt !== leftCreatedAt) return rightCreatedAt - leftCreatedAt
+      return String(left.internship.id).localeCompare(String(right.internship.id))
     })
 }

@@ -5,7 +5,7 @@ import { getMatchingReportSummary } from './matchingPreview.ts'
 export const MATCHING_CANONICAL_ENUMS = {
   experienceLevelsInternship: ['entry', 'mid', 'senior'],
   experienceLevelsStudent: ['none', 'projects', 'internship'],
-  workModes: ['remote', 'hybrid', 'on-site'],
+  workModes: ['remote', 'hybrid', 'in_person'],
   termSeasons: ['spring', 'summer', 'fall', 'winter'],
 }
 

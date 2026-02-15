@@ -679,8 +679,8 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
       application_deadline: applyDeadline,
       admin_notes: adminNotes,
       template_used: templateUsed,
-      work_mode: remoteAllowed ? 'remote' : 'on-site',
-      location_type: normalizeLocationType(remoteAllowed ? 'remote' : 'on-site'),
+      work_mode: remoteAllowed ? 'remote' : 'in_person',
+      location_type: normalizeLocationType(remoteAllowed ? 'remote' : 'in_person'),
     })
       .select('id')
       .single()

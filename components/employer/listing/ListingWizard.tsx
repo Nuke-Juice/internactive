@@ -528,7 +528,10 @@ export default function ListingWizard(props: Props) {
         ...prev,
         title: typeof parsed.title === 'string' ? parsed.title : prev.title,
         category: typeof parsed.category === 'string' ? parsed.category : prev.category,
-        workMode: typeof parsed.work_mode === 'string' ? (parsed.work_mode as WorkMode) : prev.workMode,
+        workMode:
+          typeof parsed.work_mode === 'string'
+            ? ((parsed.work_mode === 'on-site' ? 'in_person' : parsed.work_mode) as WorkMode)
+            : prev.workMode,
         locationCity: typeof parsed.location_city === 'string' ? parsed.location_city : prev.locationCity,
         locationState: typeof parsed.location_state === 'string' ? parsed.location_state : prev.locationState,
         applyMode: typeof parsed.apply_mode === 'string' ? (parsed.apply_mode as ApplyMode) : prev.applyMode,
@@ -713,7 +716,7 @@ export default function ListingWizard(props: Props) {
       stepIssues.push('Please choose a valid work location: Remote, In-person, or Hybrid.')
       step1FieldErrors.work_mode = 'Please choose a valid work location: Remote, In-person, or Hybrid.'
     }
-    if ((state.workMode === 'hybrid' || state.workMode === 'on-site') && (!state.locationCity.trim() || !state.locationState.trim())) {
+    if ((state.workMode === 'hybrid' || state.workMode === 'in_person') && (!state.locationCity.trim() || !state.locationState.trim())) {
       stepIssues.push('City and state are required for hybrid/in-person roles.')
       if (!state.locationCity.trim()) step1FieldErrors.location_city = 'City is required for hybrid/in-person roles.'
       if (!state.locationState.trim()) step1FieldErrors.location_state = 'State is required for hybrid/in-person roles.'

@@ -48,7 +48,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [recentKeys, setRecentKeys] = useState<Record<string, number>>({})
 
   useEffect(() => {
-    setToasts([])
+    const timer = setTimeout(() => setToasts([]), 0)
+    return () => clearTimeout(timer)
   }, [pathname])
 
   useEffect(() => {
@@ -56,7 +57,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const now = Date.now()
     const next = Object.fromEntries(Object.entries(recentKeys).filter(([, timestamp]) => now - timestamp < 2500))
     if (Object.keys(next).length !== Object.keys(recentKeys).length) {
-      setRecentKeys(next)
+      const timer = setTimeout(() => setRecentKeys(next), 0)
+      return () => clearTimeout(timer)
     }
   }, [recentKeys])
 

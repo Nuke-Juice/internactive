@@ -53,7 +53,7 @@ export const mockInternships: InternshipMatchInput[] = [
     title: 'Operations Intern',
     majors: ['operations', 'business'],
     hours_per_week: 35,
-    location: 'Chicago, IL (On-site)',
+    location: 'Chicago, IL (In-person)',
     description:
       'Support fulfillment projects.\nCategory: Operations\nSeason: Summer 2026\nRequired skills: excel\nPreferred skills: communication',
   },

@@ -125,8 +125,8 @@ export default function EmployerInternshipFormEnhancements({
       }
 
       const workMode = String(formData.get('work_mode') ?? '').trim()
-      if ((workMode === 'on-site' || workMode === 'hybrid') && (isBlank(formData.get('location_state')) || isBlank(formData.get('location_city')))) {
-        nextIssues.push({ field: 'location_city', message: 'City and state are required for hybrid/on-site roles.' })
+      if ((workMode === 'in_person' || workMode === 'hybrid') && (isBlank(formData.get('location_state')) || isBlank(formData.get('location_city')))) {
+        nextIssues.push({ field: 'location_city', message: 'City and state are required for hybrid/in-person roles.' })
       }
 
       if (workMode === 'remote' || workMode === 'hybrid') {
@@ -178,7 +178,7 @@ export default function EmployerInternshipFormEnhancements({
       const mode = String(new FormData(form).get('work_mode') ?? '').trim()
       const remoteSection = form.querySelector<HTMLElement>('[data-remote-eligibility-section="1"]')
       if (remoteSection) {
-        remoteSection.style.display = mode === 'on-site' ? 'none' : ''
+        remoteSection.style.display = mode === 'in_person' ? 'none' : ''
       }
     }
     const onSubmit = (event: SubmitEvent) => {

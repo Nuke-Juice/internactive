@@ -98,6 +98,9 @@ export default async function InboxPage() {
   }
 
   const copy = roleCopy(role)
+  const nowTimestamp = new Date().getTime()
+  const weekInMs = 7 * 24 * 60 * 60 * 1000
+  const weekAgoIso = new Date(nowTimestamp - weekInMs).toISOString()
 
   if (!user || !role) {
     return (
@@ -225,8 +228,6 @@ export default async function InboxPage() {
         : { data: [] as EmployerApplicationRow[] }
 
     const applications = (applicationsData ?? []) as EmployerApplicationRow[]
-    const internshipById = new Map(internships.map((item) => [item.id, item]))
-
     const applicantsByInternship = new Map<string, number>()
     for (const row of applications) {
       applicantsByInternship.set(row.internship_id, (applicantsByInternship.get(row.internship_id) ?? 0) + 1)
@@ -264,7 +265,7 @@ export default async function InboxPage() {
                 {
                   applications.filter((item) => {
                     if (!item.created_at) return false
-                    return Date.now() - new Date(item.created_at).getTime() <= 7 * 24 * 60 * 60 * 1000
+                    return nowTimestamp - new Date(item.created_at).getTime() <= weekInMs
                   }).length
                 }
               </div>
@@ -322,7 +323,7 @@ export default async function InboxPage() {
       admin
         .from('applications')
         .select('id', { count: 'exact', head: true })
-        .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+        .gte('created_at', weekAgoIso),
     ])
 
     adminInternships = (internshipRows ?? []) as AdminInternshipRow[]

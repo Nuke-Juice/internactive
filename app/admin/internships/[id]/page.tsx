@@ -749,7 +749,7 @@ export default async function AdminInternshipEditPage({
                 <label className="text-xs font-medium text-slate-700">Work mode</label>
                 <div className="mt-2 grid grid-cols-3 gap-2">
                   {[
-                    { value: 'on-site', label: 'On-site' },
+                    { value: 'in_person', label: 'In-person' },
                     { value: 'hybrid', label: 'Hybrid' },
                     { value: 'remote', label: 'Remote' },
                   ].map((option) => (

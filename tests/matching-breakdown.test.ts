@@ -4,7 +4,7 @@ import { DEFAULT_MATCHING_WEIGHTS, evaluateInternshipMatch } from '../lib/matchi
 import { mockInternships, mockStudents } from '../lib/matching.fixtures.ts'
 import { expectedSignalKeys, rankInternshipsForStudentPreview, evaluateSinglePreviewMatch } from '../lib/admin/matchingPreview.ts'
 
-test('explain breakdown includes expected signals and sums to total score', () => {
+test('explain breakdown includes expected signals and raw contributions sum to raw total', () => {
   const match = evaluateInternshipMatch(mockInternships[0], mockStudents[0].profile, DEFAULT_MATCHING_WEIGHTS, {
     explain: true,
   })
@@ -15,7 +15,8 @@ test('explain breakdown includes expected signals and sums to total score', () =
   assert.deepEqual(contributionKeys, expectedKeys)
 
   const contributionTotal = (match.breakdown?.perSignalContributions ?? []).reduce((sum, row) => sum + row.pointsAwarded, 0)
-  assert.equal(Number(contributionTotal.toFixed(3)), Number(match.score.toFixed(3)))
+  assert.equal(Number(contributionTotal.toFixed(3)), Number((match.breakdown?.totalScoreRaw ?? 0).toFixed(3)))
+  assert.equal(match.score, Math.round((match.breakdown?.normalizedScore ?? 0) * 100))
 })
 
 test('preview ranking score matches direct production score for same student/internship', () => {

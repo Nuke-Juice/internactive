@@ -625,9 +625,12 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
     if (selectedMajorId || !major.trim() || majorCatalog.length === 0) return
     const matchedByName = majorCatalog.find((item) => item.name.toLowerCase() === major.trim().toLowerCase())
     if (!matchedByName) return
-    setSelectedMajorId(matchedByName.id)
-    setMajor(matchedByName.name)
-    setMajorQuery(matchedByName.name)
+    const timer = setTimeout(() => {
+      setSelectedMajorId(matchedByName.id)
+      setMajor(matchedByName.name)
+      setMajorQuery(matchedByName.name)
+    }, 0)
+    return () => clearTimeout(timer)
   }, [major, majorCatalog, selectedMajorId])
 
   useEffect(() => {

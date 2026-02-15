@@ -17,6 +17,8 @@ type SnapshotInternship = {
   description?: string | null
   work_mode?: string | null
   term?: string | null
+  start_date?: string | null
+  application_deadline?: string | null
   experience_level?: string | null
   role_category?: string | null
   required_skills?: string[] | string | null
@@ -69,7 +71,7 @@ function asWorkModes(value: string[] | string | null | undefined): WorkMode[] {
     .map((item): WorkMode | null => {
       if (item.includes('remote')) return 'remote'
       if (item.includes('hybrid')) return 'hybrid'
-      if (item.includes('on-site') || item.includes('onsite') || item.includes('in person')) return 'on-site'
+      if (item.includes('on-site') || item.includes('onsite') || item.includes('in person') || item.includes('in_person')) return 'in_person'
       return null
     })
     .filter((item): item is WorkMode => item !== null)
@@ -98,6 +100,8 @@ export function buildApplicationMatchSnapshot(input: {
     description: input.internship.description ?? null,
     work_mode: input.internship.work_mode ?? null,
     term: input.internship.term ?? null,
+    start_date: input.internship.start_date ?? null,
+    application_deadline: input.internship.application_deadline ?? null,
     experience_level: input.internship.experience_level ?? null,
     category: input.internship.role_category ?? null,
     required_skills: input.internship.required_skills ?? null,
@@ -125,6 +129,7 @@ export function buildApplicationMatchSnapshot(input: {
     coursework: asStringArray(input.profile?.coursework ?? null),
     coursework_category_ids: asStringArray(input.profile?.coursework_category_ids ?? null),
     availability_hours_per_week: input.profile?.availability_hours_per_week ?? null,
+    availability_start_month: input.profile?.availability_start_month ?? null,
     preferred_locations: (() => {
       const explicit = asStringArray(input.profile?.preferred_locations ?? null)
       return explicit.length > 0 ? explicit : preferenceSignals.preferredLocations
@@ -139,7 +144,7 @@ export function buildApplicationMatchSnapshot(input: {
   const match = evaluateInternshipMatch(internshipInput, profileInput)
 
   return {
-    match_score: Math.round(match.score),
+    match_score: Math.max(0, Math.min(100, Math.round(match.score))),
     match_reasons: match.reasons,
     match_gaps: match.gaps,
     matching_version: MATCHING_VERSION,

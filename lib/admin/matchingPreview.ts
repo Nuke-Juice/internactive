@@ -111,6 +111,8 @@ type InternshipRow = {
   location: string | null
   work_mode: string | null
   term: string | null
+  start_date: string | null
+  application_deadline: string | null
   required_skills: string[] | null
   preferred_skills: string[] | null
   recommended_coursework: string[] | null
@@ -238,6 +240,8 @@ function toInternshipPreviewItem(row: InternshipRow): AdminInternshipPreviewItem
     location: row.location,
     work_mode: row.work_mode,
     term: row.term,
+    start_date: row.start_date,
+    application_deadline: row.application_deadline,
     required_skills: row.required_skills,
     preferred_skills: row.preferred_skills,
     recommended_coursework: row.recommended_coursework,
@@ -399,6 +403,7 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
       coursework_category_ids: courseworkCategoryIds,
       coursework: [],
       availability_hours_per_week: row.availability_hours_per_week,
+      availability_start_month: row.availability_start_month,
       preferred_terms: preferredTerms,
       preferred_locations: preferenceSignals.preferredLocations,
       preferred_work_modes: preferenceSignals.preferredWorkModes,
@@ -450,7 +455,7 @@ export async function loadAdminInternshipPreviewItems(
   let query = admin
     .from('internships')
     .select(
-      'id, title, company_name, description, majors, target_graduation_years, experience_level, role_category, category, hours_per_week, location, location_city, location_state, remote_allowed, work_mode, term, required_skills, preferred_skills, recommended_coursework, is_active, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+      'id, title, company_name, description, majors, target_graduation_years, experience_level, role_category, category, hours_per_week, location, location_city, location_state, remote_allowed, work_mode, term, start_date, application_deadline, required_skills, preferred_skills, recommended_coursework, is_active, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
     )
     .order('created_at', { ascending: false })
     .limit(600)
