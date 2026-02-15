@@ -81,7 +81,7 @@ export default function ActiveInternshipsList({
                 View details
               </Link>
               <Link
-                href={`/inbox?internship_id=${encodeURIComponent(internship.id)}`}
+                href={`/dashboard/employer/applicants?internship_id=${encodeURIComponent(internship.id)}`}
                 className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
               >
                 Applicants
