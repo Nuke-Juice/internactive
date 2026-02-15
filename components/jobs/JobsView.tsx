@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { parseMajors, rankInternships } from '@/lib/matching'
-import { getEmployerPlanFeatures } from '@/lib/billing/plan'
+import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getCommuteMinutesForListings, toGeoPoint } from '@/lib/commute'
-import { fetchInternships, formatMajors, type Internship } from '@/lib/jobs/internships'
+import { fetchInternships, fetchInternshipsByIds, formatMajors, type Internship } from '@/lib/jobs/internships'
+import { parseSponsoredInternshipIds, splitSponsoredListings } from '@/lib/jobs/sponsored'
 import { normalizeStateCode } from '@/lib/locations/usLocationCatalog'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import { supabaseServer } from '@/lib/supabase/server'
@@ -279,12 +280,6 @@ function getStudentProfileCompletion(profile: {
   return { completed, total, percent, isComplete: completed === total }
 }
 
-function tierPriorityScore(tier: string | null | undefined) {
-  if (!tier) return 0
-  const normalized = tier === 'starter' || tier === 'pro' ? tier : 'free'
-  return getEmployerPlanFeatures(normalized).priorityPlacementInStudentFeed ? 1 : 0
-}
-
 export function JobsViewSkeleton({ showHero = false }: { showHero?: boolean }) {
   return (
     <>
@@ -344,7 +339,6 @@ export default async function JobsView({
   const radius = resolvedSearchParams.radius ?? ''
   const parsedPage = Number.parseInt((resolvedSearchParams.page ?? '1').trim(), 10)
   const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1
-  const parsedPayMin = payMin ? Number(payMin) : null
 
   const supabase = await supabaseServer()
   const {
@@ -364,6 +358,29 @@ export default async function JobsView({
     },
   })
   const internships = internshipsResult.rows
+  const employerIdsForResponseStats = Array.from(
+    new Set(
+      internships
+        .map((listing) => listing.employer_id)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    )
+  )
+  const { data: employerResponseRows } =
+    employerIdsForResponseStats.length > 0
+      ? await supabase
+          .from('employer_response_rate_stats')
+          .select('employer_id, applications_total, viewed_within_7d_rate')
+          .in('employer_id', employerIdsForResponseStats)
+      : { data: [] as Array<{ employer_id: string; applications_total: number; viewed_within_7d_rate: number | null }> }
+  const employerResponseById = new Map(
+    (employerResponseRows ?? []).map((row) => [
+      row.employer_id,
+      {
+        applicationsTotal: typeof row.applications_total === 'number' ? row.applications_total : 0,
+        viewedWithin7dRate: typeof row.viewed_within_7d_rate === 'number' ? row.viewed_within_7d_rate : null,
+      },
+    ])
+  )
   const hasMoreResults = internshipsResult.hasMore
   const newestInternships = internships.slice(0, 6)
   const filters: JobsFilterState = {
@@ -384,6 +401,7 @@ export default async function JobsView({
   let profileYear: string | null = null
   let profileExperienceLevel: string | null = null
   let profileAvailability: number | null = null
+  let profileAvailabilityStartMonth: string | null = null
   let profileCoursework: string[] = []
   let profileSkills: string[] = []
   let profileSkillIds: string[] = []
@@ -443,6 +461,7 @@ export default async function JobsView({
     profileYear = profile?.year ?? null
     profileExperienceLevel = profile?.experience_level ?? null
     profileAvailability = profile?.availability_hours_per_week ?? null
+    profileAvailabilityStartMonth = profile?.availability_start_month ?? null
     profileCoursework = Array.isArray(profile?.coursework)
       ? profile.coursework.filter(
           (course): course is string => typeof course === 'string' && course.length > 0
@@ -485,9 +504,10 @@ export default async function JobsView({
   const filteredCandidates = internships.filter((listing) => matchesListingFilters(listing, filters))
 
   let filteredInternships = filteredCandidates
+  let rankedMatches: ReturnType<typeof rankInternships> = []
 
   if (isStudent && activeSortMode === 'best_match') {
-    const ranked = rankInternships(
+    rankedMatches = rankInternships(
       filteredCandidates.map((listing) => ({
         id: listing.id,
         title: listing.title,
@@ -510,6 +530,8 @@ export default async function JobsView({
         coursework_item_ids: listing.coursework_item_ids,
         coursework_category_ids: listing.coursework_category_ids,
         coursework_category_names: listing.coursework_category_names,
+        start_date: listing.start_date ?? null,
+        application_deadline: listing.application_deadline ?? null,
       })),
       {
         majors: profileMajors,
@@ -521,6 +543,7 @@ export default async function JobsView({
         coursework_category_ids: profileCourseworkCategoryIds,
         coursework: profileCoursework,
         availability_hours_per_week: profileAvailability,
+        availability_start_month: profileAvailabilityStartMonth,
         preferred_terms:
           preferenceSignals.preferredTerms.length > 0
             ? preferenceSignals.preferredTerms
@@ -531,22 +554,33 @@ export default async function JobsView({
       }
     )
 
-    const scoreById = new Map(ranked.map((item) => [item.internship.id, item.match.score]))
-    filteredInternships = filteredCandidates
-      .filter((listing) => scoreById.has(listing.id))
-      .map((listing) => ({ ...listing, matchScore: scoreById.get(listing.id) ?? 0 }))
-      .sort((a, b) => {
-        if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore
-        const tierDiff = tierPriorityScore(b.employer_verification_tier) - tierPriorityScore(a.employer_verification_tier)
-        if (tierDiff !== 0) return tierDiff
-        return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+    const listingById = new Map(filteredCandidates.map((listing) => [listing.id, listing]))
+    filteredInternships = rankedMatches
+      .map((item) => {
+        const listing = listingById.get(item.internship.id)
+        if (!listing) return null
+        whyMatchById.set(item.internship.id, item.match.reasons.slice(0, 3))
+        return { ...listing, matchScore: item.match.score }
       })
+      .filter((listing): listing is Internship & { matchScore: number } => Boolean(listing))
   } else {
     filteredInternships = [...filteredCandidates].sort((a, b) => {
-      const tierDiff = tierPriorityScore(b.employer_verification_tier) - tierPriorityScore(a.employer_verification_tier)
-      if (tierDiff !== 0) return tierDiff
       return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
     })
+  }
+
+  const sponsoredInternshipIds = parseSponsoredInternshipIds(process.env.SPONSORED_INTERNSHIP_IDS)
+  let sponsoredInternships: Internship[] = []
+  if (sponsoredInternshipIds.length > 0) {
+    const fetchedSponsored = (await fetchInternshipsByIds(sponsoredInternshipIds))
+      .filter((listing) => !(isStudent && preferenceSignals.remoteOnly && listing.work_mode !== 'remote'))
+    const split = splitSponsoredListings({
+      sponsoredListings: fetchedSponsored,
+      organicListings: filteredInternships,
+      maxSponsored: 3,
+    })
+    sponsoredInternships = split.sponsored
+    filteredInternships = split.organic
   }
 
   const topBestMatchIds = new Set(
@@ -554,46 +588,6 @@ export default async function JobsView({
       ? filteredInternships.slice(0, 3).map((listing) => listing.id)
       : []
   )
-
-  if (isStudent && activeSortMode === 'best_match') {
-    for (const listing of filteredInternships.slice(0, 3)) {
-      const reasons: string[] = []
-      const listingMajors = parseMajors(listing.majors)
-      if (profileMajors.length > 0 && listingMajors.some((major) => profileMajors.includes(major))) {
-        reasons.push(`Matches your major (${profileMajors[0]})`)
-      }
-      if (
-        (listing.work_mode ?? '').toLowerCase().includes('remote') ||
-        (listing.location ?? '').toLowerCase().includes('remote')
-      ) {
-        reasons.push('Remote friendly')
-      }
-      const listingPayRange =
-        typeof listing.pay_min === 'number' && typeof listing.pay_max === 'number'
-          ? { min: listing.pay_min, max: listing.pay_max }
-          : extractNumericPayRange(listing.pay)
-      if (
-        typeof parsedPayMin === 'number' &&
-        Number.isFinite(parsedPayMin) &&
-        parsedPayMin > 0 &&
-        listingPayRange?.max &&
-        listingPayRange.max >= parsedPayMin
-      ) {
-        reasons.push('Pay meets your minimum')
-      }
-      if (
-        typeof profileAvailability === 'number' &&
-        profileAvailability > 0 &&
-        typeof listing.hours_per_week === 'number' &&
-        listing.hours_per_week <= profileAvailability
-      ) {
-        reasons.push('Fits your weekly availability')
-      }
-      if (reasons.length > 0) {
-        whyMatchById.set(listing.id, reasons.slice(0, 4))
-      }
-    }
-  }
 
   if (user && role === 'student' && filteredInternships.length > 0) {
     const employerIds = Array.from(
@@ -771,6 +765,31 @@ export default async function JobsView({
   const sortedByLabel = SORT_CONFIG[activeSortMode].label
   const listingsTitle = filteredInternships.length === 0 ? 'Browse internships' : 'Internships hiring now'
   const compactSignedInHero = showHero && Boolean(user)
+  const exposureDay = new Date().toISOString().slice(0, 10)
+  const exposureUser = user?.id ?? 'anon'
+
+  await trackAnalyticsEvent({
+    eventName: 'jobs_feed_exposure_organic',
+    userId: user?.id ?? null,
+    properties: {
+      sort: activeSortMode,
+      page,
+      listing_ids: filteredInternships.map((listing) => listing.id),
+      dedupe_key: `jobs_feed_exposure_organic:${activeSortMode}:${page}:${exposureUser}:${exposureDay}`,
+    },
+  })
+  if (sponsoredInternships.length > 0) {
+    await trackAnalyticsEvent({
+      eventName: 'jobs_feed_exposure_sponsored',
+      userId: user?.id ?? null,
+      properties: {
+        sort: activeSortMode,
+        page,
+        listing_ids: sponsoredInternships.map((listing) => listing.id),
+        dedupe_key: `jobs_feed_exposure_sponsored:${activeSortMode}:${page}:${exposureUser}:${exposureDay}`,
+      },
+    })
+  }
 
   return (
     <>
@@ -921,6 +940,35 @@ export default async function JobsView({
           />
 
           <div className="space-y-4">
+            {sponsoredInternships.length > 0 ? (
+              <section className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-amber-900">Sponsored</h3>
+                <div className="mt-3 space-y-4">
+                  {sponsoredInternships.map((listing) => {
+                    const responseStats = listing.employer_id ? employerResponseById.get(listing.employer_id) : undefined
+                    return (
+                      <JobCard
+                        key={`sponsored-${listing.id}`}
+                        listing={{
+                          ...listing,
+                          experience_level: listing.target_student_year ?? listing.experience_level,
+                          majorsText: formatMajors(listing.majors),
+                          commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
+                          maxCommuteMinutes: studentMaxCommuteMinutes,
+                          employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
+                          employer_response_total: responseStats?.applicationsTotal ?? 0,
+                        }}
+                        isAuthenticated={Boolean(user)}
+                        userRole={role ?? null}
+                        showWhyMatch={false}
+                        whyMatchReasons={[]}
+                        isSponsored
+                      />
+                    )
+                  })}
+                </div>
+              </section>
+            ) : null}
             {internships.length === 0 ? (
               <section className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
                 <h3 className="text-lg font-semibold text-slate-900">No internships yet</h3>
@@ -977,28 +1025,35 @@ export default async function JobsView({
                       </Link>
                     </div>
                     <div className={`mt-4 grid gap-4 ${newestInternships.length > 1 ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
-                      {newestInternships.map((listing) => (
-                        <JobCard
-                          key={listing.id}
-                          listing={{
-                            ...listing,
-                            experience_level: listing.target_student_year ?? listing.experience_level,
-                            majorsText: formatMajors(listing.majors),
-                            commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
-                            maxCommuteMinutes: studentMaxCommuteMinutes,
-                          }}
-                          isAuthenticated={Boolean(user)}
-                          userRole={role ?? null}
-                          showWhyMatch={topBestMatchIds.has(listing.id)}
-                          whyMatchReasons={whyMatchById.get(listing.id) ?? []}
-                        />
-                      ))}
+                      {newestInternships.map((listing) => {
+                        const responseStats = listing.employer_id ? employerResponseById.get(listing.employer_id) : undefined
+                        return (
+                          <JobCard
+                            key={listing.id}
+                            listing={{
+                              ...listing,
+                              experience_level: listing.target_student_year ?? listing.experience_level,
+                              majorsText: formatMajors(listing.majors),
+                              commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
+                              maxCommuteMinutes: studentMaxCommuteMinutes,
+                              employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
+                              employer_response_total: responseStats?.applicationsTotal ?? 0,
+                            }}
+                            isAuthenticated={Boolean(user)}
+                            userRole={role ?? null}
+                            showWhyMatch={topBestMatchIds.has(listing.id)}
+                            whyMatchReasons={whyMatchById.get(listing.id) ?? []}
+                            isSponsored={false}
+                          />
+                        )
+                      })}
                     </div>
                   </section>
                 )}
               </div>
             ) : (
               filteredInternships.map((listing) => {
+                const responseStats = listing.employer_id ? employerResponseById.get(listing.employer_id) : undefined
                 return (
                   <JobCard
                     key={listing.id}
@@ -1008,11 +1063,14 @@ export default async function JobsView({
                       majorsText: formatMajors(listing.majors),
                       commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
                       maxCommuteMinutes: studentMaxCommuteMinutes,
+                      employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
+                      employer_response_total: responseStats?.applicationsTotal ?? 0,
                     }}
                     isAuthenticated={Boolean(user)}
                     userRole={role ?? null}
                     showWhyMatch={topBestMatchIds.has(listing.id)}
                     whyMatchReasons={whyMatchById.get(listing.id) ?? []}
+                    isSponsored={false}
                   />
                 )
               })

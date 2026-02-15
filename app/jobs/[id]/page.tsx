@@ -4,7 +4,7 @@ import EmployerVerificationBadge from '@/components/badges/EmployerVerificationB
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getCommuteMinutesForListings, toGeoPoint } from '@/lib/commute'
 import { supabaseServer } from '@/lib/supabase/server'
-import { DEFAULT_MATCHING_WEIGHTS, evaluateInternshipMatch, parseMajors } from '@/lib/matching'
+import { evaluateInternshipMatch, parseMajors } from '@/lib/matching'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import ApplyButton from '../_components/ApplyButton'
 
@@ -32,13 +32,6 @@ function seasonFromMonth(value: string | null | undefined) {
   if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
   if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
   return ''
-}
-
-function scoreToPercent(score: number) {
-  const maxScore = Object.values(DEFAULT_MATCHING_WEIGHTS).reduce((sum, value) => sum + value, 0)
-
-  if (maxScore <= 0) return 0
-  return Math.max(0, Math.min(100, Math.round((score / maxScore) * 100)))
 }
 
 function formatDate(value: string | null | undefined) {
@@ -112,9 +105,9 @@ export default async function JobDetailPage({
   }
 
   const listingSelectRich =
-    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
   const listingSelectBase =
-    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline'
+    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
 
   const { data: richListing, error: richListingError } = await supabase
     .from('internships')
@@ -200,6 +193,8 @@ export default async function JobDetailPage({
         category: listing.role_category ?? null,
         work_mode: listing.work_mode ?? null,
         term: listing.term ?? null,
+        start_date: (listing as { start_date?: string | null }).start_date ?? null,
+        application_deadline: listing.application_deadline ?? null,
         required_skills: listing.required_skills ?? null,
         preferred_skills: listing.preferred_skills ?? null,
         recommended_coursework: listing.recommended_coursework ?? null,
@@ -235,6 +230,7 @@ export default async function JobDetailPage({
         coursework_item_ids: canonicalCourseworkItemIds,
         coursework_category_ids: canonicalCourseworkCategoryIds,
         availability_hours_per_week: profile?.availability_hours_per_week ?? null,
+        availability_start_month: profile?.availability_start_month ?? null,
         preferred_terms:
           preferenceSignals.preferredTerms.length > 0
             ? preferenceSignals.preferredTerms
@@ -248,7 +244,7 @@ export default async function JobDetailPage({
     )
 
     matchBreakdown = {
-      scorePercent: scoreToPercent(match.score),
+      scorePercent: match.score,
       reasons: match.reasons,
       gaps: match.gaps,
     }
@@ -337,6 +333,22 @@ export default async function JobDetailPage({
 
   const viewDay = new Date().toISOString().slice(0, 10)
   const viewDedupeKey = user?.id ? `view:${listing.id}:${user.id}:${viewDay}` : null
+  const applicationCap = typeof listing.application_cap === 'number' ? listing.application_cap : 60
+  const applicationsCount = typeof listing.applications_count === 'number' ? listing.applications_count : 0
+  const capReached = applicationsCount >= applicationCap
+  const { data: responseStatsRow } =
+    listing.employer_id
+      ? await supabase
+          .from('employer_response_rate_stats')
+          .select('applications_total, viewed_within_7d_rate')
+          .eq('employer_id', listing.employer_id)
+          .maybeSingle()
+      : { data: null as { applications_total: number; viewed_within_7d_rate: number | null } | null }
+  const employerApplicationsTotal =
+    typeof responseStatsRow?.applications_total === 'number' ? responseStatsRow.applications_total : 0
+  const employerResponseRate =
+    typeof responseStatsRow?.viewed_within_7d_rate === 'number' ? responseStatsRow.viewed_within_7d_rate : null
+
   await trackAnalyticsEvent({
     eventName: 'view_job_detail',
     userId: user?.id ?? null,
@@ -539,6 +551,10 @@ export default async function JobDetailPage({
               </p>
 
               <div className="mt-4 grid gap-2 rounded-lg border border-blue-100 bg-white/80 p-3 text-xs text-blue-950">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-blue-700">Applicants</span>
+                  <span className="text-right font-medium">Applicants: {applicationsCount} / {applicationCap}</span>
+                </div>
                 <div className="flex items-center justify-between">
                   <span className="text-blue-700">Company</span>
                   {listing.employer_id ? (
@@ -567,13 +583,30 @@ export default async function JobDetailPage({
                 ) : null}
               </div>
 
+              <div className="mt-3 rounded-lg border border-blue-100 bg-white/80 p-3 text-xs text-blue-950">
+                <div className="font-semibold">Transparent applications.</div>
+                <p className="mt-1 text-blue-900">
+                  We show applicant counts and when employers view your application - so you&apos;re not applying into a black hole.
+                </p>
+              </div>
+
+              <div className="mt-2 text-xs text-blue-900">
+                {employerApplicationsTotal >= 5 && employerResponseRate !== null
+                  ? `Responds to ${Math.round(employerResponseRate)}% within 7 days`
+                  : 'Not enough data yet'}
+              </div>
+
               <ApplyButton
                 listingId={listing.id}
                 applyMode={listing.apply_mode}
                 isAuthenticated={Boolean(user)}
                 userRole={userRole}
+                isClosed={capReached}
                 className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
               />
+              {capReached ? (
+                <p className="mt-2 text-xs text-blue-900">Applications closed ({applicationCap} applicants).</p>
+              ) : null}
               {listing.apply_mode === 'ats_link' || listing.apply_mode === 'hybrid' ? (
                 <p className="mt-2 text-xs text-blue-900">
                   You will quick apply here first, then complete the employer ATS application.

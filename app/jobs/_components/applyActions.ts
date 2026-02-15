@@ -1,7 +1,12 @@
 'use server'
 
 import { supabaseServer } from '@/lib/supabase/server'
-import { APPLY_ERROR, isDuplicateApplicationConstraintError, type ApplyErrorCode } from '@/lib/applyErrors'
+import {
+  APPLY_ERROR,
+  isCapReachedApplicationError,
+  isDuplicateApplicationConstraintError,
+  type ApplyErrorCode,
+} from '@/lib/applyErrors'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
 import { buildApplicationMatchSnapshot } from '@/lib/applicationMatchSnapshot'
@@ -70,7 +75,7 @@ export async function applyFromMicroOnboardingAction({
     supabase
       .from('internships')
       .select(
-        'id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, external_apply_url, internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, external_apply_url, application_cap, applications_count, internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
       .eq('is_active', true)
@@ -91,6 +96,16 @@ export async function applyFromMicroOnboardingAction({
       properties: { listing_id: listingId, code: APPLY_ERROR.LISTING_NOT_FOUND, missing: [] },
     })
     return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND }
+  }
+  const applicationCap = typeof listing.application_cap === 'number' ? listing.application_cap : 60
+  const applicationsCount = typeof listing.applications_count === 'number' ? listing.applications_count : 0
+  if (applicationsCount >= applicationCap) {
+    await trackAnalyticsEvent({
+      eventName: 'apply_blocked',
+      userId: user.id,
+      properties: { listing_id: listingId, code: APPLY_ERROR.CAP_REACHED, missing: [] },
+    })
+    return { ok: false, code: APPLY_ERROR.CAP_REACHED }
   }
 
   if (!userRow || userRow.role !== 'student') {
@@ -165,23 +180,28 @@ export async function applyFromMicroOnboardingAction({
     return { ok: false, code: APPLY_ERROR.APPLICATION_INSERT_FAILED }
   }
 
-  const { data: insertedApplication, error: insertError } = await supabase
-    .from('applications')
-    .insert({
-      internship_id: listingId,
-      student_id: user.id,
-      resume_url: resumePath,
-      status: 'submitted',
-      external_apply_required: requiresExternalApply,
-      match_score: snapshot.match_score,
-      match_reasons: snapshot.match_reasons,
-      match_gaps: snapshot.match_gaps,
-      matching_version: snapshot.matching_version,
-    })
-    .select('id')
-    .single()
+  const { data: insertedApplication, error: insertError } = await supabase.rpc('submit_application_with_cap', {
+    in_internship_id: listingId,
+    in_student_id: user.id,
+    in_resume_url: resumePath,
+    in_status: 'submitted',
+    in_external_apply_required: requiresExternalApply,
+    in_quick_apply_note: null,
+    in_match_score: snapshot.match_score,
+    in_match_reasons: snapshot.match_reasons,
+    in_match_gaps: snapshot.match_gaps,
+    in_matching_version: snapshot.matching_version,
+  })
 
   if (insertError) {
+    if (isCapReachedApplicationError(insertError)) {
+      await trackAnalyticsEvent({
+        eventName: 'apply_blocked',
+        userId: user.id,
+        properties: { listing_id: listingId, code: APPLY_ERROR.CAP_REACHED, missing: [] },
+      })
+      return { ok: false, code: APPLY_ERROR.CAP_REACHED }
+    }
     if (isDuplicateApplicationConstraintError(insertError)) {
       await trackAnalyticsEvent({
         eventName: 'apply_blocked',
@@ -198,6 +218,9 @@ export async function applyFromMicroOnboardingAction({
     })
     return { ok: false, code: APPLY_ERROR.APPLICATION_INSERT_FAILED }
   }
+  const insertedApplicationId = Array.isArray(insertedApplication)
+    ? insertedApplication[0]?.id
+    : insertedApplication?.id
 
   await trackAnalyticsEvent({
     eventName: 'submit_apply_success',
@@ -207,12 +230,12 @@ export async function applyFromMicroOnboardingAction({
   await trackAnalyticsEvent({
     eventName: 'quick_apply_submitted',
     userId: user.id,
-    properties: { listing_id: listingId, application_id: insertedApplication?.id ?? null, apply_mode: applyMode },
+    properties: { listing_id: listingId, application_id: insertedApplicationId ?? null, apply_mode: applyMode },
   })
 
-  if (insertedApplication?.id) {
+  if (insertedApplicationId) {
     try {
-      await sendEmployerApplicationAlert({ applicationId: insertedApplication.id })
+      await sendEmployerApplicationAlert({ applicationId: insertedApplicationId })
     } catch {
       // no-op; email should not block application submission
     }

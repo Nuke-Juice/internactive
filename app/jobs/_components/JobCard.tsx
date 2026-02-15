@@ -16,6 +16,10 @@ type Listing = {
   role_category?: string | null
   work_mode?: string | null
   apply_mode?: string | null
+  application_cap?: number | null
+  applications_count?: number | null
+  employer_response_rate?: number | null
+  employer_response_total?: number | null
   term?: string | null
   hours_min?: number | null
   hours_max?: number | null
@@ -40,6 +44,7 @@ type Props = {
   userRole?: 'student' | 'employer' | null
   showWhyMatch?: boolean
   whyMatchReasons?: string[]
+  isSponsored?: boolean
 }
 
 type LocationChip = {
@@ -58,7 +63,7 @@ function toWorkModeLabel(value: string | null | undefined) {
   const normalized = (value ?? '').trim().toLowerCase()
   if (normalized === 'remote') return 'Remote'
   if (normalized === 'hybrid') return 'Hybrid'
-  if (normalized === 'onsite' || normalized === 'on-site') return 'On-site'
+  if (normalized === 'onsite' || normalized === 'on-site' || normalized === 'in person' || normalized === 'in_person') return 'In-person'
   return null
 }
 
@@ -217,6 +222,7 @@ export default function JobCard({
   userRole = null,
   showWhyMatch = false,
   whyMatchReasons = [],
+  isSponsored = false,
 }: Props) {
   const locationChips = getLocationChips(listing)
   const levelLabel = mapExperienceLevel(listing.experience_level)
@@ -229,6 +235,10 @@ export default function JobCard({
   const isClosed = typeof deadlineDays === 'number' && deadlineDays < 0
   const isUrgent = typeof deadlineDays === 'number' && deadlineDays >= 0 && deadlineDays <= 7
   const { visible: skillChips, overflow: skillsOverflow } = getSkillChips(listing)
+  const applicationCap = typeof listing.application_cap === 'number' ? listing.application_cap : 60
+  const applicationsCount = typeof listing.applications_count === 'number' ? listing.applications_count : 0
+  const capReached = applicationsCount >= applicationCap
+  const nearCap = applicationsCount >= 50 && !capReached
 
   return (
     <article className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5">
@@ -254,6 +264,7 @@ export default function JobCard({
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
+        {isSponsored ? <span className={badgeClass(true)}>Sponsored</span> : null}
         {locationChips.map((chip) => (
           <span key={chip.label} className={badgeClass(Boolean(chip.primary))}>
             {chip.label}
@@ -266,6 +277,19 @@ export default function JobCard({
       {rolePreview ? <p className="mt-3 line-clamp-1 text-sm text-slate-700">{rolePreview}</p> : null}
 
       <div className="mt-3 grid gap-1.5 text-xs text-slate-600 sm:grid-cols-2">
+        <p className="font-medium text-slate-700">
+          Applicants: {applicationsCount} / {applicationCap}
+          {nearCap ? (
+            <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-700">
+              Nearly full
+            </span>
+          ) : null}
+          {capReached ? (
+            <span className="ml-2 rounded-full border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-700">
+              Closed
+            </span>
+          ) : null}
+        </p>
         {hoursText ? <p className="font-medium text-slate-700">{hoursText}</p> : null}
         {listing.application_deadline && deadlineDays !== null ? (
           <p className={`text-right sm:text-left ${isClosed ? 'font-semibold text-slate-500' : isUrgent ? 'font-semibold text-amber-700' : 'text-slate-700'}`}>
@@ -281,6 +305,11 @@ export default function JobCard({
             <span className="font-medium text-slate-700">Industry:</span> {industryLabel}
           </p>
         ) : null}
+        <p className="text-[11px] text-slate-600">
+          {typeof listing.employer_response_total === 'number' && listing.employer_response_total >= 5 && typeof listing.employer_response_rate === 'number'
+            ? `Employer response rate: ${Math.round(listing.employer_response_rate)}% (views within 7 days)`
+            : 'New employer - response rate not available yet'}
+        </p>
       </div>
 
       {listing.majorsText ? (
@@ -330,7 +359,7 @@ export default function JobCard({
           applyMode={listing.apply_mode}
           isAuthenticated={isAuthenticated}
           userRole={userRole}
-          isClosed={isClosed}
+          isClosed={isClosed || capReached}
           className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         />
       </div>

@@ -5,6 +5,7 @@ export const APPLY_ERROR = {
   RESUME_REQUIRED: 'RESUME_REQUIRED',
   PROFILE_INCOMPLETE: 'PROFILE_INCOMPLETE',
   DUPLICATE_APPLICATION: 'DUPLICATE_APPLICATION',
+  CAP_REACHED: 'CAP_REACHED',
   LISTING_NOT_FOUND: 'LISTING_NOT_FOUND',
   INVALID_RESUME_FILE: 'INVALID_RESUME_FILE',
   APPLICATION_INSERT_FAILED: 'APPLICATION_INSERT_FAILED',
@@ -14,4 +15,8 @@ export type ApplyErrorCode = (typeof APPLY_ERROR)[keyof typeof APPLY_ERROR]
 
 export function isDuplicateApplicationConstraintError(error: { code?: string } | null | undefined) {
   return error?.code === '23505'
+}
+
+export function isCapReachedApplicationError(error: { code?: string; message?: string } | null | undefined) {
+  return error?.code === 'cap_reached' || (error?.message ?? '').toLowerCase().includes('cap_reached')
 }

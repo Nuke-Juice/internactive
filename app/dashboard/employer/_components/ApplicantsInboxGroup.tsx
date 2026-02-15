@@ -12,6 +12,8 @@ type Applicant = {
   topReasons: string[]
   readinessLabel?: string | null
   resumeUrl: string | null
+  openApplicationHref: string
+  employerViewedAt: string | null
   status: 'submitted' | 'reviewing' | 'interview' | 'rejected' | 'accepted'
   notes: string | null
 }
@@ -19,6 +21,8 @@ type Applicant = {
 type Props = {
   internshipId: string
   internshipTitle: string
+  applicantCountText: string
+  responseRateText: string
   applicants: Applicant[]
   onUpdate: (formData: FormData) => Promise<void>
   showMatchScore: boolean
@@ -32,6 +36,15 @@ function formatDate(value: string | null) {
     return new Date(value).toLocaleDateString()
   } catch {
     return value
+  }
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return 'Not viewed yet'
+  try {
+    return `Viewed ${new Date(value).toLocaleString()}`
+  } catch {
+    return `Viewed ${value}`
   }
 }
 
@@ -49,6 +62,8 @@ function statusClass(status: Applicant['status']) {
 export default function ApplicantsInboxGroup({
   internshipId,
   internshipTitle,
+  applicantCountText,
+  responseRateText,
   applicants,
   onUpdate,
   showMatchScore,
@@ -59,7 +74,9 @@ export default function ApplicantsInboxGroup({
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-5 py-4">
         <div className="text-sm font-semibold text-slate-900">{internshipTitle || 'Internship'}</div>
-        <div className="mt-1 text-xs text-slate-500">{applicants.length} applicant(s)</div>
+        <div className="mt-1 text-xs text-slate-500">{applicantCountText}</div>
+        <div className="mt-1 text-xs text-slate-500">{responseRateText}</div>
+        <div className="mt-1 text-xs text-slate-500">Viewing applications quickly improves trust and your response rate.</div>
       </div>
 
       <div className="overflow-x-auto">
@@ -112,16 +129,17 @@ export default function ApplicantsInboxGroup({
                 <td className="px-4 py-3">
                   {applicant.resumeUrl ? (
                     <a
-                      href={applicant.resumeUrl}
+                      href={applicant.openApplicationHref}
                       target="_blank"
                       rel="noreferrer"
                       className="text-xs font-medium text-blue-700 hover:underline"
                     >
-                      View resume
+                      Open application
                     </a>
                   ) : (
                     <span className="text-xs text-slate-500">No resume</span>
                   )}
+                  <div className="mt-1 text-[11px] text-slate-500">{formatDateTime(applicant.employerViewedAt)}</div>
                 </td>
                 <td className="px-4 py-3">
                   <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${statusClass(applicant.status)}`}>

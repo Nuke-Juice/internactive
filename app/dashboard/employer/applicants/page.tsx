@@ -29,6 +29,8 @@ type ApplicationRow = {
   internship_id: string
   student_id: string
   created_at: string | null
+  submitted_at: string | null
+  employer_viewed_at: string | null
   match_score: number | null
   match_reasons: unknown
   resume_url: string | null
@@ -42,7 +44,7 @@ type ApplicationRow = {
 }
 
 function normalizeSort(value: string | undefined): ApplicantsSort {
-  return value === 'applied_at' ? 'applied_at' : 'match_score'
+  return value === 'match_score' ? 'match_score' : 'applied_at'
 }
 
 function normalizeSortForPlan(value: string | undefined, canSortByMatch: boolean): ApplicantsSort {
@@ -191,7 +193,7 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
 
   const { data: internships } = await supabase
     .from('internships')
-    .select('id, title')
+    .select('id, title, application_cap, applications_count')
     .eq('employer_id', user.id)
     .order('created_at', { ascending: false })
 
@@ -205,7 +207,7 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
     let query = supabase
       .from('applications')
       .select(
-        'id, internship_id, student_id, created_at, match_score, match_reasons, resume_url, status, reviewed_at, notes, external_apply_required, external_apply_completed_at, external_apply_clicks, external_apply_last_clicked_at'
+        'id, internship_id, student_id, created_at, submitted_at, employer_viewed_at, match_score, match_reasons, resume_url, status, reviewed_at, notes, external_apply_required, external_apply_completed_at, external_apply_clicks, external_apply_last_clicked_at'
       )
       .in('internship_id', scopedInternshipIds)
 
@@ -214,14 +216,23 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
     }
 
     if (sort === 'match_score') {
-      query = query.order('match_score', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
+      query = query.order('match_score', { ascending: false, nullsFirst: false }).order('submitted_at', { ascending: false })
     } else {
-      query = query.order('created_at', { ascending: false }).order('match_score', { ascending: false, nullsFirst: false })
+      query = query.order('submitted_at', { ascending: false }).order('match_score', { ascending: false, nullsFirst: false })
     }
 
     const { data } = await query
     applications = (data ?? []) as ApplicationRow[]
   }
+  const { data: employerResponseStats } = await supabase
+    .from('employer_response_rate_stats')
+    .select('applications_total, viewed_within_7d_rate')
+    .eq('employer_id', user.id)
+    .maybeSingle()
+  const employerResponseTotal =
+    typeof employerResponseStats?.applications_total === 'number' ? employerResponseStats.applications_total : 0
+  const employerResponseRate =
+    typeof employerResponseStats?.viewed_within_7d_rate === 'number' ? employerResponseStats.viewed_within_7d_rate : null
 
   const studentIds = Array.from(new Set(applications.map((row) => row.student_id)))
   const quickApplicantsCount = applications.filter((row) => Boolean(row.external_apply_required)).length
@@ -271,18 +282,11 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
     ])
   )
 
-  const uniqueResumePaths = Array.from(new Set(applications.map((row) => row.resume_url).filter(Boolean))) as string[]
-  const signedResumeEntries = await Promise.all(
-    uniqueResumePaths.map(async (path) => {
-      const { data } = await supabase.storage.from('resumes').createSignedUrl(path, 60 * 60)
-      return [path, data?.signedUrl ?? null] as const
-    })
-  )
-  const signedResumeUrlByPath = new Map(signedResumeEntries)
-
   const groups = availableInternships
     .filter((internship) => scopedInternshipIds.includes(internship.id))
     .map((internship) => {
+      const internshipCap = typeof internship.application_cap === 'number' ? internship.application_cap : 60
+      const internshipApplicantsCount = typeof internship.applications_count === 'number' ? internship.applications_count : 0
       const applicants = applications
         .filter((application) => application.internship_id === internship.id)
         .map((application, index) => {
@@ -310,11 +314,13 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
               hasResume: Boolean(application.resume_url),
               topReason: topReasons[0] ?? null,
             }),
-            appliedAt: application.created_at,
+            appliedAt: application.submitted_at ?? application.created_at,
             matchScore: application.match_score,
             topReasons,
             readinessLabel,
-            resumeUrl: application.resume_url ? signedResumeUrlByPath.get(application.resume_url) ?? null : null,
+            resumeUrl: application.resume_url ?? null,
+            openApplicationHref: `/dashboard/employer/applicants/view/${encodeURIComponent(application.id)}`,
+            employerViewedAt: application.employer_viewed_at,
             status: normalizeStatus(application.status),
             notes: application.notes ?? null,
           }
@@ -328,6 +334,11 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
       return {
         internshipId: internship.id,
         internshipTitle: internship.title ?? 'Internship',
+        applicantCountText: `Applicants: ${internshipApplicantsCount} / ${internshipCap}`,
+        responseRateText:
+          employerResponseTotal >= 5 && employerResponseRate !== null
+            ? `Your response rate (views within 7 days): ${Math.round(employerResponseRate)}%`
+            : 'Your response rate (views within 7 days): Not enough data yet',
         applicants,
       }
     })
@@ -407,6 +418,7 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
             <p className="mt-1 text-sm text-slate-600">
               Review applicants by internship and move them through your hiring workflow.
             </p>
+            <p className="mt-1 text-xs text-slate-500">Students can see applicant counts and when you view applications.</p>
           </div>
           <ApplicantsSortControls
             currentSort={sort}
@@ -560,6 +572,8 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
                 key={group.internshipId}
                 internshipId={group.internshipId}
                 internshipTitle={group.internshipTitle}
+                applicantCountText={group.applicantCountText}
+                responseRateText={group.responseRateText}
                 applicants={group.applicants}
                 onUpdate={updateApplication}
                 showMatchScore={features.rankedApplicants}

@@ -107,7 +107,7 @@ export default async function ApplicationsPage({
   const { data: applications } = await supabase
     .from('applications')
     .select(
-      'id, status, created_at, match_score, match_reasons, external_apply_required, external_apply_completed_at, external_apply_clicks, external_apply_last_clicked_at, internship:internships(id, title, company_name, apply_mode, external_apply_url)'
+      'id, status, created_at, submitted_at, employer_viewed_at, match_score, match_reasons, external_apply_required, external_apply_completed_at, external_apply_clicks, external_apply_last_clicked_at, internship:internships(id, title, company_name, apply_mode, external_apply_url)'
     )
     .eq('student_id', user.id)
     .order('created_at', { ascending: false })
@@ -209,7 +209,7 @@ export default async function ApplicationsPage({
                     </div>
                     <div className="flex items-center gap-3">
                       <StatusPill status={status} />
-                      <div className="text-sm text-slate-500">{formatDate(a.created_at)}</div>
+                      <div className="text-sm text-slate-500">{formatDate(a.submitted_at ?? a.created_at)}</div>
                     </div>
                   </div>
                   {pendingExternalApply ? (
@@ -224,6 +224,12 @@ export default async function ApplicationsPage({
 
                   <div className="mt-2 text-xs text-slate-500">
                     Submitted {'->'} Viewed {'->'} Interview {'->'} Accepted (or Rejected)
+                  </div>
+
+                  <div className="mt-2 text-xs text-slate-600">
+                    {a.employer_viewed_at
+                      ? `✅ Viewed by employer ${new Date(a.employer_viewed_at).toLocaleString()}`
+                      : 'Not viewed yet'}
                   </div>
 
                   <div className="mt-3 text-xs text-slate-600">

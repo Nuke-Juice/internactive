@@ -25,10 +25,13 @@ export type Internship = {
   pay_max?: number | null
   role_category: string | null
   category: string | null
-  work_mode: 'remote' | 'hybrid' | 'on-site' | string | null
+  work_mode: 'remote' | 'hybrid' | 'in_person' | string | null
   apply_mode?: 'native' | 'ats_link' | 'hybrid' | string | null
   external_apply_url?: string | null
+  application_cap?: number | null
+  applications_count?: number | null
   term: string | null
+  start_date?: string | null
   hours_min: number | null
   hours_max: number | null
   required_skills: string[] | null
@@ -111,6 +114,22 @@ export type Internship = {
   source: 'concierge' | 'employer_self' | 'partner' | string | null
 }
 
+function normalizeInternshipWorkMode(value: string | null | undefined): Internship['work_mode'] {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (!normalized) return null
+  if (normalized === 'remote') return 'remote'
+  if (normalized === 'hybrid') return 'hybrid'
+  if (
+    normalized === 'in_person' ||
+    normalized === 'in person' ||
+    normalized === 'on-site' ||
+    normalized === 'onsite'
+  ) {
+    return 'in_person'
+  }
+  return value ?? null
+}
+
 const INTERNSHIP_SELECT_RICH_COLUMNS = [
   'id',
   'title',
@@ -133,7 +152,10 @@ const INTERNSHIP_SELECT_RICH_COLUMNS = [
   'work_mode',
   'apply_mode',
   'external_apply_url',
+  'application_cap',
+  'applications_count',
   'term',
+  'start_date',
   'hours_min',
   'hours_max',
   'required_skills',
@@ -175,7 +197,10 @@ const INTERNSHIP_SELECT_BASE_COLUMNS = [
   'work_mode',
   'apply_mode',
   'external_apply_url',
+  'application_cap',
+  'applications_count',
   'term',
+  'start_date',
   'hours_min',
   'hours_max',
   'required_skills',
@@ -209,7 +234,10 @@ const INTERNSHIP_SELECT_LEGACY_COLUMNS = [
   'work_mode',
   'apply_mode',
   'external_apply_url',
+  'application_cap',
+  'applications_count',
   'term',
+  'start_date',
   'hours_min',
   'hours_max',
   'required_skills',
@@ -305,6 +333,39 @@ function buildInternshipsQuery(params: {
   return query
 }
 
+type RawInternshipRow = Omit<
+  Internship,
+  'required_skill_ids' | 'preferred_skill_ids' | 'coursework_item_ids' | 'coursework_category_ids' | 'coursework_category_names'
+>
+
+function mapInternshipRows(rows: RawInternshipRow[]) {
+  return rows.map((row) => ({
+    ...row,
+    work_mode: normalizeInternshipWorkMode(row.work_mode),
+    short_summary: row.short_summary ?? null,
+    remote_eligibility: row.remote_eligibility ?? null,
+    required_skill_ids: (row.internship_required_skill_items ?? [])
+      .map((item) => item.skill_id)
+      .filter((item): item is string => typeof item === 'string'),
+    preferred_skill_ids: (row.internship_preferred_skill_items ?? [])
+      .map((item) => item.skill_id)
+      .filter((item): item is string => typeof item === 'string'),
+    coursework_item_ids: (row.internship_coursework_items ?? [])
+      .map((item) => item.coursework_item_id)
+      .filter((item): item is string => typeof item === 'string'),
+    coursework_category_ids: (row.internship_coursework_category_links ?? [])
+      .map((item) => item.category_id)
+      .filter((item): item is string => typeof item === 'string'),
+    coursework_category_names: (row.internship_coursework_category_links ?? [])
+      .map((item) => {
+        const category = item.category as { name?: string | null } | Array<{ name?: string | null }> | null
+        if (Array.isArray(category)) return typeof category[0]?.name === 'string' ? category[0].name : ''
+        return typeof category?.name === 'string' ? category.name : ''
+      })
+      .filter((item): item is string => typeof item === 'string' && item.length > 0),
+  }))
+}
+
 async function runSchemaTolerantInternshipQuery(params: {
   supabase: Awaited<ReturnType<typeof supabaseServer>>
   columns: readonly string[]
@@ -367,10 +428,7 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
     context: queryContext,
     label: 'rich',
   })
-  let rows =
-    (data ?? []) as unknown as Array<
-      Omit<Internship, 'required_skill_ids' | 'preferred_skill_ids' | 'coursework_item_ids' | 'coursework_category_ids' | 'coursework_category_names'>
-    >
+  let rows = (data ?? []) as unknown as RawInternshipRow[]
 
   if (error) {
     const { data: fallbackData, error: fallbackError } = await runSchemaTolerantInternshipQuery({
@@ -394,75 +452,42 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
         return { rows: [], hasMore: false }
       }
 
-      rows =
-        (legacyData ?? []) as unknown as Array<
-          Omit<Internship, 'required_skill_ids' | 'preferred_skill_ids' | 'coursework_item_ids' | 'coursework_category_ids' | 'coursework_category_names'>
-        >
-      const mappedRows = rows.map((row) => ({
-        ...row,
-        short_summary: row.short_summary ?? null,
-        remote_eligibility: row.remote_eligibility ?? null,
-        required_skill_ids: (row.internship_required_skill_items ?? [])
-          .map((item) => item.skill_id)
-          .filter((item): item is string => typeof item === 'string'),
-        preferred_skill_ids: (row.internship_preferred_skill_items ?? [])
-          .map((item) => item.skill_id)
-          .filter((item): item is string => typeof item === 'string'),
-        coursework_item_ids: (row.internship_coursework_items ?? [])
-          .map((item) => item.coursework_item_id)
-          .filter((item): item is string => typeof item === 'string'),
-        coursework_category_ids: (row.internship_coursework_category_links ?? [])
-          .map((item) => item.category_id)
-          .filter((item): item is string => typeof item === 'string'),
-        coursework_category_names: (row.internship_coursework_category_links ?? [])
-          .map((item) => {
-            const category = item.category as { name?: string | null } | Array<{ name?: string | null }> | null
-            if (Array.isArray(category)) return typeof category[0]?.name === 'string' ? category[0].name : ''
-            return typeof category?.name === 'string' ? category.name : ''
-          })
-          .filter((item): item is string => typeof item === 'string' && item.length > 0),
-      }))
+      rows = (legacyData ?? []) as unknown as RawInternshipRow[]
+      const mappedRows = mapInternshipRows(rows)
       return {
         rows: mappedRows.slice(0, limit),
         hasMore: mappedRows.length > limit,
       }
     }
 
-    rows =
-      (fallbackData ?? []) as unknown as Array<
-        Omit<Internship, 'required_skill_ids' | 'preferred_skill_ids' | 'coursework_item_ids' | 'coursework_category_ids' | 'coursework_category_names'>
-      >
+    rows = (fallbackData ?? []) as unknown as RawInternshipRow[]
   }
 
-  const mappedRows = rows.map((row) => ({
-    ...row,
-    short_summary: row.short_summary ?? null,
-    remote_eligibility: row.remote_eligibility ?? null,
-    required_skill_ids: (row.internship_required_skill_items ?? [])
-      .map((item) => item.skill_id)
-      .filter((item): item is string => typeof item === 'string'),
-    preferred_skill_ids: (row.internship_preferred_skill_items ?? [])
-      .map((item) => item.skill_id)
-      .filter((item): item is string => typeof item === 'string'),
-    coursework_item_ids: (row.internship_coursework_items ?? [])
-      .map((item) => item.coursework_item_id)
-      .filter((item): item is string => typeof item === 'string'),
-    coursework_category_ids: (row.internship_coursework_category_links ?? [])
-      .map((item) => item.category_id)
-      .filter((item): item is string => typeof item === 'string'),
-    coursework_category_names: (row.internship_coursework_category_links ?? [])
-      .map((item) => {
-        const category = item.category as { name?: string | null } | Array<{ name?: string | null }> | null
-        if (Array.isArray(category)) return typeof category[0]?.name === 'string' ? category[0].name : ''
-        return typeof category?.name === 'string' ? category.name : ''
-      })
-      .filter((item): item is string => typeof item === 'string' && item.length > 0),
-  }))
+  const mappedRows = mapInternshipRows(rows)
 
   return {
     rows: mappedRows.slice(0, limit),
     hasMore: mappedRows.length > limit,
   }
+}
+
+export async function fetchInternshipsByIds(ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)))
+  if (uniqueIds.length === 0) return [] as Internship[]
+
+  const supabase = await supabaseServer()
+  const today = new Date().toISOString().slice(0, 10)
+  const { data } = await supabase
+    .from('internships')
+    .select(INTERNSHIP_SELECT_RICH_COLUMNS.join(', '))
+    .in('id', uniqueIds)
+    .eq('is_active', true)
+    .or(`application_deadline.is.null,application_deadline.gte.${today}`)
+
+  const rows = (data ?? []) as unknown as RawInternshipRow[]
+  const mapped = mapInternshipRows(rows)
+  const byId = new Map(mapped.map((row) => [row.id, row]))
+  return uniqueIds.map((id) => byId.get(id)).filter((row): row is Internship => Boolean(row))
 }
 
 export function formatMajors(value: Internship['majors']) {

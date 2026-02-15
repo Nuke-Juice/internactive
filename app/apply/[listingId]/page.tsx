@@ -6,6 +6,7 @@ import { requireRole } from '@/lib/auth/requireRole'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import {
   APPLY_ERROR,
+  isCapReachedApplicationError,
   isDuplicateApplicationConstraintError,
   type ApplyErrorCode,
 } from '@/lib/applyErrors'
@@ -39,7 +40,7 @@ function formatTargetYear(value: string | null | undefined) {
   return value
 }
 
-function getApplyErrorDisplay(searchParams?: { code?: string; missing?: string; error?: string }) {
+function getApplyErrorDisplay(searchParams?: { code?: string; missing?: string; error?: string; cap?: string }) {
   const code = searchParams?.code as ApplyErrorCode | undefined
 
   if (code === APPLY_ERROR.ROLE_NOT_STUDENT) {
@@ -56,6 +57,12 @@ function getApplyErrorDisplay(searchParams?: { code?: string; missing?: string; 
 
   if (code === APPLY_ERROR.DUPLICATE_APPLICATION) {
     return { message: 'You already applied to this internship.', missing: [] as string[] }
+  }
+
+  if (code === APPLY_ERROR.CAP_REACHED) {
+    const capValue = Number.parseInt(String(searchParams?.cap ?? '60'), 10)
+    const cap = Number.isFinite(capValue) && capValue > 0 ? capValue : 60
+    return { message: `Applications closed (${cap} applicants).`, missing: [] as string[] }
   }
 
   if (code === APPLY_ERROR.AUTH_REQUIRED) {
@@ -93,7 +100,7 @@ export default async function ApplyPage({
   searchParams,
 }: {
   params: Promise<{ listingId: string }>
-  searchParams?: { error?: string; code?: string; missing?: string; recovery?: string; stage?: string; application?: string }
+  searchParams?: { error?: string; code?: string; missing?: string; recovery?: string; stage?: string; application?: string; cap?: string }
 }) {
   const { listingId } = await params
   await requireRole('student', { requestedPath: `/apply/${listingId}` })
@@ -117,7 +124,7 @@ export default async function ApplyPage({
   const { data: listing } = await supabase
     .from('internships')
     .select(
-      'id, title, company_name, location, experience_level, target_student_year, majors, target_graduation_years, description, work_mode, term, role_category, required_skills, preferred_skills, recommended_coursework, hours_per_week, apply_mode, external_apply_url, external_apply_type, internship_coursework_category_links(category_id, category:coursework_categories(name))'
+      'id, title, company_name, location, experience_level, target_student_year, majors, target_graduation_years, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, hours_per_week, apply_mode, external_apply_url, external_apply_type, application_cap, applications_count, internship_coursework_category_links(category_id, category:coursework_categories(name))'
     )
     .eq('id', listingId)
     .eq('is_active', true)
@@ -145,6 +152,9 @@ export default async function ApplyPage({
       </main>
     )
   }
+  const applicationCap = typeof listing.application_cap === 'number' ? listing.application_cap : 60
+  const applicationsCount = typeof listing.applications_count === 'number' ? listing.applications_count : 0
+  const capReached = applicationsCount >= applicationCap
   const applyMode = normalizeApplyMode(String(listing.apply_mode ?? 'native'))
   const requiresExternalCompletion = applyMode === 'ats_link' || applyMode === 'hybrid'
   const requestedCompletionApplicationId =
@@ -203,7 +213,7 @@ export default async function ApplyPage({
     const { data: listingForSubmit } = await supabaseAction
       .from('internships')
       .select(
-        'id, title, company_name, location, experience_level, target_student_year, majors, target_graduation_years, description, work_mode, term, role_category, required_skills, preferred_skills, recommended_coursework, hours_per_week, apply_mode, external_apply_url, external_apply_type, internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, title, company_name, location, experience_level, target_student_year, majors, target_graduation_years, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, hours_per_week, apply_mode, external_apply_url, external_apply_type, application_cap, applications_count, internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
       .eq('is_active', true)
@@ -216,6 +226,11 @@ export default async function ApplyPage({
         properties: { listing_id: listingId, code: APPLY_ERROR.LISTING_NOT_FOUND, missing: [] },
       })
       redirect(`/apply/${listingId}?code=${APPLY_ERROR.LISTING_NOT_FOUND}`)
+    }
+    const listingCap = typeof listingForSubmit.application_cap === 'number' ? listingForSubmit.application_cap : 60
+    const listingCount = typeof listingForSubmit.applications_count === 'number' ? listingForSubmit.applications_count : 0
+    if (listingCount >= listingCap) {
+      redirect(`/apply/${listingId}?code=${APPLY_ERROR.CAP_REACHED}&cap=${listingCap}`)
     }
 
     const listingIdForSubmit = listingForSubmit.id
@@ -351,24 +366,28 @@ export default async function ApplyPage({
       },
     })
 
-    const { data: insertedApplication, error: insertError } = await supabaseAction
-      .from('applications')
-      .insert({
-        internship_id: listingIdForSubmit,
-        student_id: currentUser.id,
-        resume_url: path,
-        status: 'submitted',
-        external_apply_required: requiresExternalCompletionForSubmit,
-        quick_apply_note: quickApplyNote || null,
-        match_score: snapshot.match_score,
-        match_reasons: snapshot.match_reasons,
-        match_gaps: snapshot.match_gaps,
-        matching_version: snapshot.matching_version,
-      })
-      .select('id')
-      .single()
+    const { data: insertedApplication, error: insertError } = await supabaseAction.rpc('submit_application_with_cap', {
+      in_internship_id: listingIdForSubmit,
+      in_student_id: currentUser.id,
+      in_resume_url: path,
+      in_status: 'submitted',
+      in_external_apply_required: requiresExternalCompletionForSubmit,
+      in_quick_apply_note: quickApplyNote || null,
+      in_match_score: snapshot.match_score,
+      in_match_reasons: snapshot.match_reasons,
+      in_match_gaps: snapshot.match_gaps,
+      in_matching_version: snapshot.matching_version,
+    })
 
     if (insertError) {
+      if (isCapReachedApplicationError(insertError)) {
+        await trackAnalyticsEvent({
+          eventName: 'apply_blocked',
+          userId: currentUser.id,
+          properties: { listing_id: listingId, code: APPLY_ERROR.CAP_REACHED, missing: [] },
+        })
+        redirect(`/apply/${listingId}?code=${APPLY_ERROR.CAP_REACHED}&cap=${listingCap}`)
+      }
       if (isDuplicateApplicationConstraintError(insertError)) {
         await trackAnalyticsEvent({
           eventName: 'apply_blocked',
@@ -384,6 +403,9 @@ export default async function ApplyPage({
       })
       redirect(`/apply/${listingId}?code=${APPLY_ERROR.APPLICATION_INSERT_FAILED}`)
     }
+    const insertedApplicationId = Array.isArray(insertedApplication)
+      ? insertedApplication[0]?.id
+      : insertedApplication?.id
 
     await trackAnalyticsEvent({
       eventName: 'submit_apply_success',
@@ -393,19 +415,19 @@ export default async function ApplyPage({
     await trackAnalyticsEvent({
       eventName: 'quick_apply_submitted',
       userId: currentUser.id,
-      properties: { listing_id: listingIdForSubmit, application_id: insertedApplication?.id ?? null, apply_mode: applyModeForSubmit },
+      properties: { listing_id: listingIdForSubmit, application_id: insertedApplicationId ?? null, apply_mode: applyModeForSubmit },
     })
 
-    if (insertedApplication?.id) {
+    if (insertedApplicationId) {
       try {
-        await sendEmployerApplicationAlert({ applicationId: insertedApplication.id })
+        await sendEmployerApplicationAlert({ applicationId: insertedApplicationId })
       } catch {
         // no-op; email should not block application submission
       }
     }
 
-    if (requiresExternalCompletionForSubmit && insertedApplication?.id) {
-      redirect(`/apply/${listingId}?stage=complete&application=${encodeURIComponent(insertedApplication.id)}`)
+    if (requiresExternalCompletionForSubmit && insertedApplicationId) {
+      redirect(`/apply/${listingId}?stage=complete&application=${encodeURIComponent(insertedApplicationId)}`)
     }
     redirect('/applications')
   }
@@ -481,6 +503,7 @@ export default async function ApplyPage({
                 Majors: {formatMajors(listing.majors)}
               </div>
             )}
+            <div className="text-xs font-medium text-slate-700">Applicants: {applicationsCount} / {applicationCap}</div>
           </div>
 
           {listing.description && (
@@ -505,7 +528,18 @@ export default async function ApplyPage({
             )
           })()}
 
-          {showCompletionStage && requiresExternalCompletion ? (
+          <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
+            <div className="text-sm font-semibold text-blue-900">Transparent applications.</div>
+            <p className="mt-1 text-xs text-blue-900">
+              We show applicant counts and when employers view your application - so you&apos;re not applying into a black hole.
+            </p>
+          </div>
+
+          {capReached ? (
+            <div className="mt-4 rounded-md border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              Applications closed ({applicationCap} applicants).
+            </div>
+          ) : showCompletionStage && requiresExternalCompletion ? (
             <>
               <ExternalCompletionPanel
                 listingId={listing.id}
