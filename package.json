@@ -9,6 +9,11 @@
     "lint": "eslint",
     "matching:sanity": "node --experimental-strip-types scripts/matching-sanity.mjs",
     "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test tests/*.test.ts",
+    "courses:import-csv": "node scripts/import-course-csvs.mjs",
+    "courses:import-csv:verify": "node scripts/import-course-csvs.mjs --verify",
+    "courses:seed-catalog": "node scripts/seed-canonical-courses-from-csv.mjs",
+    "courses:db-status": "node scripts/audit-course-catalog-db-status.mjs",
+    "courses:verify-search": "node scripts/verify-course-catalog-search.mjs",
     "courses:scrape": "node scripts/sync-university-course-catalog.mjs",
     "courses:scrape:dry": "node scripts/sync-university-course-catalog.mjs --dry-run",
     "courses:import:utah": "node scripts/import-utah-course-reports.mjs"

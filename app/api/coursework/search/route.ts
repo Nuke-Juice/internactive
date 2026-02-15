@@ -10,6 +10,18 @@ type CourseResult = {
   label: string
 }
 
+type DbCourseRow = {
+  id: string | null
+  subject_code: string | null
+  course_number: string | null
+  title: string | null
+  institution: string | null
+  category: string | null
+  slug: string | null
+  code: string | null
+  name: string | null
+}
+
 function normalizeWhitespace(value: string) {
   return value.trim().replace(/\s+/g, ' ')
 }
@@ -66,6 +78,19 @@ function mergeAndSortResults(items: CourseResult[], query: string) {
     .slice(0, MAX_RESULTS)
 }
 
+function toCourseLabel(row: DbCourseRow) {
+  const subjectCode = typeof row.subject_code === 'string' ? normalizeWhitespace(row.subject_code) : ''
+  const courseNumber = typeof row.course_number === 'string' ? normalizeWhitespace(row.course_number) : ''
+  const title = typeof row.title === 'string' ? normalizeWhitespace(row.title) : ''
+  if (subjectCode && courseNumber) {
+    return normalizeWhitespace(`${subjectCode} ${courseNumber} ${title}`)
+  }
+
+  const code = typeof row.code === 'string' ? normalizeWhitespace(row.code) : ''
+  const name = typeof row.name === 'string' ? normalizeWhitespace(row.name) : ''
+  return normalizeWhitespace(`${code} ${name}`)
+}
+
 export async function GET(request: Request) {
   const supabase = await supabaseServer()
   const {
@@ -86,16 +111,19 @@ export async function GET(request: Request) {
 
   const db = supabase
     .from('canonical_courses')
-    .select('id, code, name')
-    .or(`code.ilike.%${safeQuery}%,name.ilike.%${safeQuery}%`)
+    .select('id, subject_code, course_number, title, institution, category, slug, code, name')
+    .or(
+      `subject_code.ilike.%${safeQuery}%,course_number.ilike.%${safeQuery}%,title.ilike.%${safeQuery}%,institution.ilike.%${safeQuery}%,code.ilike.%${safeQuery}%,name.ilike.%${safeQuery}%`
+    )
     .limit(DB_FETCH_LIMIT)
 
   const { data: dbRows } = await db
   const dbResults: CourseResult[] = (dbRows ?? [])
-    .filter((row): row is { id: string; code: string; name: string } => {
-      return typeof row.id === 'string' && typeof row.code === 'string' && typeof row.name === 'string'
+    .filter((row): row is DbCourseRow => {
+      return typeof row.id === 'string'
     })
-    .map((row) => ({ id: row.id, label: normalizeWhitespace(`${row.code} ${row.name}`) }))
+    .map((row) => ({ id: row.id ?? `db:${normalizeCodeToken(toCourseLabel(row))}`, label: toCourseLabel(row) }))
+    .filter((row) => row.label.length > 0)
     .filter((row) => matchesQuery(row.label, safeQuery))
 
   const scopedResults: CourseResult[] = !searchAll
