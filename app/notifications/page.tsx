@@ -111,6 +111,7 @@ export default async function NotificationsPage() {
   }
 
   const copy = roleLabel(role)
+  const nowTimestamp = new Date().getTime()
 
   if (!user || !role) {
     return (
@@ -198,7 +199,7 @@ export default async function NotificationsPage() {
       .filter((row) => row.application_deadline)
       .map((row) => {
         const deadline = row.application_deadline as string
-        const msLeft = new Date(deadline).getTime() - Date.now()
+        const msLeft = new Date(deadline).getTime() - nowTimestamp
         return { row, msLeft }
       })
       .filter((item) => item.msLeft >= 0 && item.msLeft <= 14 * 24 * 60 * 60 * 1000)

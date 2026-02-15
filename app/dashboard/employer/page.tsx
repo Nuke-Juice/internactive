@@ -151,7 +151,7 @@ function getCreateInternshipError(searchParams?: {
     return withField('Hours range is invalid. Use values between 1 and 80 with min <= max.', 'hours' as const)
   }
   if (code === INTERNSHIP_VALIDATION_ERROR.LOCATION_REQUIRED) {
-    return withField('City and state are required for hybrid/on-site roles.', 'location' as const)
+    return withField('City and state are required for hybrid/in-person roles.', 'location' as const)
   }
   if (code === INTERNSHIP_VALIDATION_ERROR.REQUIRED_SKILLS_MISSING) {
     return withField('Add at least one required skill.', 'required_skills' as const)
@@ -184,7 +184,7 @@ function getCreateInternshipError(searchParams?: {
     return withField('Work mode is required for publish.', 'work_mode' as const)
   }
   if (code === LISTING_PUBLISH_ERROR.LOCATION_REQUIRED) {
-    return withField('City and state are required for hybrid/on-site roles.', 'location' as const)
+    return withField('City and state are required for hybrid/in-person roles.', 'location' as const)
   }
   if (code === LISTING_PUBLISH_ERROR.PAY_REQUIRED) {
     return withField('Pay details are required for publish.', 'pay' as const)
@@ -534,7 +534,11 @@ export default async function EmployerDashboardPage({
     const category = String(formData.get('category') ?? '').trim()
     const locationCity = String(formData.get('location_city') ?? '').trim()
     const locationState = normalizeStateCode(String(formData.get('location_state') ?? ''))
-    const workMode = String(formData.get('work_mode') ?? '').trim().toLowerCase()
+    const workModeRaw = String(formData.get('work_mode') ?? '').trim().toLowerCase()
+    const workMode =
+      workModeRaw === 'on-site' || workModeRaw === 'onsite' || workModeRaw === 'in person'
+        ? 'in_person'
+        : workModeRaw
     const remoteEligibleRegionInput = String(formData.get('remote_eligible_region') ?? '').trim().toLowerCase()
     const remoteEligibleRegion = remoteEligibleRegionInput === 'us-wide' ? 'us-wide' : remoteEligibleRegionInput === 'state' ? 'state' : null
     const remoteEligibleStateInput = normalizeStateCode(String(formData.get('remote_eligible_state') ?? ''))
@@ -1681,7 +1685,7 @@ export default async function EmployerDashboardPage({
                 title: editingInternship?.title ?? '',
                 companyName: editingInternship?.company_name ?? employerProfile?.company_name ?? '',
                 category: editingInternship?.category ?? '',
-                workMode: (editingInternship?.work_mode as 'on-site' | 'hybrid' | 'remote' | null) ?? 'hybrid',
+                workMode: (editingInternship?.work_mode as 'in_person' | 'hybrid' | 'remote' | null) ?? 'hybrid',
                 locationCity: editingInternship?.location_city ?? '',
                 locationState: editingInternship?.location_state ?? '',
                 applyMode:

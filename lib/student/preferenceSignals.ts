@@ -16,8 +16,8 @@ function parseWorkMode(value: string): WorkMode | null {
   const normalized = normalizeText(value)
   if (normalized.includes('remote')) return 'remote'
   if (normalized.includes('hybrid')) return 'hybrid'
-  if (normalized.includes('on-site') || normalized.includes('onsite') || normalized.includes('in person')) {
-    return 'on-site'
+  if (normalized.includes('on-site') || normalized.includes('onsite') || normalized.includes('in person') || normalized.includes('in_person')) {
+    return 'in_person'
   }
   return null
 }

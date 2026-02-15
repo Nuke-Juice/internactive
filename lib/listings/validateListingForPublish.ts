@@ -67,6 +67,8 @@ export function validateListingForPublish(
   const title = normalizeText(input.title)
   const employerId = normalizeText(input.employerId)
   const workMode = normalizeText(input.workMode).toLowerCase()
+  const canonicalWorkMode =
+    workMode === 'on-site' || workMode === 'onsite' || workMode === 'in person' ? 'in_person' : workMode
   const locationCity = normalizeText(input.locationCity)
   const locationState = normalizeText(input.locationState)
   const term = normalizeText(input.term)
@@ -80,10 +82,10 @@ export function validateListingForPublish(
 
   if (!title) return { ok: false, code: LISTING_PUBLISH_ERROR.TITLE_REQUIRED }
   if (!employerId) return { ok: false, code: LISTING_PUBLISH_ERROR.EMPLOYER_REQUIRED }
-  if (!workMode || (workMode !== 'remote' && workMode !== 'hybrid' && workMode !== 'on-site')) {
+  if (!canonicalWorkMode || (canonicalWorkMode !== 'remote' && canonicalWorkMode !== 'hybrid' && canonicalWorkMode !== 'in_person')) {
     return { ok: false, code: LISTING_PUBLISH_ERROR.WORK_MODE_REQUIRED }
   }
-  if ((workMode === 'hybrid' || workMode === 'on-site') && (!locationCity || !locationState)) {
+  if ((canonicalWorkMode === 'hybrid' || canonicalWorkMode === 'in_person') && (!locationCity || !locationState)) {
     return { ok: false, code: LISTING_PUBLISH_ERROR.LOCATION_REQUIRED }
   }
   if (!payText && !hasNumericPay) {

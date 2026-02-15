@@ -36,7 +36,8 @@ export default function ListingStepBasics(props: Props) {
 
   useEffect(() => {
     if (isCityFocusedRef.current) return
-    setCityInputValue(props.locationCity)
+    const timer = setTimeout(() => setCityInputValue(props.locationCity), 0)
+    return () => clearTimeout(timer)
   }, [props.locationCity])
 
   const cityOptions = useMemo(() => {
@@ -96,7 +97,7 @@ export default function ListingStepBasics(props: Props) {
           {[
             { value: 'remote', label: 'Remote' },
             { value: 'hybrid', label: 'Hybrid' },
-            { value: 'on-site', label: 'In-person' },
+            { value: 'in_person', label: 'In-person' },
           ].map((option) => (
             <label
               key={option.value}
@@ -166,7 +167,6 @@ export default function ListingStepBasics(props: Props) {
               }`}
               placeholder="Type city"
               autoComplete="off"
-              aria-expanded={cityMenuOpen}
               aria-controls="listing-city-options"
               aria-autocomplete="list"
             />

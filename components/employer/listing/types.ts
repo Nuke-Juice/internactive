@@ -1,5 +1,5 @@
 export type ApplyMode = 'native' | 'ats_link' | 'hybrid'
-export type WorkMode = 'on-site' | 'hybrid' | 'remote'
+export type WorkMode = 'in_person' | 'hybrid' | 'remote'
 
 export type CatalogOption = {
   id: string

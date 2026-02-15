@@ -75,6 +75,8 @@ export function validateInternshipInput(
       code: InternshipValidationErrorCode
     } {
   const workMode = normalizeText(input.work_mode).toLowerCase()
+  const canonicalWorkMode =
+    workMode === 'on-site' || workMode === 'onsite' || workMode === 'in person' ? 'in_person' : workMode
   const term = normalizeText(input.term)
   const locationCity = normalizeText(input.location_city)
   const locationState = normalizeText(input.location_state)
@@ -87,7 +89,7 @@ export function validateInternshipInput(
     return { ok: false, code: INTERNSHIP_VALIDATION_ERROR.WORK_MODE_REQUIRED }
   }
 
-  if (workMode !== 'remote' && workMode !== 'hybrid' && workMode !== 'on-site') {
+  if (canonicalWorkMode !== 'remote' && canonicalWorkMode !== 'hybrid' && canonicalWorkMode !== 'in_person') {
     return { ok: false, code: INTERNSHIP_VALIDATION_ERROR.WORK_MODE_REQUIRED }
   }
 
@@ -109,7 +111,7 @@ export function validateInternshipInput(
     return { ok: false, code: INTERNSHIP_VALIDATION_ERROR.INVALID_HOURS_RANGE }
   }
 
-  if ((workMode === 'hybrid' || workMode === 'on-site') && (!locationCity || !locationState)) {
+  if ((canonicalWorkMode === 'hybrid' || canonicalWorkMode === 'in_person') && (!locationCity || !locationState)) {
     return { ok: false, code: INTERNSHIP_VALIDATION_ERROR.LOCATION_REQUIRED }
   }
 
@@ -123,7 +125,7 @@ export function validateInternshipInput(
   ) {
     return { ok: false, code: INTERNSHIP_VALIDATION_ERROR.INVALID_PAY_RANGE }
   }
-  if (workMode === 'remote' || workMode === 'hybrid') {
+  if (canonicalWorkMode === 'remote' || canonicalWorkMode === 'hybrid') {
     if (!remoteEligibleState && remoteEligibilityScope === 'us_states' && remoteEligibleStates.length === 0) {
       return { ok: false, code: INTERNSHIP_VALIDATION_ERROR.REMOTE_ELIGIBILITY_REQUIRED }
     }

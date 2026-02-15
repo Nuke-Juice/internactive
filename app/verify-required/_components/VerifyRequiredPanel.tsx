@@ -28,7 +28,6 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
   const [refreshing, setRefreshing] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
-  const [checking, setChecking] = useState(false)
   const maskedEmail = maskEmail(email)
   const { showToast } = useToast()
 
@@ -42,7 +41,8 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
 
   useEffect(() => {
     if (state.ok) {
-      setCooldownSeconds(30)
+      const timer = setTimeout(() => setCooldownSeconds(30), 0)
+      return () => clearTimeout(timer)
     }
   }, [state.ok])
 
@@ -66,8 +66,6 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
     if (manual) {
       setRefreshing(true)
       setRefreshError(null)
-    } else {
-      setChecking(true)
     }
 
     const supabase = supabaseBrowser()
@@ -85,7 +83,6 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
         })
       }
       setRefreshing(false)
-      setChecking(false)
       return
     }
 
@@ -93,7 +90,6 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
     if (error) {
       const normalized = normalizeAuthError(error, 'verify')
       if (!manual) {
-        setChecking(false)
         return
       }
       setRefreshing(false)
@@ -125,7 +121,6 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
         })
       }
       setRefreshing(false)
-      setChecking(false)
       return
     }
 
@@ -136,7 +131,6 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
       .eq('verified', false)
 
     setRefreshing(false)
-    setChecking(false)
     router.push(`${nextUrl}${nextUrl.includes('?') ? '&' : '?'}verified=1`)
     router.refresh()
   }
@@ -168,7 +162,7 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
     }, 5000)
 
     return () => clearInterval(interval)
-  }, [])
+  }, [checkVerificationStatus])
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
