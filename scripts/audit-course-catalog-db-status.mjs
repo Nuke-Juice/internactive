@@ -61,21 +61,20 @@ async function main() {
   })
 
   const requiredColumns = ['subject_code', 'course_number', 'title', 'institution', 'category', 'slug']
-  const { data: columnsData, error: columnsError } = await admin
-    .from('information_schema.columns')
-    .select('column_name')
-    .eq('table_schema', 'public')
-    .eq('table_name', 'canonical_courses')
+  const { error: probeError } = await admin
+    .from('canonical_courses')
+    .select('subject_code, course_number, title, institution, category, slug')
+    .limit(1)
 
-  if (columnsError) {
-    lines.push(`- Status: failed column inspection (${columnsError.message})`)
-    await fs.mkdir(path.dirname(OUTPUT_PATH), { recursive: true })
-    await fs.writeFile(OUTPUT_PATH, `${lines.join('\n')}\n`, 'utf8')
-    console.log(`[audit-course-catalog-db-status] wrote ${path.relative(ROOT, OUTPUT_PATH)}`)
-    return
+  const foundColumns = new Set()
+  if (!probeError) {
+    for (const col of requiredColumns) foundColumns.add(col)
+  } else {
+    lines.push(`- Column probe note: ${probeError.message}`)
+    lines.push('- Column mode detected: legacy canonical_courses schema (code/name/category_id/level)')
+    lines.push('')
   }
 
-  const foundColumns = new Set((columnsData ?? []).map((row) => row.column_name))
   lines.push('## canonical_courses Column Check')
   lines.push('')
   for (const column of requiredColumns) {

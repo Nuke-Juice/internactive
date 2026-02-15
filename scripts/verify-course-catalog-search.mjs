@@ -79,16 +79,39 @@ async function main() {
 
   for (const query of TEST_QUERIES) {
     const safeQuery = query.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
-    const { data, error } = await admin
+    const modern = await admin
       .from('canonical_courses')
       .select('id, subject_code, course_number, title, institution, category, slug, code, name')
       .or(
         `subject_code.ilike.%${safeQuery}%,course_number.ilike.%${safeQuery}%,title.ilike.%${safeQuery}%,institution.ilike.%${safeQuery}%,code.ilike.%${safeQuery}%,name.ilike.%${safeQuery}%`
       )
       .limit(20)
+    let data = modern.data
+    let error = modern.error
+    let mode = 'csv-aligned'
+
+    if (error) {
+      const legacy = await admin
+        .from('canonical_courses')
+        .select('id, code, name')
+        .or(`code.ilike.%${safeQuery}%,name.ilike.%${safeQuery}%`)
+        .limit(20)
+      data = (legacy.data ?? []).map((row) => ({
+        ...row,
+        subject_code: null,
+        course_number: null,
+        title: null,
+        institution: null,
+        category: null,
+        slug: null,
+      }))
+      error = legacy.error
+      mode = 'legacy-fallback'
+    }
 
     lines.push(`### ${query}`)
     lines.push('')
+    lines.push(`- query_mode: ${mode}`)
 
     if (error) {
       lines.push(`- query_error: ${error.message}`)

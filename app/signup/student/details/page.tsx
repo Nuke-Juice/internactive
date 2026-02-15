@@ -56,8 +56,6 @@ type StudentProfileRow = {
   second_major_id: string | null
   majors: string[] | string | null
   year: string | null
-  coursework: string[] | null
-  coursework_unverified: string[] | null
   availability_start_month: string | null
   availability_hours_per_week: number | null
   interests: string | null
@@ -76,7 +74,6 @@ type StudentDraft = {
   secondMajorId?: string | null
   secondMajorQuery?: string
   coursework?: string[]
-  courseworkUnverified?: string[]
   desiredRoles?: string
   interests?: string
   hoursPerWeek?: string
@@ -318,10 +315,16 @@ export default function StudentSignupDetailsPage() {
       const { data: profile } = await supabase
         .from('student_profiles')
         .select(
-          'school, gender, major_id, second_major_id, majors, year, coursework, coursework_unverified, availability_start_month, availability_hours_per_week, interests'
+          'school, gender, major_id, second_major_id, majors, year, availability_start_month, availability_hours_per_week, interests'
         )
         .eq('user_id', user.id)
         .maybeSingle<StudentProfileRow>()
+
+      const { data: selectedCourseRows } = await supabase
+        .from('student_courses')
+        .select('course_id, course:canonical_courses(subject_code, course_number, title, code, name)')
+        .eq('student_profile_id', user.id)
+        .limit(200)
 
       if (profile) {
         const profileMajors = parseMajors(profile.majors)
@@ -337,8 +340,6 @@ export default function StudentSignupDetailsPage() {
           setYear(profileYear)
         }
         setGender(profile.gender || '')
-        setCoursework(Array.isArray(profile.coursework) ? profile.coursework : [])
-        setCourseworkUnverified(Array.isArray(profile.coursework_unverified) ? profile.coursework_unverified : [])
         setHoursPerWeek(profile.availability_hours_per_week ? String(profile.availability_hours_per_week) : '15')
         setInterests(profile.interests || '')
 
@@ -369,6 +370,34 @@ export default function StudentSignupDetailsPage() {
         }
       }
 
+      if (Array.isArray(selectedCourseRows) && selectedCourseRows.length > 0) {
+        const fromCanonical = selectedCourseRows
+          .map((row) => {
+            const course = row.course as
+              | {
+                  subject_code?: string | null
+                  course_number?: string | null
+                  title?: string | null
+                  code?: string | null
+                  name?: string | null
+                }
+              | null
+            const subjectCode = typeof course?.subject_code === 'string' ? normalizeCourseText(course.subject_code) : ''
+            const courseNumber =
+              typeof course?.course_number === 'string' ? normalizeCourseText(course.course_number) : ''
+            const title = typeof course?.title === 'string' ? normalizeCourseText(course.title) : ''
+            if (subjectCode && courseNumber) {
+              return normalizeCourseText(`${subjectCode} ${courseNumber} ${title}`.trim())
+            }
+            const code = typeof course?.code === 'string' ? normalizeCourseText(course.code) : ''
+            const name = typeof course?.name === 'string' ? normalizeCourseText(course.name) : ''
+            return normalizeCourseText(`${code} ${name}`.trim())
+          })
+          .filter(Boolean)
+        setCoursework(Array.from(new Set(fromCanonical)))
+        setCourseworkUnverified([])
+      }
+
       const draft = readStudentDraft()
       if (draft) {
         if (typeof draft.firstName === 'string') setFirstName(draft.firstName)
@@ -380,7 +409,6 @@ export default function StudentSignupDetailsPage() {
         if (typeof draft.majorQuery === 'string') setMajorQuery(draft.majorQuery)
         if (typeof draft.secondMajorQuery === 'string') setSecondMajorQuery(draft.secondMajorQuery)
         if (Array.isArray(draft.coursework)) setCoursework(draft.coursework)
-        if (Array.isArray(draft.courseworkUnverified)) setCourseworkUnverified(draft.courseworkUnverified)
         if (typeof draft.desiredRoles === 'string') setDesiredRoles(draft.desiredRoles)
         if (typeof draft.interests === 'string') setInterests(draft.interests)
         if (typeof draft.hoursPerWeek === 'string') setHoursPerWeek(draft.hoursPerWeek)
@@ -427,7 +455,6 @@ export default function StudentSignupDetailsPage() {
       secondMajorId: selectedSecondMajor?.id ?? null,
       secondMajorQuery,
       coursework,
-      courseworkUnverified,
       desiredRoles,
       interests,
       hoursPerWeek,
@@ -450,7 +477,6 @@ export default function StudentSignupDetailsPage() {
     selectedSecondMajor,
     secondMajorQuery,
     coursework,
-    courseworkUnverified,
     desiredRoles,
     interests,
     hoursPerWeek,
@@ -590,8 +616,6 @@ export default function StudentSignupDetailsPage() {
           second_major_id: selectedSecondMajor?.id ?? null,
           majors: majorNames,
           year,
-          coursework: normalizedCourseworkList,
-          coursework_unverified: normalizedUnverifiedCoursework,
           experience_level: 'none',
           availability_start_month: 'May',
           availability_hours_per_week: parsedHours,

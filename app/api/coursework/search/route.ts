@@ -117,8 +117,30 @@ export async function GET(request: Request) {
     )
     .limit(DB_FETCH_LIMIT)
 
-  const { data: dbRows } = await db
-  const dbResults: CourseResult[] = (dbRows ?? [])
+  const { data: dbRows, error: dbError } = await db
+  let effectiveDbRows: DbCourseRow[] = (dbRows ?? []) as DbCourseRow[]
+
+  if (dbError) {
+    const legacy = await supabase
+      .from('canonical_courses')
+      .select('id, code, name')
+      .or(`code.ilike.%${safeQuery}%,name.ilike.%${safeQuery}%`)
+      .limit(DB_FETCH_LIMIT)
+
+    effectiveDbRows = (legacy.data ?? []).map((row) => ({
+      id: typeof row.id === 'string' ? row.id : null,
+      subject_code: null,
+      course_number: null,
+      title: null,
+      institution: null,
+      category: null,
+      slug: null,
+      code: typeof row.code === 'string' ? row.code : null,
+      name: typeof row.name === 'string' ? row.name : null,
+    }))
+  }
+
+  const dbResults: CourseResult[] = effectiveDbRows
     .filter((row): row is DbCourseRow => {
       return typeof row.id === 'string'
     })
