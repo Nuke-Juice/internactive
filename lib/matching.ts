@@ -36,6 +36,7 @@ export type StudentMatchProfile = {
   coursework_item_ids?: string[]
   coursework_category_ids?: string[]
   coursework?: string[]
+  availability_start_month?: string | null
   availability_hours_per_week?: number | null
   preferred_terms?: string[]
   preferred_locations?: string[]
