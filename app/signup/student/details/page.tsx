@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
-import { getUniversityCourseCatalog, hasUniversitySpecificCourses } from '@/lib/coursework/universityCourseCatalog'
+import { hasUniversitySpecificCourses } from '@/lib/coursework/universityCourseCatalog'
 import { normalizeCourseworkClient } from '@/lib/coursework/normalizeCourseworkClient'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { toUserFacingErrorMessage } from '@/lib/errors/userFacingError'
@@ -53,9 +53,11 @@ type StudentProfileRow = {
   school: string | null
   gender: string | null
   major_id: string | null
+  second_major_id: string | null
   majors: string[] | string | null
   year: string | null
   coursework: string[] | null
+  coursework_unverified: string[] | null
   availability_start_month: string | null
   availability_hours_per_week: number | null
   interests: string | null
@@ -74,7 +76,7 @@ type StudentDraft = {
   secondMajorId?: string | null
   secondMajorQuery?: string
   coursework?: string[]
-  courseworkInput?: string
+  courseworkUnverified?: string[]
   desiredRoles?: string
   interests?: string
   hoursPerWeek?: string
@@ -95,6 +97,14 @@ function parseMajors(value: StudentProfileRow['majors']) {
   }
 
   return []
+}
+
+function normalizeCourseToken(value: string) {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function normalizeCourseCode(value: string) {
+  return value.trim().toUpperCase().replace(/\s+/g, '')
 }
 
 function readStudentDraft() {
@@ -125,7 +135,7 @@ export default function StudentSignupDetailsPage() {
   const [secondMajorQuery, setSecondMajorQuery] = useState('')
   const [selectedSecondMajor, setSelectedSecondMajor] = useState<CanonicalMajor | null>(null)
   const [coursework, setCoursework] = useState<string[]>([])
-  const [courseworkInput, setCourseworkInput] = useState('')
+  const [courseworkUnverified, setCourseworkUnverified] = useState<string[]>([])
   const [hoursPerWeek, setHoursPerWeek] = useState('15')
   const [desiredRoles, setDesiredRoles] = useState('')
   const [interests, setInterests] = useState('')
@@ -143,18 +153,10 @@ export default function StudentSignupDetailsPage() {
   const [error, setError] = useState<string | null>(null)
 
   const selectedSchoolForCatalog = school || schoolQuery
-  const courseworkCatalog = useMemo(() => getUniversityCourseCatalog(selectedSchoolForCatalog), [selectedSchoolForCatalog])
   const hasSchoolSpecificCoursework = useMemo(
     () => hasUniversitySpecificCourses(selectedSchoolForCatalog),
     [selectedSchoolForCatalog]
   )
-
-  const filteredCourseworkOptions = useMemo(() => {
-    const query = courseworkInput.trim().toLowerCase()
-    const available = courseworkCatalog.filter((item) => !coursework.includes(item))
-    if (!query) return available.slice(0, 8)
-    return available.filter((item) => item.toLowerCase().includes(query)).slice(0, 8)
-  }, [coursework, courseworkCatalog, courseworkInput])
 
   const filteredSchoolOptions = useMemo(() => {
     const query = schoolQuery.trim().toLowerCase()
@@ -166,18 +168,34 @@ export default function StudentSignupDetailsPage() {
 
   const currentStepNumber = stepIndex + 1
 
-  function addCoursework(course: string) {
-    const normalized = course.trim().replace(/\s+/g, ' ')
-    if (!normalized) return
-    if (!courseworkCatalog.some((item) => item.toLowerCase() === normalized.toLowerCase())) {
-      return
-    }
-    setCoursework((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]))
-    setCourseworkInput('')
+  function normalizeCourseText(value: string) {
+    return value.trim().replace(/\s+/g, ' ')
   }
 
-  function removeCoursework(course: string) {
-    setCoursework((prev) => prev.filter((item) => item !== course))
+  function addCoursework(input: { label: string; verified: boolean }) {
+    const normalized = normalizeCourseText(input.label)
+    if (!normalized) return
+    const normalizedToken = normalized.toLowerCase()
+
+    setCoursework((prev) => {
+      if (prev.some((item) => item.toLowerCase() === normalizedToken)) return prev
+      return [...prev, normalized]
+    })
+
+    if (input.verified) {
+      setCourseworkUnverified((prev) => prev.filter((item) => item.toLowerCase() !== normalizedToken))
+      return
+    }
+    setCourseworkUnverified((prev) => {
+      if (prev.some((item) => item.toLowerCase() === normalizedToken)) return prev
+      return [...prev, normalized]
+    })
+  }
+
+  function removeCoursework(courseLabel: string) {
+    const token = normalizeCourseText(courseLabel).toLowerCase()
+    setCoursework((prev) => prev.filter((item) => item.toLowerCase() !== token))
+    setCourseworkUnverified((prev) => prev.filter((item) => item.toLowerCase() !== token))
   }
 
   function validateStep(index: number) {
@@ -298,7 +316,9 @@ export default function StudentSignupDetailsPage() {
 
       const { data: profile } = await supabase
         .from('student_profiles')
-        .select('school, gender, major_id, majors, year, coursework, availability_start_month, availability_hours_per_week, interests')
+        .select(
+          'school, gender, major_id, second_major_id, majors, year, coursework, coursework_unverified, availability_start_month, availability_hours_per_week, interests'
+        )
         .eq('user_id', user.id)
         .maybeSingle<StudentProfileRow>()
 
@@ -317,6 +337,7 @@ export default function StudentSignupDetailsPage() {
         }
         setGender(profile.gender || '')
         setCoursework(Array.isArray(profile.coursework) ? profile.coursework : [])
+        setCourseworkUnverified(Array.isArray(profile.coursework_unverified) ? profile.coursework_unverified : [])
         setHoursPerWeek(profile.availability_hours_per_week ? String(profile.availability_hours_per_week) : '15')
         setInterests(profile.interests || '')
 
@@ -327,14 +348,21 @@ export default function StudentSignupDetailsPage() {
           setMajorQuery(primaryMajor.name)
         }
 
-        const majorNames = parseMajors(profile.majors)
-        const secondaryName = majorNames.find((name) => primaryMajor?.name !== name)
-        if (secondaryName) {
-          const secondaryMajor = catalog.find((item) => item.name === secondaryName) || null
+        const secondaryMajorById =
+          profile.second_major_id && catalog.length > 0
+            ? catalog.find((item) => item.id === profile.second_major_id) || null
+            : null
+        if (secondaryMajorById) {
+          setSelectedSecondMajor(secondaryMajorById)
+          setSecondMajorQuery(secondaryMajorById.name)
+        } else {
+          const majorNames = parseMajors(profile.majors)
+          const secondaryName = majorNames.find((name) => primaryMajor?.name !== name)
+          const secondaryMajor = secondaryName ? catalog.find((item) => item.name === secondaryName) || null : null
           if (secondaryMajor) {
             setSelectedSecondMajor(secondaryMajor)
             setSecondMajorQuery(secondaryMajor.name)
-          } else {
+          } else if (secondaryName) {
             setSecondMajorQuery(secondaryName)
           }
         }
@@ -351,7 +379,7 @@ export default function StudentSignupDetailsPage() {
         if (typeof draft.majorQuery === 'string') setMajorQuery(draft.majorQuery)
         if (typeof draft.secondMajorQuery === 'string') setSecondMajorQuery(draft.secondMajorQuery)
         if (Array.isArray(draft.coursework)) setCoursework(draft.coursework)
-        if (typeof draft.courseworkInput === 'string') setCourseworkInput(draft.courseworkInput)
+        if (Array.isArray(draft.courseworkUnverified)) setCourseworkUnverified(draft.courseworkUnverified)
         if (typeof draft.desiredRoles === 'string') setDesiredRoles(draft.desiredRoles)
         if (typeof draft.interests === 'string') setInterests(draft.interests)
         if (typeof draft.hoursPerWeek === 'string') setHoursPerWeek(draft.hoursPerWeek)
@@ -398,7 +426,7 @@ export default function StudentSignupDetailsPage() {
       secondMajorId: selectedSecondMajor?.id ?? null,
       secondMajorQuery,
       coursework,
-      courseworkInput,
+      courseworkUnverified,
       desiredRoles,
       interests,
       hoursPerWeek,
@@ -421,7 +449,7 @@ export default function StudentSignupDetailsPage() {
     selectedSecondMajor,
     secondMajorQuery,
     coursework,
-    courseworkInput,
+    courseworkUnverified,
     desiredRoles,
     interests,
     hoursPerWeek,
@@ -510,18 +538,23 @@ export default function StudentSignupDetailsPage() {
         )
       )
     )
-    const normalizedCourseworkList = coursework.map((course) => course.trim().replace(/\s+/g, ' ')).filter(Boolean)
+    const normalizedCourseworkList = coursework.map((course) => normalizeCourseText(course)).filter(Boolean)
+    const normalizedUnverifiedCoursework = courseworkUnverified
+      .map((course) => normalizeCourseText(course))
+      .filter(Boolean)
+    const unverifiedTokens = new Set(normalizedUnverifiedCoursework.map((course) => course.toLowerCase()))
+    const verifiedCourseworkList = normalizedCourseworkList.filter((course) => !unverifiedTokens.has(course.toLowerCase()))
 
     let courseworkItemIds: string[] = []
     let mappedCategoryIdsFromText: string[] = []
 
     try {
-      const normalized = await normalizeCourseworkClient(normalizedCourseworkList)
+      const normalized = await normalizeCourseworkClient(verifiedCourseworkList)
       courseworkItemIds = normalized.courseworkItemIds
       const response = await fetch('/api/coursework/map-categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: normalizedCourseworkList }),
+        body: JSON.stringify({ items: verifiedCourseworkList }),
       })
       if (response.ok) {
         const payload = (await response.json()) as { categoryIds?: string[] }
@@ -553,9 +586,11 @@ export default function StudentSignupDetailsPage() {
           school,
           gender: gender || null,
           major_id: selectedMajor.id,
+          second_major_id: selectedSecondMajor?.id ?? null,
           majors: majorNames,
           year,
-          coursework,
+          coursework: normalizedCourseworkList,
+          coursework_unverified: normalizedUnverifiedCoursework,
           experience_level: 'none',
           availability_start_month: 'May',
           availability_hours_per_week: parsedHours,
@@ -602,22 +637,50 @@ export default function StudentSignupDetailsPage() {
       .eq('student_profile_id', user.id)
     if (clearStudentCoursesError) return setError(toUserFacingErrorMessage(clearStudentCoursesError.message))
 
-    const canonicalCourseTokens = normalizedCourseworkList.map((course) => course.toLowerCase())
-    if (canonicalCourseTokens.length > 0) {
-      const { data: canonicalCourseRows } = await supabase
-        .from('canonical_courses')
-        .select('id, code, name')
-        .in('name', normalizedCourseworkList)
-        .limit(200)
+    if (verifiedCourseworkList.length > 0) {
+      const matchedCanonicalIds = Array.from(
+        new Set(
+          (
+            await Promise.all(
+              verifiedCourseworkList.map(async (course) => {
+                const term = course.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+                if (!term) return null
+                const { data: courseRows } = await supabase
+                  .from('canonical_courses')
+                  .select('id, code, name')
+                  .or(`code.ilike.%${term}%,name.ilike.%${term}%`)
+                  .limit(8)
 
-      const matchedCanonicalIds = (canonicalCourseRows ?? [])
-        .filter((row) => {
-          const code = typeof row.code === 'string' ? row.code.toLowerCase() : ''
-          const name = typeof row.name === 'string' ? row.name.toLowerCase() : ''
-          return canonicalCourseTokens.includes(code) || canonicalCourseTokens.includes(name)
-        })
-        .map((row) => row.id)
-        .filter((id): id is string => typeof id === 'string')
+                const ranked = (courseRows ?? [])
+                  .filter(
+                    (row): row is { id: string; code: string; name: string } =>
+                      typeof row.id === 'string' && typeof row.code === 'string' && typeof row.name === 'string'
+                  )
+                  .sort((a, b) => {
+                    const aCode = normalizeCourseCode(a.code)
+                    const bCode = normalizeCourseCode(b.code)
+                    const queryCode = normalizeCourseCode(course)
+                    const aLabel = normalizeCourseToken(`${a.code} ${a.name}`)
+                    const bLabel = normalizeCourseToken(`${b.code} ${b.name}`)
+                    const queryLabel = normalizeCourseToken(course)
+                    const aScore =
+                      (aCode.startsWith(queryCode) ? 3 : 0) +
+                      (aLabel.includes(queryLabel) ? 2 : 0) +
+                      (normalizeCourseToken(a.name).includes(queryLabel) ? 1 : 0)
+                    const bScore =
+                      (bCode.startsWith(queryCode) ? 3 : 0) +
+                      (bLabel.includes(queryLabel) ? 2 : 0) +
+                      (normalizeCourseToken(b.name).includes(queryLabel) ? 1 : 0)
+                    if (aScore !== bScore) return bScore - aScore
+                    return a.name.localeCompare(b.name)
+                  })
+
+                return ranked[0]?.id ?? null
+              })
+            )
+          ).filter((item): item is string => typeof item === 'string')
+        )
+      )
 
       if (matchedCanonicalIds.length > 0) {
         const { error: insertStudentCoursesError } = await supabase.from('student_courses').insert(
@@ -755,10 +818,12 @@ export default function StudentSignupDetailsPage() {
           majorCatalog={majorCatalog}
           majorsLoading={majorsLoading}
           majorError={majorError}
+          schoolName={selectedSchoolForCatalog}
           hasSchoolSpecificCoursework={hasSchoolSpecificCoursework}
-          courseworkInput={courseworkInput}
-          coursework={coursework}
-          filteredCourseworkOptions={filteredCourseworkOptions}
+          courseworkSelections={coursework.map((label) => ({
+            label,
+            verified: !courseworkUnverified.some((item) => item.toLowerCase() === label.toLowerCase()),
+          }))}
           desiredRoles={desiredRoles}
           onSecondMajorQueryChange={(value) => {
             setSecondMajorQuery(value)
@@ -771,7 +836,6 @@ export default function StudentSignupDetailsPage() {
             setSecondMajorQuery(major.name)
           }}
           onMajorErrorClear={() => setMajorError(null)}
-          onCourseworkInputChange={setCourseworkInput}
           onAddCoursework={addCoursework}
           onRemoveCoursework={removeCoursework}
           onDesiredRolesChange={setDesiredRoles}
