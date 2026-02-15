@@ -1,213 +1,55 @@
-'use client'
-
-import Link from 'next/link'
-import { useMemo, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
-import { supabaseBrowser } from '@/lib/supabase/client'
-import TurnstileWidget from '@/components/security/TurnstileWidget'
-import OAuthButtons from '@/components/auth/OAuthButtons'
-import PressRevealPasswordField from '@/components/forms/PressRevealPasswordField'
-import { resolveClientAppOrigin } from '@/lib/url/origin'
+import { redirect } from 'next/navigation'
+import StudentSignupForm from '@/components/auth/StudentSignupForm'
 import { normalizeNextPath } from '@/lib/auth/nextPath'
+import { resolvePostAuthRedirect } from '@/lib/auth/postAuthRedirect'
+import { supabaseServer } from '@/lib/supabase/server'
 
-const FIELD =
-  'mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100'
-
-function getPasswordError(password: string) {
-  if (password.length < 8) return 'Password must be at least 8 characters.'
-  if (!/[A-Z]/.test(password)) return 'Password must include at least one uppercase letter.'
-  if (!/[a-z]/.test(password)) return 'Password must include at least one lowercase letter.'
-  if (!/[0-9]/.test(password)) return 'Password must include at least one number.'
-  return null
+function decodeError(value: string | undefined) {
+  if (!value) return null
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }
 
-export default function StudentSignupPage() {
-  const friendlyCaptchaError = 'Please verify you\'re human and try again.'
-  const searchParams = useSearchParams()
+function isSelfPath(path: string | null) {
+  return path === '/signup/student' || Boolean(path?.startsWith('/signup/student?'))
+}
 
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [revealingPasswords, setRevealingPasswords] = useState(false)
-  const [turnstileToken, setTurnstileToken] = useState('')
-  const [turnstileKey, setTurnstileKey] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+export default async function StudentSignupPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ error?: string; next?: string }>
+}) {
+  const resolvedSearchParams = (searchParams ? await searchParams : {}) ?? {}
+  const requestedNextPath = normalizeNextPath(resolvedSearchParams.next)
+  const normalizedNextForRedirect = isSelfPath(requestedNextPath) ? null : requestedNextPath
 
-  const roleStep2Path = '/signup/student/details'
+  const supabase = await supabaseServer()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  const queryError = useMemo(() => {
-    const value = searchParams.get('error')
-    return value ? decodeURIComponent(value) : null
-  }, [searchParams])
-  const requestedNextPath = useMemo(() => {
-    return normalizeNextPath(searchParams.get('next'))
-  }, [searchParams])
-  const verifyNextPath = requestedNextPath ?? roleStep2Path
-
-  async function createAccount() {
-    setError(null)
-    setSuccess(null)
-
-    if (!email.trim() || !password) {
-      return setError('Email, password, and confirm password are required.')
-    }
-
-    const passwordError = getPasswordError(password)
-    if (passwordError) return setError(passwordError)
-    if (password !== confirmPassword) {
-      return setError('Passwords do not match. Re-enter both fields and try again.')
-    }
-    if (!turnstileToken) return setError(friendlyCaptchaError)
-
-    setLoading(true)
-
-    try {
-      const captchaResponse = await fetch('/api/turnstile/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: turnstileToken,
-          action: 'student_signup',
-        }),
-      })
-
-      if (!captchaResponse.ok) {
-        setLoading(false)
-        setTurnstileToken('')
-        setTurnstileKey((value) => value + 1)
-        return setError(friendlyCaptchaError)
-      }
-    } catch {
-      setLoading(false)
-      setTurnstileToken('')
-      setTurnstileKey((value) => value + 1)
-      return setError(friendlyCaptchaError)
-    }
-
-    const supabase = supabaseBrowser()
-    const appOrigin = resolveClientAppOrigin(process.env.NEXT_PUBLIC_APP_URL, window.location.origin)
-    const callbackNextPath = requestedNextPath ?? roleStep2Path
-
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo: `${appOrigin}/auth/callback?next=${encodeURIComponent(callbackNextPath)}`,
-        data: {
-          role_hint: 'student',
-        },
-      },
+  if (user) {
+    const { destination } = await resolvePostAuthRedirect({
+      supabase,
+      userId: user.id,
+      requestedNextPath: normalizedNextForRedirect,
+      user,
     })
 
-    if (signUpError) {
-      setLoading(false)
-      const message = signUpError.message.toLowerCase()
-      if (message.includes('rate limit') || message.includes('email rate limit exceeded')) {
-        return setError(
-          'Email rate limit reached. Please wait a moment before trying again, or use an existing account.'
-        )
-      }
-      return setError(signUpError.message)
+    if (!isSelfPath(destination)) {
+      redirect(destination)
     }
 
-    const userId = data.user?.id
-    if (!userId) {
-      setLoading(false)
-      return setError('Signup succeeded but no user was returned.')
-    }
-
-    const normalizedEmail = email.trim().toLowerCase()
-    const verifyRequiredPath = `/verify-required?next=${encodeURIComponent(verifyNextPath)}&action=signup_profile_completion&email=${encodeURIComponent(normalizedEmail)}`
-    setLoading(false)
-    window.location.href = verifyRequiredPath
+    redirect('/signup/student/details')
   }
 
   return (
-    <main className="min-h-screen bg-white px-6 py-12">
-      <div className="mx-auto max-w-3xl">
-        <Link
-          href="/"
-          aria-label="Go back"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </Link>
-
-        <h1 className="mt-4 text-2xl font-semibold text-slate-900">Student signup</h1>
-        <p className="mt-2 text-slate-600">Step 1 of 2: create your account, then verify your email.</p>
-
-        <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-900">Account</h2>
-          <OAuthButtons roleHint="student" nextPath={requestedNextPath ?? undefined} className="mt-4" />
-          <div className="mt-4 border-t border-slate-200 pt-4">
-            <p className="text-xs text-slate-500">Or continue with email and password.</p>
-          </div>
-
-          <div className="mt-4 space-y-4">
-            <div>
-              <label className="text-sm font-medium text-slate-700">Email</label>
-              <input
-                type="email"
-                className={FIELD}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@email.com"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-slate-700">Password</label>
-              <PressRevealPasswordField
-                className={FIELD}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 8 characters"
-                revealed={revealingPasswords}
-                onRevealChange={setRevealingPasswords}
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-slate-700">Confirm password</label>
-              <PressRevealPasswordField
-                className={FIELD}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Re-enter password"
-                revealed={revealingPasswords}
-                onRevealChange={setRevealingPasswords}
-              />
-            </div>
-          </div>
-
-          {queryError ? <p className="mt-4 text-sm text-amber-700">{queryError}</p> : null}
-          {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
-          {success ? <p className="mt-4 text-sm text-emerald-700">{success}</p> : null}
-
-          <TurnstileWidget
-            key={turnstileKey}
-            action="student_signup"
-            className="mt-4"
-            appearance="always"
-            onTokenChange={setTurnstileToken}
-          />
-
-          <button
-            onClick={createAccount}
-            disabled={loading}
-            className="mt-6 w-full rounded-md bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            {loading ? 'Creating account...' : 'Create account and verify email'}
-          </button>
-
-          <p className="mt-4 text-xs text-slate-500">
-            Step 2 unlocks after email verification.
-          </p>
-        </div>
-      </div>
-    </main>
+    <StudentSignupForm
+      queryError={decodeError(resolvedSearchParams.error)}
+      requestedNextPath={requestedNextPath}
+    />
   )
 }

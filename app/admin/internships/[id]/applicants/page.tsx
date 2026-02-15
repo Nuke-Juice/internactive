@@ -170,17 +170,21 @@ export default async function AdminInternshipApplicantsPage({
   if (!internship?.id) {
     redirect('/admin/internships?error=Internship+not+found')
   }
+  if (!internship.employer_id) {
+    redirect('/admin/internships?error=Internship+employer+not+found')
+  }
+  const employerId = internship.employer_id
 
   const { data: employerProfile } = await admin
     .from('employer_profiles')
     .select('user_id, company_name, contact_email')
-    .eq('user_id', internship.employer_id)
+    .eq('user_id', employerId)
     .maybeSingle()
 
   const { data: claimTokensData } = await admin
     .from('employer_claim_tokens')
     .select('employer_id, created_at, expires_at, used_at')
-    .eq('employer_id', internship.employer_id)
+    .eq('employer_id', employerId)
     .order('created_at', { ascending: false })
 
   const claimStatus = buildEmployerClaimStatus((claimTokensData ?? []) as EmployerClaimTokenRow[])
@@ -487,14 +491,11 @@ export default async function AdminInternshipApplicantsPage({
     const statusValue = normalizeStatusFilter(String(formData.get('status_filter') ?? ''))
     const adminWrite = supabaseAdmin()
 
-    const [{ data: internshipRow }, { data: employerRow }] = await Promise.all([
-      adminWrite.from('internships').select('id, title, employer_id').eq('id', internshipId).maybeSingle(),
-      adminWrite
-        .from('employer_profiles')
-        .select('user_id, company_name, contact_email')
-        .eq('user_id', internship.employer_id)
-        .maybeSingle(),
-    ])
+    const { data: internshipRow } = await adminWrite
+      .from('internships')
+      .select('id, title, employer_id')
+      .eq('id', internshipId)
+      .maybeSingle()
 
     if (!internshipRow?.id || !internshipRow.employer_id) {
       redirect(
@@ -505,6 +506,12 @@ export default async function AdminInternshipApplicantsPage({
         })}`
       )
     }
+
+    const { data: employerRow } = await adminWrite
+      .from('employer_profiles')
+      .select('user_id, company_name, contact_email')
+      .eq('user_id', internshipRow.employer_id)
+      .maybeSingle()
 
     const recipient = employerRow?.contact_email?.trim() ?? ''
     if (!recipient) {
@@ -559,7 +566,7 @@ export default async function AdminInternshipApplicantsPage({
     const { error } = await adminWrite
       .from('employer_profiles')
       .update({ contact_email: contactEmail || null })
-      .eq('user_id', internship.employer_id)
+      .eq('user_id', employerId)
 
     if (error) {
       redirect(

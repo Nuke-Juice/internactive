@@ -1,7 +1,7 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { hasUniversitySpecificCourses } from '@/lib/coursework/universityCourseCatalog'
 import { normalizeCourseworkClient } from '@/lib/coursework/normalizeCourseworkClient'
@@ -119,6 +119,7 @@ function readStudentDraft() {
 }
 
 export default function StudentSignupDetailsPage() {
+  const router = useRouter()
   const [initializing, setInitializing] = useState(true)
   const [stepIndex, setStepIndex] = useState(0)
 
@@ -885,13 +886,16 @@ export default function StudentSignupDetailsPage() {
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <Link
-          href="/signup/student"
+        <button
+          type="button"
           aria-label="Back to account step"
+          onClick={() => {
+            router.push('/signup/student')
+          }}
           className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
         >
           <ArrowLeft className="h-5 w-5" />
-        </Link>
+        </button>
 
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">Student profile details</h1>
         <p className="mt-2 text-slate-600">You&apos;re 2 minutes away from matching with internships.</p>
