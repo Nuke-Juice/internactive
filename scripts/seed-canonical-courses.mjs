@@ -180,7 +180,6 @@ async function main() {
       subject_code: row.subject_code,
       course_number: row.course_number,
       title: row.title,
-      description: row.description,
       category: row.category,
       code: row.code,
       name: row.name,

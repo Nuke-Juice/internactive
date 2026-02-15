@@ -41,13 +41,16 @@ async function loadEnvFromDotLocal() {
 
 async function getLocalVersions() {
   const files = await fs.readdir(MIGRATIONS_DIR)
-  return files
+  return Array.from(
+    new Set(
+      files
     .map((file) => {
       const match = file.match(/^(\d{14})_/) || file.match(/^(\d{8,14})_/) 
       return match ? match[1] : null
     })
     .filter((v) => v !== null)
-    .sort()
+    )
+  ).sort()
 }
 
 async function getRemoteVersionsViaDb() {
