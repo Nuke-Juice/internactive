@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local catalog inputs + generated import outputs
+data/catalog_imports/
+data/course_import/
+data/*proposed*.json
+SYSTEM_AUDIT_PACK/
+
+# Deprecated degree-plan scraping artifacts
+data/degree_plan_indexes/
+data/degree_plans_parsed.json
+data/discovered_degree_plan_sources.json
+data/elective_buckets.proposed.json
