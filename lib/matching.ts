@@ -10,6 +10,8 @@ export type InternshipMatchInput = {
   description?: string | null
   work_mode?: string | null
   term?: string | null
+  start_date?: string | null
+  application_deadline?: string | null
   experience_level?: string | null
   target_student_year?: string | null
   desired_coursework_strength?: string | null
