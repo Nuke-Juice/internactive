@@ -53,6 +53,8 @@ export default async function LoginPage({
 
   const resolvedSearchParams = (searchParams ? await searchParams : {}) ?? {}
   const nextPath = normalizeNextPath(resolvedSearchParams.next)
+  const normalizedNextPath =
+    nextPath === '/login' || nextPath?.startsWith('/login?') ? null : nextPath
   const normalizedReason = (resolvedSearchParams.reason ?? '').trim()
   const reasonOnlyMessage =
     !resolvedSearchParams.error && normalizedReason
@@ -62,6 +64,23 @@ export default async function LoginPage({
           ? 'Could not finish OAuth sign-in.'
           : null
       : null
+  const supabase = await supabaseServer()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (user) {
+    const { destination } = await resolvePostAuthRedirect({
+      supabase,
+      userId: user.id,
+      requestedNextPath: normalizedNextPath,
+      user,
+    })
+    if (destination === '/login' || destination.startsWith('/login?')) {
+      redirect('/')
+    }
+    redirect(destination)
+  }
 
   return (
     <main className="min-h-screen bg-white px-6 py-12">
