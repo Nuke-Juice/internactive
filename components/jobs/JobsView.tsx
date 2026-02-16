@@ -8,6 +8,7 @@ import { normalizeStateCode } from '@/lib/locations/usLocationCatalog'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import { supabaseServer } from '@/lib/supabase/server'
 import { INTERNSHIP_CATEGORIES } from '@/lib/internships/categories'
+import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
 import FiltersPanel from '@/app/jobs/_components/FiltersPanel'
 import JobCard from '@/app/jobs/_components/JobCard'
 import JobCardSkeleton from '@/app/jobs/_components/JobCardSkeleton'
@@ -29,6 +30,7 @@ export type JobsQuery = {
   loc?: string
   radius?: string
   page?: string
+  applied?: string
 }
 
 type JobsViewProps = {
@@ -222,64 +224,6 @@ function getActiveFilterDescriptors(filters: JobsFilterState) {
   return candidates.filter((item) => Boolean(filters[item.key]))
 }
 
-function getStudentProfileCompletion(profile: {
-  university_id?: string | number | null
-  school?: string | null
-  major_id?: string | null
-  major?: unknown
-  majors?: string[] | string | null
-  year?: string | null
-  coursework?: string[] | string | null
-  experience_level?: string | null
-  availability_start_month?: string | null
-  availability_hours_per_week?: number | string | null
-} | null, hasIdentityName = false) {
-  if (!profile) return { completed: 0, total: 8, percent: 0, isComplete: false }
-
-  const majorName = canonicalMajorName(profile.major)
-  const majors = majorName ? parseMajors([majorName]) : parseMajors(profile.majors ?? null)
-  const coursework =
-    Array.isArray(profile.coursework)
-      ? profile.coursework.filter((course): course is string => typeof course === 'string' && course.trim().length > 0)
-      : typeof profile.coursework === 'string'
-        ? profile.coursework
-            .split(',')
-            .map((course) => course.trim())
-            .filter(Boolean)
-        : []
-
-  const hasUniversity = Boolean(
-    profile.university_id || (typeof profile.school === 'string' && profile.school.trim().length > 0)
-  )
-  const hasYear = typeof profile.year === 'string' && profile.year.trim().length > 0 && profile.year !== 'Not set'
-  const hasExperience =
-    profile.experience_level === 'none' ||
-    profile.experience_level === 'projects' ||
-    profile.experience_level === 'internship'
-  const hasStartMonth =
-    typeof profile.availability_start_month === 'string' && profile.availability_start_month.trim().length > 0
-  const hasHours =
-    typeof profile.availability_hours_per_week === 'number'
-      ? profile.availability_hours_per_week > 0
-      : typeof profile.availability_hours_per_week === 'string' && profile.availability_hours_per_week.trim().length > 0
-
-  const checks = [
-    hasIdentityName,
-    hasUniversity,
-    majors.length > 0,
-    hasYear,
-    hasExperience,
-    hasStartMonth,
-    hasHours,
-    coursework.length > 0,
-  ]
-  const completed = checks.filter(Boolean).length
-  const total = checks.length
-  const percent = Math.round((completed / total) * 100)
-
-  return { completed, total, percent, isComplete: completed === total }
-}
-
 export function JobsViewSkeleton({ showHero = false }: { showHero?: boolean }) {
   return (
     <>
@@ -407,6 +351,9 @@ export default async function JobsView({
   let profileSkillIds: string[] = []
   let profileCourseworkItemIds: string[] = []
   let profileCourseworkCategoryIds: string[] = []
+  let profileCanonicalCourseworkCategoryIds: string[] = []
+  let profileCanonicalCourseworkCategoryNames: string[] = []
+  let profileCanonicalCourseLevelBands: Array<'intro' | 'intermediate' | 'advanced'> = []
   let preferenceSignals = parseStudentPreferenceSignals(null)
   let studentTransportMode: string | null = null
   let studentMaxCommuteMinutes: number | null = null
@@ -418,22 +365,10 @@ export default async function JobsView({
   }
   const whyMatchById = new Map<string, string[]>()
   const commuteMinutesById = new Map<string, number>()
+  const employerAvatarById = new Map<string, string | null>()
   let role: 'student' | 'employer' | undefined
-  let showCompleteProfileBanner = false
-  let profileCompletionPercent = 0
 
   if (user) {
-    const userMetadata = (user.user_metadata ?? {}) as { first_name?: string; last_name?: string; full_name?: string }
-    const hasIdentityName =
-      (typeof userMetadata.first_name === 'string' &&
-        userMetadata.first_name.trim().length > 0 &&
-        typeof userMetadata.last_name === 'string' &&
-        userMetadata.last_name.trim().length > 0) ||
-      (typeof userMetadata.full_name === 'string' &&
-        userMetadata.full_name
-          .split(/\s+/)
-          .map((token) => token.trim())
-          .filter(Boolean).length >= 2)
     const { data: userRow } = await supabase
       .from('users')
       .select('role')
@@ -443,17 +378,37 @@ export default async function JobsView({
       role = userRow.role
     }
 
-    const { data: profile } = await supabase
+    const fullProfileSelect =
+      'university_id, school, major_id, major:canonical_majors(id, slug, name), majors, year, coursework, coursework_unverified, experience_level, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, location_lat, location_lng'
+    const fallbackProfileSelect =
+      'university_id, school, major_id, major:canonical_majors(id, slug, name), majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode'
+    const profileResult = await supabase
       .from('student_profiles')
-      .select(
-        'university_id, school, major_id, major:canonical_majors(id, slug, name), majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, location_lat, location_lng'
-      )
+      .select(fullProfileSelect)
       .eq('user_id', user.id)
       .maybeSingle()
-    const [{ data: studentSkillRows }, { data: studentCourseworkRows }, { data: studentCourseworkCategoryRows }] = await Promise.all([
-      supabase.from('student_skill_items').select('skill_id').eq('student_id', user.id),
-      supabase.from('student_coursework_items').select('coursework_item_id').eq('student_id', user.id),
-      supabase.from('student_coursework_category_links').select('category_id').eq('student_id', user.id),
+    const profile =
+      profileResult.error &&
+      profileResult.error.message.toLowerCase().includes('schema cache')
+        ? (
+            await supabase
+              .from('student_profiles')
+              .select(fallbackProfileSelect)
+              .eq('user_id', user.id)
+              .maybeSingle()
+          ).data
+        : profileResult.data
+    const [{ data: studentSkillRows }, courseworkFeatures] = await Promise.all([
+      supabase.from('student_skill_items').select('skill_id, skill:skills(label)').eq('student_id', user.id),
+      getStudentCourseworkFeatures({
+        supabase,
+        studentId: user.id,
+        profileCoursework: profile?.coursework,
+        profileCourseworkUnverified:
+          profile && typeof profile === 'object' && 'coursework_unverified' in profile
+            ? (profile as { coursework_unverified?: unknown }).coursework_unverified
+            : undefined,
+      }),
     ])
 
     const profileMajorName = canonicalMajorName(profile?.major)
@@ -462,13 +417,20 @@ export default async function JobsView({
     profileExperienceLevel = profile?.experience_level ?? null
     profileAvailability = profile?.availability_hours_per_week ?? null
     profileAvailabilityStartMonth = profile?.availability_start_month ?? null
-    profileCoursework = Array.isArray(profile?.coursework)
-      ? profile.coursework.filter(
-          (course): course is string => typeof course === 'string' && course.length > 0
-        )
+    profileCoursework = courseworkFeatures.textCoursework
+      ? courseworkFeatures.textCoursework
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
       : []
+    const canonicalSkillLabels = (studentSkillRows ?? [])
+      .map((row) => {
+        const skill = row.skill as { label?: string | null } | null
+        return typeof skill?.label === 'string' ? skill.label : ''
+      })
+      .filter((value): value is string => value.length > 0)
     preferenceSignals = parseStudentPreferenceSignals(profile?.interests ?? null)
-    profileSkills = preferenceSignals.skills
+    profileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels]))
     studentTransportMode = typeof profile?.transport_mode === 'string' ? profile.transport_mode : 'driving'
     studentMaxCommuteMinutes = typeof profile?.max_commute_minutes === 'number' ? profile.max_commute_minutes : null
     studentLocation = {
@@ -476,24 +438,50 @@ export default async function JobsView({
       state: typeof profile?.preferred_state === 'string' ? profile.preferred_state : null,
       zip: typeof profile?.preferred_zip === 'string' ? profile.preferred_zip : null,
       point: toGeoPoint(
-        typeof profile?.location_lat === 'number' ? profile.location_lat : null,
-        typeof profile?.location_lng === 'number' ? profile.location_lng : null
+        profile && typeof profile === 'object' && 'location_lat' in profile && typeof profile.location_lat === 'number'
+          ? profile.location_lat
+          : null,
+        profile && typeof profile === 'object' && 'location_lng' in profile && typeof profile.location_lng === 'number'
+          ? profile.location_lng
+          : null
       ),
     }
     profileSkillIds = (studentSkillRows ?? [])
       .map((row) => row.skill_id)
       .filter((value): value is string => typeof value === 'string')
-    profileCourseworkItemIds = (studentCourseworkRows ?? [])
-      .map((row) => row.coursework_item_id)
-      .filter((value): value is string => typeof value === 'string')
-    profileCourseworkCategoryIds = (studentCourseworkCategoryRows ?? [])
-      .map((row) => row.category_id)
-      .filter((value): value is string => typeof value === 'string')
+    profileCourseworkItemIds = courseworkFeatures.legacyItemIds
+    profileCourseworkCategoryIds = courseworkFeatures.legacyCategoryIds
+    profileCanonicalCourseworkCategoryIds = courseworkFeatures.canonicalCategoryIds
+    profileCanonicalCourseworkCategoryNames = courseworkFeatures.canonicalCategoryNames
+    profileCanonicalCourseLevelBands = courseworkFeatures.canonicalCourseLevelBands
 
     if (role === 'student') {
-      const completion = getStudentProfileCompletion(profile ?? null, hasIdentityName)
-      profileCompletionPercent = completion.percent
-      showCompleteProfileBanner = !completion.isComplete
+      let completionProfile = profile as
+        | {
+            university_id?: string | number | null
+            school?: string | null
+            major_id?: string | null
+            major?: unknown
+            majors?: string[] | string | null
+            year?: string | null
+            coursework?: string[] | string | null
+            experience_level?: string | null
+            availability_start_month?: string | null
+            availability_hours_per_week?: number | string | null
+          }
+        | null
+
+      if (!completionProfile) {
+        const minimalCompletionResult = await supabase
+          .from('student_profiles')
+          .select('university_id, school, major_id, majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        completionProfile = minimalCompletionResult.data ?? null
+      }
+
+      if (completionProfile) {
+      }
     }
 
   }
@@ -527,6 +515,8 @@ export default async function JobsView({
         recommended_coursework: listing.recommended_coursework,
         required_skill_ids: listing.required_skill_ids,
         preferred_skill_ids: listing.preferred_skill_ids,
+        required_course_category_ids: listing.required_course_category_ids,
+        required_course_category_names: listing.required_course_category_names,
         coursework_item_ids: listing.coursework_item_ids,
         coursework_category_ids: listing.coursework_category_ids,
         coursework_category_names: listing.coursework_category_names,
@@ -539,6 +529,9 @@ export default async function JobsView({
         experience_level: profileExperienceLevel,
         skills: profileSkills,
         skill_ids: profileSkillIds,
+        canonical_coursework_category_ids: profileCanonicalCourseworkCategoryIds,
+        canonical_coursework_category_names: profileCanonicalCourseworkCategoryNames,
+        canonical_coursework_level_bands: profileCanonicalCourseLevelBands,
         coursework_item_ids: profileCourseworkItemIds,
         coursework_category_ids: profileCourseworkCategoryIds,
         coursework: profileCoursework,
@@ -601,9 +594,9 @@ export default async function JobsView({
       employerIds.length > 0
         ? await supabase
             .from('employer_profiles')
-            .select('user_id, location')
+            .select('user_id, location, avatar_url')
             .in('user_id', employerIds)
-        : { data: [] as Array<{ user_id: string; location: string | null }> }
+        : { data: [] as Array<{ user_id: string; location: string | null; avatar_url: string | null }> }
 
     const employerLocationById = new Map(
       (employerProfiles ?? []).map((row) => {
@@ -619,6 +612,11 @@ export default async function JobsView({
         ]
       })
     )
+    for (const row of employerProfiles ?? []) {
+      if (typeof row.user_id === 'string') {
+        employerAvatarById.set(row.user_id, typeof row.avatar_url === 'string' ? row.avatar_url : null)
+      }
+    }
 
     const commuteMap = await getCommuteMinutesForListings({
       supabase,
@@ -831,22 +829,6 @@ export default async function JobsView({
       ) : null}
 
       <section id={anchorId} className="mx-auto max-w-6xl scroll-mt-24 px-6 py-8">
-        {showCompleteProfileBanner && (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p>
-                Profile {profileCompletionPercent}% complete. Finish your profile to improve internship matches.
-              </p>
-              <Link
-                href="/account?complete=1"
-                className="inline-flex items-center justify-center rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
-              >
-                Complete profile
-              </Link>
-            </div>
-          </div>
-        )}
-
         <div className="flex items-end justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold text-slate-900">{listingsTitle}</h2>
@@ -957,6 +939,7 @@ export default async function JobsView({
                           maxCommuteMinutes: studentMaxCommuteMinutes,
                           employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
                           employer_response_total: responseStats?.applicationsTotal ?? 0,
+                          employer_avatar_url: listing.employer_id ? employerAvatarById.get(listing.employer_id) ?? null : null,
                         }}
                         isAuthenticated={Boolean(user)}
                         userRole={role ?? null}
@@ -1038,6 +1021,7 @@ export default async function JobsView({
                               maxCommuteMinutes: studentMaxCommuteMinutes,
                               employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
                               employer_response_total: responseStats?.applicationsTotal ?? 0,
+                              employer_avatar_url: listing.employer_id ? employerAvatarById.get(listing.employer_id) ?? null : null,
                             }}
                             isAuthenticated={Boolean(user)}
                             userRole={role ?? null}
@@ -1065,6 +1049,7 @@ export default async function JobsView({
                       maxCommuteMinutes: studentMaxCommuteMinutes,
                       employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
                       employer_response_total: responseStats?.applicationsTotal ?? 0,
+                      employer_avatar_url: listing.employer_id ? employerAvatarById.get(listing.employer_id) ?? null : null,
                     }}
                     isAuthenticated={Boolean(user)}
                     userRole={role ?? null}

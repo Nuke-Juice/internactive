@@ -3,26 +3,57 @@ import { supabaseServer } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
 import { trackAnalyticsEvent } from '@/lib/analytics'
+import { FileText, ShieldCheck } from 'lucide-react'
 
 const steps = ['submitted', 'reviewing', 'interview', 'accepted'] as const
 type Status = (typeof steps)[number] | 'rejected' | 'viewed'
 
-function ProgressBar({ status }: { status: Status }) {
-  if (status === 'rejected') {
-    return (
-      <div className="h-2 w-full rounded bg-slate-200" title="Rejected">
-        <div className="h-2 w-1/3 rounded bg-slate-400" />
-      </div>
-    )
-  }
+const stageLabels = ['Submitted', 'Viewed', 'Interview', 'Accepted']
 
-  const normalizedStatus = status === 'viewed' ? 'reviewing' : status
-  const idx = steps.indexOf(normalizedStatus as (typeof steps)[number])
-  const pct = idx >= 0 ? ((idx + 1) / steps.length) * 100 : 25
+function normalizedStatus(status: Status) {
+  if (status === 'viewed') return 'reviewing'
+  return status
+}
+
+function stageIndex(status: Status) {
+  const normalized = normalizedStatus(status)
+  return steps.indexOf(normalized as (typeof steps)[number])
+}
+
+function StageStepper({ status }: { status: Status }) {
+  const index = stageIndex(status)
+  const rejected = status === 'rejected'
 
   return (
-    <div className="h-2 w-full rounded bg-slate-200">
-      <div className="h-2 rounded bg-blue-600" style={{ width: `${pct}%` }} />
+    <div className="mt-4">
+      <div className="grid grid-cols-4 gap-2">
+        {stageLabels.map((label, idx) => {
+          const completed = !rejected && idx < index
+          const active = !rejected && idx === index
+          const muted = rejected || idx > index
+          return (
+            <div key={label} className="flex flex-col items-center gap-1 text-center">
+              <div
+                className={`grid h-8 w-8 place-items-center rounded-full border text-[11px] font-semibold ${
+                  completed
+                    ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                    : active
+                      ? 'border-blue-300 bg-blue-100 text-blue-800'
+                      : muted
+                        ? 'border-slate-200 bg-slate-100 text-slate-500'
+                        : 'border-slate-200 bg-slate-100 text-slate-600'
+                }`}
+              >
+                {completed ? '✓' : idx + 1}
+              </div>
+              <div className={`text-[11px] ${active ? 'font-semibold text-slate-800' : 'text-slate-500'}`}>{label}</div>
+            </div>
+          )
+        })}
+      </div>
+      {rejected ? (
+        <p className="mt-2 text-xs text-slate-600">This application was closed by the employer.</p>
+      ) : null}
     </div>
   )
 }
@@ -32,9 +63,9 @@ function StatusPill({ status }: { status: Status }) {
     submitted: 'bg-slate-50 text-slate-700 border-slate-200',
     reviewing: 'bg-blue-50 text-blue-700 border-blue-200',
     viewed: 'bg-blue-50 text-blue-700 border-blue-200',
-    interview: 'bg-blue-50 text-blue-700 border-blue-200',
-    accepted: 'bg-blue-50 text-blue-700 border-blue-200',
-    rejected: 'bg-slate-100 text-slate-700 border-slate-200',
+    interview: 'bg-amber-50 text-amber-700 border-amber-200',
+    accepted: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    rejected: 'bg-red-50 text-red-700 border-red-200',
   }
   return (
     <span className={`rounded-full border px-2 py-1 text-xs font-medium ${map[status]}`}>
@@ -59,13 +90,16 @@ function parseReasons(value: unknown) {
     .slice(0, 2)
 }
 
-export default async function ApplicationsPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{ external_complete?: string; error?: string }>
-}) {
-  const resolvedSearchParams = searchParams ? await searchParams : undefined
+function formatDateTime(value: string | null) {
+  if (!value) return null
+  try {
+    return new Date(value).toLocaleString()
+  } catch {
+    return value
+  }
+}
 
+export default async function ApplicationsPage() {
   async function markExternalComplete(formData: FormData) {
     'use server'
 
@@ -98,7 +132,7 @@ export default async function ApplicationsPage({
       properties: { listing_id: listingId, application_id: applicationId, source: 'applications_page' },
     })
 
-    redirect('/applications?external_complete=1')
+    redirect('/applications?toast=External+application+marked+complete.&toast_type=success')
   }
 
   const { user } = await requireRole('student', { requestedPath: '/applications' })
@@ -126,16 +160,6 @@ export default async function ApplicationsPage({
             <p className="mt-2 text-slate-600">Track status at a glance.</p>
           </div>
         </div>
-        {resolvedSearchParams?.external_complete === '1' ? (
-          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            External application marked complete.
-          </div>
-        ) : null}
-        {resolvedSearchParams?.error ? (
-          <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {decodeURIComponent(resolvedSearchParams.error)}
-          </div>
-        ) : null}
         {pendingExternal.length > 0 ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
             <div className="text-sm font-semibold text-amber-900">Finish your ATS applications</div>
@@ -196,20 +220,32 @@ export default async function ApplicationsPage({
               const status = (a.status ?? 'submitted') as Status
               const topReasons = parseReasons(a.match_reasons)
               const pendingExternalApply = Boolean(a.external_apply_required) && !a.external_apply_completed_at
+              const companyInitial = (listing?.company_name ?? 'C').trim().charAt(0).toUpperCase()
+              const lastActivity =
+                formatDateTime(a.employer_viewed_at ?? null) ??
+                formatDateTime(a.external_apply_last_clicked_at ?? null) ??
+                formatDateTime(a.submitted_at ?? a.created_at)
               return (
-                <div key={a.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div key={a.id} className="rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-5 shadow-sm">
                   <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="text-base font-semibold text-slate-900">
-                        {listing?.title || 'Internship'}
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-600">
+                        {companyInitial}
                       </div>
-                      <div className="text-sm text-slate-600">
-                        {listing?.company_name || 'Company'}
+                      <div className="min-w-0">
+                        <div className="truncate text-lg font-semibold text-slate-900">
+                          {listing?.title || 'Internship'}
+                        </div>
+                        <div className="text-sm text-slate-600">
+                          {listing?.company_name || 'Company'}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Applied {formatDate(a.submitted_at ?? a.created_at)}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <StatusPill status={status} />
-                      <div className="text-sm text-slate-500">{formatDate(a.submitted_at ?? a.created_at)}</div>
                     </div>
                   </div>
                   {pendingExternalApply ? (
@@ -218,28 +254,27 @@ export default async function ApplicationsPage({
                     </div>
                   ) : null}
 
-                  <div className="mt-4">
-                    <ProgressBar status={status} />
+                  <StageStepper status={status} />
+
+                  <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                    <span className="inline-flex items-center gap-1">
+                      <FileText className="h-3.5 w-3.5" />
+                      Last activity: {lastActivity ?? 'No activity yet'}
+                    </span>
+                    {typeof a.match_score === 'number' ? (
+                      <span className="inline-flex items-center gap-1">
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        Match: {a.match_score}
+                      </span>
+                    ) : null}
                   </div>
 
-                  <div className="mt-2 text-xs text-slate-500">
-                    Submitted {'->'} Viewed {'->'} Interview {'->'} Accepted (or Rejected)
-                  </div>
-
-                  <div className="mt-2 text-xs text-slate-600">
-                    {a.employer_viewed_at
-                      ? `✅ Viewed by employer ${new Date(a.employer_viewed_at).toLocaleString()}`
-                      : 'Not viewed yet'}
-                  </div>
-
-                  <div className="mt-3 text-xs text-slate-600">
-                    <span className="font-medium text-slate-700">Match score:</span>{' '}
-                    {typeof a.match_score === 'number' ? a.match_score : 'N/A'}
-                  </div>
                   {topReasons.length > 0 ? (
-                    <ul className="mt-2 list-disc pl-5 text-xs text-slate-600">
+                    <ul className="mt-3 space-y-2 text-xs">
                       {topReasons.map((reason) => (
-                        <li key={reason}>{reason}</li>
+                        <li key={reason} className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-blue-900">
+                          {reason}
+                        </li>
                       ))}
                     </ul>
                   ) : null}

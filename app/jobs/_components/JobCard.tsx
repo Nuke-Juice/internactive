@@ -7,6 +7,7 @@ type Listing = {
   title: string | null
   company_name: string | null
   employer_id?: string | null
+  employer_avatar_url?: string | null
   employer_verification_tier?: string | null
   location: string | null
   location_city?: string | null
@@ -36,6 +37,7 @@ type Listing = {
   preferred_skills?: string[] | null
   commuteMinutes?: number | null
   maxCommuteMinutes?: number | null
+  matchScore?: number | null
 }
 
 type Props = {
@@ -239,28 +241,46 @@ export default function JobCard({
   const applicationsCount = typeof listing.applications_count === 'number' ? listing.applications_count : 0
   const capReached = applicationsCount >= applicationCap
   const nearCap = applicationsCount >= 50 && !capReached
+  const companyInitial = (listing.company_name ?? 'C').trim().charAt(0).toUpperCase()
 
   return (
     <article className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold text-slate-900">{listing.title || 'Internship'}</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            {listing.employer_id ? (
-              <Link
-                href={`/employers/${encodeURIComponent(listing.employer_id)}`}
-                className="text-sm font-medium text-blue-700 hover:underline"
-                title="View employer profile"
-              >
-                {listing.company_name || 'Company'}
-              </Link>
+        <div className="min-w-0 flex flex-1 items-start gap-3">
+          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+            {listing.employer_avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={listing.employer_avatar_url} alt={`${listing.company_name ?? 'Company'} logo`} className="h-full w-full object-cover" />
             ) : (
-              <p className="text-sm font-medium text-slate-700">{listing.company_name || 'Company'}</p>
+              <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-slate-600">{companyInitial}</div>
             )}
-            <EmployerVerificationBadge tier={listing.employer_verification_tier ?? 'free'} />
+          </div>
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-semibold text-slate-900">{listing.title || 'Internship'}</h2>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              {listing.employer_id ? (
+                <Link
+                  href={`/employers/${encodeURIComponent(listing.employer_id)}`}
+                  className="text-sm font-medium text-blue-700 hover:underline"
+                  title="View employer profile"
+                >
+                  {listing.company_name || 'Company'}
+                </Link>
+              ) : (
+                <p className="text-sm font-medium text-slate-700">{listing.company_name || 'Company'}</p>
+              )}
+              <EmployerVerificationBadge tier={listing.employer_verification_tier ?? 'free'} />
+            </div>
           </div>
         </div>
-        {listing.pay ? <span className={badgeClass(true)}>{listing.pay}</span> : null}
+        <div className="flex items-center gap-2">
+          {typeof listing.matchScore === 'number' ? (
+            <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              {Math.round(listing.matchScore)}% match
+            </span>
+          ) : null}
+          {listing.pay ? <span className={badgeClass(true)}>{listing.pay}</span> : null}
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -276,7 +296,8 @@ export default function JobCard({
 
       {rolePreview ? <p className="mt-3 line-clamp-1 text-sm text-slate-700">{rolePreview}</p> : null}
 
-      <div className="mt-3 grid gap-1.5 text-xs text-slate-600 sm:grid-cols-2">
+      <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+        <div className="grid gap-1.5 text-xs text-slate-600 sm:grid-cols-2">
         <p className="font-medium text-slate-700">
           Applicants: {applicationsCount} / {applicationCap}
           {nearCap ? (
@@ -310,6 +331,7 @@ export default function JobCard({
             ? `Employer response rate: ${Math.round(listing.employer_response_rate)}% (views within 7 days)`
             : 'New employer - response rate not available yet'}
         </p>
+        </div>
       </div>
 
       {listing.majorsText ? (
@@ -332,7 +354,6 @@ export default function JobCard({
       {typeof listing.commuteMinutes === 'number' ? (
         <p className={`mt-2 text-xs ${typeof listing.maxCommuteMinutes === 'number' && listing.commuteMinutes > listing.maxCommuteMinutes ? 'text-amber-700' : 'text-slate-600'}`}>
           <span className="font-medium text-slate-700">Commute:</span> ~{listing.commuteMinutes} min
-          {typeof listing.maxCommuteMinutes === 'number' ? ` (${listing.maxCommuteMinutes} min target)` : ''}
         </p>
       ) : null}
 

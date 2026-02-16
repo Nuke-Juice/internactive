@@ -43,7 +43,7 @@ export default function ApplyButton({
   }
 
   const mode = applyMode === 'ats_link' || applyMode === 'hybrid' ? applyMode : 'native'
-  const applyHref = mode === 'native' ? `/apply/${listingId}` : `/apply/${listingId}?quick=1`
+  const applyHref = `/jobs/${listingId}?apply=1`
   const applyLabel = mode === 'native' ? 'Apply' : 'Quick apply'
 
   if (isClosed) {

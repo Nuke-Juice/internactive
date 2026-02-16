@@ -1,12 +1,22 @@
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import {
+  ArrowLeft,
+  Briefcase,
+  FileText,
+  ShieldCheck,
+  Star,
+  Users,
+} from 'lucide-react'
 import EmployerVerificationBadge from '@/components/badges/EmployerVerificationBadge'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getCommuteMinutesForListings, toGeoPoint } from '@/lib/commute'
 import { supabaseServer } from '@/lib/supabase/server'
 import { evaluateInternshipMatch, parseMajors } from '@/lib/matching'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
-import ApplyButton from '../_components/ApplyButton'
+import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
+import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
+import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
+import ApplyModalLauncher from '../_components/ApplyModalLauncher'
 
 function formatMajors(value: string[] | string | null) {
   if (!value) return ''
@@ -39,6 +49,53 @@ function formatDate(value: string | null | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function parseDashedBullets(value: string | null | undefined) {
+  const raw = (value ?? '').trim()
+  if (!raw) return []
+  const cleaned = raw.replace(/\r/g, ' ').replace(/\n/g, ' ')
+  const parts = cleaned
+    .split(/\s+-\s+/)
+    .map((part) => part.replace(/^-+\s*/, '').trim())
+    .filter(Boolean)
+  if (parts.length < 2) return []
+  const plausible = parts.filter((item) => item.length >= 5 && item.length <= 180)
+  if (plausible.length < 2) return []
+  return plausible.slice(0, 10)
+}
+
+function parseScreeningQuestion(value: string | null | undefined) {
+  const raw = (value ?? '').trim()
+  if (!raw) return null
+  const match = raw.match(/screening question:\s*([^\n\r]+)/i)
+  if (!match?.[1]) return null
+  const prompt = match[1].trim()
+  return prompt.length > 0 ? prompt : null
+}
+
+function scoreLabel(score: number | null, insufficientData: boolean, noSkillSignals: boolean) {
+  if (insufficientData) {
+    return {
+      title: 'Complete your profile to see your match',
+      badge: noSkillSignals ? 'Add skills to calculate match' : 'Match pending',
+      tone: 'pending' as const,
+    }
+  }
+  if (score === null) {
+    return { title: 'How you match', badge: 'Match pending', tone: 'pending' as const }
+  }
+  if (score >= 60) return { title: "Why you're a strong match", badge: `${score}% match`, tone: 'high' as const }
+  if (score >= 20) return { title: 'How you match', badge: `${score}% match`, tone: 'medium' as const }
+  return { title: 'Match details', badge: 'Low match', tone: 'low' as const }
+}
+
+function missingProfileFieldLabel(value: string) {
+  if (value === 'school') return 'School'
+  if (value === 'major') return 'Major'
+  if (value === 'availability_start_month') return 'Availability start month'
+  if (value === 'availability_hours_per_week') return 'Hours per week'
+  return value
 }
 
 function gapCta(gap: string) {
@@ -84,6 +141,11 @@ function canonicalMajorName(value: unknown) {
   return null
 }
 
+function isSchemaDriftError(message: string | null | undefined) {
+  const normalized = (message ?? '').toLowerCase()
+  return normalized.includes('schema cache') || (normalized.includes('column') && normalized.includes('student_profiles'))
+}
+
 export default async function JobDetailPage({
   params,
 }: {
@@ -95,6 +157,15 @@ export default async function JobDetailPage({
   const {
     data: { user },
   } = await supabase.auth.getUser()
+  const authMetadata = (user?.user_metadata ?? {}) as {
+    resume_path?: string
+    resume_file_name?: string
+  }
+  const hasSavedResume = typeof authMetadata.resume_path === 'string' && authMetadata.resume_path.trim().length > 0
+  const savedResumeFileName =
+    typeof authMetadata.resume_file_name === 'string' && authMetadata.resume_file_name.trim().length > 0
+      ? authMetadata.resume_file_name.trim()
+      : null
   let userRole: 'student' | 'employer' | null = null
 
   if (user) {
@@ -105,7 +176,7 @@ export default async function JobDetailPage({
   }
 
   const listingSelectRich =
-        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
   const listingSelectBase =
     'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
 
@@ -120,6 +191,7 @@ export default async function JobDetailPage({
     | (typeof richListing & {
         internship_required_skill_items?: Array<{ skill_id: string | null }> | null
         internship_preferred_skill_items?: Array<{ skill_id: string | null }> | null
+        internship_required_course_categories?: Array<{ category_id: string | null; category?: { name?: string | null; slug?: string | null } | null }> | null
         internship_coursework_items?: Array<{ coursework_item_id: string | null }> | null
         internship_coursework_category_links?: Array<{ category_id: string | null; category?: { name?: string | null } | null }> | null
       })
@@ -143,6 +215,7 @@ export default async function JobDetailPage({
           ...baseListing,
           internship_required_skill_items: [],
           internship_preferred_skill_items: [],
+          internship_required_course_categories: [],
           internship_coursework_items: [],
           internship_coursework_category_links: [],
         }
@@ -150,35 +223,77 @@ export default async function JobDetailPage({
   }
 
   let matchBreakdown: { scorePercent: number; reasons: string[]; gaps: string[] } | null = null
+  let insufficientMatchData = true
+  let missingMatchFields: string[] = []
+  let missingSkillSignals = false
   let commuteMinutes: number | null = null
   let maxCommuteMinutes: number | null = null
   if (user && userRole === 'student' && listing) {
-    const [{ data: profile }, { data: studentSkillRows }, { data: studentCourseworkRows }, { data: studentCourseworkCategoryRows }] = await Promise.all([
-      supabase
-        .from('student_profiles')
-        .select(
-          'major_id, major:canonical_majors(id, slug, name), majors, year, experience_level, coursework, interests, availability_start_month, availability_hours_per_week, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, location_lat, location_lng'
-        )
-        .eq('user_id', user.id)
-        .maybeSingle(),
-      supabase.from('student_skill_items').select('skill_id').eq('student_id', user.id),
-      supabase.from('student_coursework_items').select('coursework_item_id').eq('student_id', user.id),
-      supabase.from('student_coursework_category_links').select('category_id').eq('student_id', user.id),
+    const fullProfileSelect =
+      'school, major_id, major:canonical_majors(id, slug, name), majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, location_lat, location_lng'
+    const fallbackProfileSelect =
+      'school, major_id, major:canonical_majors(id, slug, name), majors, year, experience_level, coursework, interests, availability_start_month, availability_hours_per_week, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode'
+    const profileResult = await supabase
+      .from('student_profiles')
+      .select(fullProfileSelect)
+      .eq('user_id', user.id)
+      .maybeSingle()
+    const profile =
+      profileResult.error && isSchemaDriftError(profileResult.error.message)
+        ? (
+            await supabase
+              .from('student_profiles')
+              .select(fallbackProfileSelect)
+              .eq('user_id', user.id)
+              .maybeSingle()
+          ).data
+        : profileResult.data
+    const [{ data: studentSkillRows }, courseworkFeatures] = await Promise.all([
+      supabase.from('student_skill_items').select('skill_id, skill:skills(label)').eq('student_id', user.id),
+      getStudentCourseworkFeatures({
+        supabase,
+        studentId: user.id,
+        profileCoursework: profile?.coursework,
+        profileCourseworkUnverified:
+          profile && typeof profile === 'object' && 'coursework_unverified' in profile
+            ? (profile as { coursework_unverified?: unknown }).coursework_unverified
+            : undefined,
+      }),
     ])
 
     const canonicalSkillIds = (studentSkillRows ?? [])
       .map((row) => row.skill_id)
       .filter((value): value is string => typeof value === 'string')
-    const canonicalCourseworkItemIds = (studentCourseworkRows ?? [])
-      .map((row) => row.coursework_item_id)
-      .filter((value): value is string => typeof value === 'string')
-    const canonicalCourseworkCategoryIds = (studentCourseworkCategoryRows ?? [])
-      .map((row) => row.category_id)
-      .filter((value): value is string => typeof value === 'string')
-    const coursework = Array.isArray(profile?.coursework)
-      ? profile.coursework.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    const canonicalSkillLabels = (studentSkillRows ?? [])
+      .map((row) => {
+        const skill = row.skill as { label?: string | null } | null
+        return typeof skill?.label === 'string' ? skill.label : ''
+      })
+      .filter((value): value is string => value.length > 0)
+    const canonicalCourseworkItemIds = courseworkFeatures.legacyItemIds
+    const canonicalCourseworkCategoryIds = courseworkFeatures.legacyCategoryIds
+    const coursework = courseworkFeatures.textCoursework
+      ? courseworkFeatures.textCoursework
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
       : []
     const preferenceSignals = parseStudentPreferenceSignals(profile?.interests ?? null)
+    const combinedProfileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels]))
+    const minimumCompleteness = getMinimumProfileCompleteness(profile)
+    missingMatchFields = minimumCompleteness.missing
+    missingSkillSignals = combinedProfileSkills.length === 0
+    insufficientMatchData =
+      !minimumCompleteness.ok ||
+      (combinedProfileSkills.length === 0 &&
+        !courseworkFeatures.coverage.hasCanonical &&
+        !courseworkFeatures.coverage.hasLegacy &&
+        !courseworkFeatures.coverage.hasText)
+    const normalizedListingCoursework = normalizeListingCoursework({
+      internship_required_course_categories: listing.internship_required_course_categories,
+      internship_coursework_category_links: listing.internship_coursework_category_links,
+      internship_coursework_items: listing.internship_coursework_items,
+    })
 
     const match = evaluateInternshipMatch(
       {
@@ -198,6 +313,8 @@ export default async function JobDetailPage({
         required_skills: listing.required_skills ?? null,
         preferred_skills: listing.preferred_skills ?? null,
         recommended_coursework: listing.recommended_coursework ?? null,
+        required_course_category_ids: normalizedListingCoursework.requiredCanonicalCategoryIds,
+        required_course_category_names: normalizedListingCoursework.requiredCanonicalCategoryNames,
         required_skill_ids: (listing.internship_required_skill_items ?? [])
           .map((item) => item.skill_id)
           .filter((value): value is string => typeof value === 'string'),
@@ -224,9 +341,12 @@ export default async function JobDetailPage({
         })(),
         year: profile?.year ?? null,
         experience_level: profile?.experience_level ?? null,
-        skills: preferenceSignals.skills,
+        skills: combinedProfileSkills,
         coursework,
         skill_ids: canonicalSkillIds,
+        canonical_coursework_category_ids: courseworkFeatures.canonicalCategoryIds,
+        canonical_coursework_category_names: courseworkFeatures.canonicalCategoryNames,
+        canonical_coursework_level_bands: courseworkFeatures.canonicalCourseLevelBands,
         coursework_item_ids: canonicalCourseworkItemIds,
         coursework_category_ids: canonicalCourseworkCategoryIds,
         availability_hours_per_week: profile?.availability_hours_per_week ?? null,
@@ -243,6 +363,23 @@ export default async function JobDetailPage({
       }
     )
 
+    if (process.env.MATCHING_DEBUG_PIPELINE === '1') {
+      console.info('[jobs:detail:matching-pipeline]', {
+        listingId: listing.id,
+        studentId: user.id,
+        profileSkills: combinedProfileSkills,
+        profileSkillIds: canonicalSkillIds,
+        profileCourseworkCategories: courseworkFeatures.canonicalCategoryNames,
+        profileCoursework: coursework,
+        listingRequiredSkills: listing.required_skills ?? [],
+        listingPreferredSkills: listing.preferred_skills ?? [],
+        listingRequiredCourseworkCategories: normalizedListingCoursework.requiredCanonicalCategoryNames,
+        matchScore: match.score,
+        matchReasons: match.reasons,
+        matchGaps: match.gaps,
+      })
+    }
+
     matchBreakdown = {
       scorePercent: match.score,
       reasons: match.reasons,
@@ -255,8 +392,12 @@ export default async function JobDetailPage({
       state: typeof profile?.preferred_state === 'string' ? profile.preferred_state : null,
       zip: typeof profile?.preferred_zip === 'string' ? profile.preferred_zip : null,
       point: toGeoPoint(
-        typeof profile?.location_lat === 'number' ? profile.location_lat : null,
-        typeof profile?.location_lng === 'number' ? profile.location_lng : null
+        profile && typeof profile === 'object' && 'location_lat' in profile && typeof profile.location_lat === 'number'
+          ? profile.location_lat
+          : null,
+        profile && typeof profile === 'object' && 'location_lng' in profile && typeof profile.location_lng === 'number'
+          ? profile.location_lng
+          : null
       ),
     }
 
@@ -348,6 +489,35 @@ export default async function JobDetailPage({
     typeof responseStatsRow?.applications_total === 'number' ? responseStatsRow.applications_total : 0
   const employerResponseRate =
     typeof responseStatsRow?.viewed_within_7d_rate === 'number' ? responseStatsRow.viewed_within_7d_rate : null
+  const scoreUi = scoreLabel(matchBreakdown?.scorePercent ?? null, insufficientMatchData, missingSkillSignals)
+  const screeningQuestion = parseScreeningQuestion(listing.description)
+  const scoreToneClasses =
+    scoreUi.tone === 'high'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+      : scoreUi.tone === 'medium'
+        ? 'border-amber-200 bg-amber-50 text-amber-800'
+        : scoreUi.tone === 'low'
+          ? 'border-slate-300 bg-slate-100 text-slate-700'
+          : 'border-blue-200 bg-blue-50 text-blue-800'
+  const scoreCircleClasses =
+    scoreUi.tone === 'high'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+      : scoreUi.tone === 'medium'
+        ? 'border-amber-200 bg-amber-50 text-amber-800'
+        : scoreUi.tone === 'low'
+          ? 'border-slate-300 bg-slate-100 text-slate-700'
+          : 'border-blue-200 bg-blue-50 text-blue-800'
+  const scoreCircleValue = insufficientMatchData
+    ? '—'
+    : (matchBreakdown?.scorePercent ?? 0) <= 0
+      ? 'Low'
+      : String(Math.round(matchBreakdown?.scorePercent ?? 0))
+  const deadlineDate = listing.application_deadline ? new Date(listing.application_deadline) : null
+  const daysToDeadline =
+    deadlineDate && Number.isFinite(deadlineDate.getTime())
+      ? Math.ceil((deadlineDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+      : null
+  const isDeadlineSoon = typeof daysToDeadline === 'number' && daysToDeadline >= 0 && daysToDeadline <= 14
 
   await trackAnalyticsEvent({
     eventName: 'view_job_detail',
@@ -360,54 +530,87 @@ export default async function JobDetailPage({
       <div className="mx-auto max-w-6xl">
         <Link
           href="/"
-          aria-label="Go back"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+          aria-label="Back to listings"
+          className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
         >
-          <ArrowLeft className="h-5 w-5" />
+          <ArrowLeft className="h-4 w-4" />
+          Back to listings
         </Link>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <h1 className="text-3xl font-semibold text-slate-900">{listing.title || 'Internship'}</h1>
+                  <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{listing.title || 'Internship'}</h1>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-600">
                     {listing.employer_id ? (
                       <Link
                         href={`/employers/${encodeURIComponent(listing.employer_id)}`}
-                        className="font-medium text-slate-800 hover:text-blue-700 hover:underline"
+                        className="font-medium text-slate-700 hover:text-blue-700 hover:underline"
                       >
                         {listing.company_name || 'Company'}
                       </Link>
                     ) : (
-                      <span className="font-medium text-slate-800">{listing.company_name || 'Company'}</span>
+                      <span className="font-medium text-slate-700">{listing.company_name || 'Company'}</span>
                     )}
                     <EmployerVerificationBadge tier={listing.employer_verification_tier ?? 'free'} />
-                    <span className="text-slate-400">•</span>
-                    <span>{listing.location || 'TBD'}</span>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {listing.work_mode ? (
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                      {listing.work_mode}
+                <div className="flex items-start gap-3">
+                  {isDeadlineSoon ? (
+                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+                      Deadline soon
                     </span>
                   ) : null}
-                  {listing.term ? (
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                      {listing.term}
-                    </span>
-                  ) : null}
-                  {formatTargetYear((listing as { target_student_year?: string | null }).target_student_year ?? listing.experience_level) ? (
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">
-                      {formatTargetYear((listing as { target_student_year?: string | null }).target_student_year ?? listing.experience_level)}
-                    </span>
+                  {userRole === 'student' ? (
+                    <div className="flex flex-col items-center">
+                      <div className={`grid h-24 w-24 place-items-center rounded-full border-2 ${scoreCircleClasses}`}>
+                        <span className="text-2xl font-semibold leading-none">{scoreCircleValue}</span>
+                      </div>
+                      <p className="mt-2 text-xs font-semibold text-slate-700">{scoreUi.badge}</p>
+                      {insufficientMatchData ? (
+                        <p className="mt-1 max-w-[9rem] text-center text-[11px] text-slate-500">
+                          Complete your profile to calculate your match.
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <Briefcase className="h-3.5 w-3.5" />
+                    Location
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">{listing.location || 'TBD'}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <Briefcase className="h-3.5 w-3.5" />
+                    Work mode
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">{listing.work_mode || 'Not specified'}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <FileText className="h-3.5 w-3.5" />
+                    Term
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">{listing.term || 'Open term'}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <Star className="h-3.5 w-3.5" />
+                    Year in school
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">
+                    {formatTargetYear((listing as { target_student_year?: string | null }).target_student_year ?? listing.experience_level) ||
+                      'Any year'}
+                  </div>
+                </div>
                 {typeof listing.hours_per_week === 'number' ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hours/week</div>
@@ -425,16 +628,24 @@ export default async function JobDetailPage({
                       }`}
                     >
                       ~{commuteMinutes} min
-                      {typeof maxCommuteMinutes === 'number' ? ` (${maxCommuteMinutes} min target)` : ''}
                     </div>
                   </div>
                 ) : null}
                 {listing.majors ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:col-span-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recommended majors</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Majors targeted</div>
                     <div className="mt-1 text-sm text-slate-800">{formatMajors(listing.majors)}</div>
                   </div>
                 ) : null}
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:col-span-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <Users className="h-3.5 w-3.5" />
+                    Applicants
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">
+                    {applicationsCount} of {applicationCap} spots filled
+                  </div>
+                </div>
                 {Array.isArray(listing.recommended_coursework) && listing.recommended_coursework.length > 0 ? (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:col-span-2">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recommended coursework</div>
@@ -445,20 +656,28 @@ export default async function JobDetailPage({
             </section>
 
             {listing.description ? (
-              <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Role overview</h2>
-                <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">{listing.description}</p>
+                {parseDashedBullets(listing.description).length > 0 ? (
+                  <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-700">
+                    {parseDashedBullets(listing.description).map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">{listing.description}</p>
+                )}
               </section>
             ) : null}
 
             {Array.isArray(listing.required_skills) && listing.required_skills.length > 0 ? (
-              <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Required skills</h2>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {listing.required_skills.map((skill) => (
                     <span
                       key={skill}
-                      className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                      className="inline-flex items-center rounded-full border border-blue-300 bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800"
                     >
                       {skill}
                     </span>
@@ -468,7 +687,7 @@ export default async function JobDetailPage({
             ) : null}
 
             {Array.isArray(listing.preferred_skills) && listing.preferred_skills.length > 0 ? (
-              <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Preferred skills</h2>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {listing.preferred_skills.map((skill) => (
@@ -483,17 +702,41 @@ export default async function JobDetailPage({
               </section>
             ) : null}
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-sm font-semibold text-slate-900">Why this match</h2>
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-semibold text-slate-900">{scoreUi.title}</h2>
+              </div>
               {!user ? (
                 <p className="mt-2 text-sm text-slate-600">Sign in to see your personalized match breakdown.</p>
               ) : userRole !== 'student' ? (
                 <p className="mt-2 text-sm text-slate-600">Match breakdown is available for student accounts.</p>
+              ) : insufficientMatchData ? (
+                <div className="mt-3 space-y-3">
+                  <p className="text-sm text-slate-700">
+                    {missingSkillSignals ? 'Add at least one skill to calculate a stronger match.' : 'Complete your profile to unlock full match insights.'}
+                  </p>
+                  {missingMatchFields.length > 0 ? (
+                    <ul className="space-y-2">
+                      {missingMatchFields.map((field) => (
+                        <li key={field} className="flex items-center gap-2 text-sm text-slate-700">
+                          <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+                          {missingProfileFieldLabel(field)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <Link
+                    href={missingSkillSignals ? '/account#skills' : '/account?complete=1'}
+                    className="inline-flex text-sm font-medium text-blue-700 hover:text-blue-800 hover:underline"
+                  >
+                    {missingSkillSignals ? 'Add skills' : 'Update profile'}
+                  </Link>
+                </div>
               ) : !matchBreakdown ? (
                 <p className="mt-2 text-sm text-slate-600">Match breakdown unavailable.</p>
               ) : (
                 <div className="mt-4 grid gap-4 md:grid-cols-[160px_1fr]">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className={`rounded-xl border p-4 ${scoreToneClasses}`}>
                     <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Match score</div>
                     <div className="mt-1 text-3xl font-semibold text-slate-900">{matchBreakdown.scorePercent}</div>
                     <div className="text-xs text-slate-500">out of 100</div>
@@ -501,27 +744,35 @@ export default async function JobDetailPage({
 
                   <div className="space-y-4">
                     <div>
-                      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Reasons</div>
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                        <Star className="h-3.5 w-3.5" />
+                        Reasons
+                      </div>
                       {matchBreakdown.reasons.length > 0 ? (
-                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                        <ul className="mt-2 space-y-2">
                           {matchBreakdown.reasons.map((reason) => (
-                            <li key={reason}>{reason}</li>
+                            <li key={reason} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                              {reason}
+                            </li>
                           ))}
                         </ul>
                       ) : (
-                        <p className="mt-2 text-sm text-slate-600">No positive reasons yet.</p>
+                        <p className="mt-2 text-sm text-slate-600">No strong overlaps yet. Add skills/coursework to improve this score.</p>
                       )}
                     </div>
 
                     <div>
-                      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Gaps</div>
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        Gaps
+                      </div>
                       {matchBreakdown.gaps.length > 0 ? (
                         <ul className="mt-2 space-y-2">
                           {matchBreakdown.gaps.map((gap) => {
                             const cta = gapCta(gap)
                             return (
-                              <li key={gap} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                                <div className="text-slate-700">{gap}</div>
+                              <li key={gap} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
+                                <div className="text-amber-900">{gap}</div>
                                 {cta ? (
                                   <Link href={cta.href} className="mt-1 inline-flex text-xs font-medium text-blue-700 hover:underline">
                                     {cta.label}
@@ -542,21 +793,27 @@ export default async function JobDetailPage({
           </div>
 
           <aside className="lg:sticky lg:top-6 lg:self-start">
-            <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 shadow-sm">
-              <h2 className="text-base font-semibold text-blue-950">Ready to apply?</h2>
-              <p className="mt-1 text-sm text-blue-900">
+            <div className="rounded-3xl border border-blue-200 bg-gradient-to-b from-blue-50 to-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-950">Ready to apply?</h2>
+              <p className="mt-1 text-sm text-slate-700">
                 {listing.application_deadline
                   ? `Deadline: ${formatDate(listing.application_deadline) ?? listing.application_deadline}`
                   : 'Applications are currently open.'}
               </p>
 
-              <div className="mt-4 grid gap-2 rounded-lg border border-blue-100 bg-white/80 p-3 text-xs text-blue-950">
+              <div className="mt-4 grid gap-2 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-900">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-blue-700">Applicants</span>
-                  <span className="text-right font-medium">Applicants: {applicationsCount} / {applicationCap}</span>
+                  <span className="inline-flex items-center gap-1 text-slate-600">
+                    <Users className="h-3.5 w-3.5" />
+                    Applicants
+                  </span>
+                  <span className="text-right font-semibold">{applicationsCount} / {applicationCap}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-blue-700">Company</span>
+                  <span className="inline-flex items-center gap-1 text-slate-600">
+                    <Briefcase className="h-3.5 w-3.5" />
+                    Company
+                  </span>
                   {listing.employer_id ? (
                     <Link href={`/employers/${encodeURIComponent(listing.employer_id)}`} className="font-medium text-blue-800 hover:underline">
                       {listing.company_name || 'Company'}
@@ -566,49 +823,82 @@ export default async function JobDetailPage({
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-blue-700">Location</span>
-                  <span className="text-right font-medium">{listing.location || 'TBD'}</span>
+                  <span className="inline-flex items-center gap-1 text-slate-600">
+                    <Briefcase className="h-3.5 w-3.5" />
+                    Location
+                  </span>
+                  <span className="text-right font-semibold">{listing.location || 'TBD'}</span>
                 </div>
                 {listing.term ? (
                   <div className="flex items-center justify-between">
-                    <span className="text-blue-700">Term</span>
-                    <span className="font-medium">{listing.term}</span>
+                    <span className="inline-flex items-center gap-1 text-slate-600">
+                      <FileText className="h-3.5 w-3.5" />
+                      Term
+                    </span>
+                    <span className="font-semibold">{listing.term}</span>
                   </div>
                 ) : null}
                 {listing.work_mode ? (
                   <div className="flex items-center justify-between">
-                    <span className="text-blue-700">Work mode</span>
-                    <span className="font-medium">{listing.work_mode}</span>
+                    <span className="inline-flex items-center gap-1 text-slate-600">
+                      <Briefcase className="h-3.5 w-3.5" />
+                      Work mode
+                    </span>
+                    <span className="font-semibold">{listing.work_mode}</span>
+                  </div>
+                ) : null}
+                {typeof listing.hours_per_week === 'number' ? (
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1 text-slate-600">
+                      <Briefcase className="h-3.5 w-3.5" />
+                      Hours/week
+                    </span>
+                    <span className="font-semibold">{listing.hours_per_week}</span>
                   </div>
                 ) : null}
               </div>
 
-              <div className="mt-3 rounded-lg border border-blue-100 bg-white/80 p-3 text-xs text-blue-950">
+              <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-900">
                 <div className="font-semibold">Transparent applications.</div>
-                <p className="mt-1 text-blue-900">
+                <p className="mt-1 text-slate-700">
                   We show applicant counts and when employers view your application - so you&apos;re not applying into a black hole.
                 </p>
               </div>
 
-              <div className="mt-2 text-xs text-blue-900">
+              <div className="mt-3 inline-flex items-center gap-1 text-xs text-slate-700">
+                <Star className="h-3.5 w-3.5" />
                 {employerApplicationsTotal >= 5 && employerResponseRate !== null
                   ? `Responds to ${Math.round(employerResponseRate)}% within 7 days`
                   : 'Not enough data yet'}
               </div>
 
-              <ApplyButton
+              {insufficientMatchData ? (
+                <div className="mt-2 text-xs text-slate-600">
+                  Not enough data yet.{' '}
+                  <Link href="/account?complete=1" className="font-medium text-blue-700 hover:underline">
+                    Update profile
+                  </Link>
+                </div>
+              ) : null}
+
+              <div className="mt-3">
+                <ApplyModalLauncher
                 listingId={listing.id}
-                applyMode={listing.apply_mode}
+                companyName={listing.company_name || 'this company'}
                 isAuthenticated={Boolean(user)}
                 userRole={userRole}
                 isClosed={capReached}
-                className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                screeningQuestion={screeningQuestion}
+                hasSavedResume={hasSavedResume}
+                savedResumeFileName={savedResumeFileName}
               />
+              </div>
               {capReached ? (
-                <p className="mt-2 text-xs text-blue-900">Applications closed ({applicationCap} applicants).</p>
+                <p className="mt-2 text-xs text-slate-700">Applications closed ({applicationCap} applicants).</p>
               ) : null}
               {listing.apply_mode === 'ats_link' || listing.apply_mode === 'hybrid' ? (
-                <p className="mt-2 text-xs text-blue-900">
+                <p className="mt-2 inline-flex items-start gap-1 text-xs text-slate-700">
+                  <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-700" />
                   You will quick apply here first, then complete the employer ATS application.
                 </p>
               ) : null}
