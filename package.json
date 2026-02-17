@@ -15,6 +15,7 @@
     "courses:seed-catalog:dry": "node scripts/seed-canonical-courses.mjs --dry-run",
     "courses:db-status": "node scripts/audit-course-catalog-db-status.mjs",
     "courses:verify-search": "node scripts/verify-course-catalog-search.mjs",
+    "coursework:coverage": "node scripts/coursework_coverage_report.mjs",
     "supabase:migrations:check": "node scripts/check-migration-history.mjs",
     "courses:scrape": "node scripts/sync-university-course-catalog.mjs",
     "courses:scrape:dry": "node scripts/sync-university-course-catalog.mjs --dry-run",

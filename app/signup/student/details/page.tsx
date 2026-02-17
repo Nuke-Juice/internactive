@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { hasUniversitySpecificCourses } from '@/lib/coursework/universityCourseCatalog'
 import { normalizeCourseworkClient } from '@/lib/coursework/normalizeCourseworkClient'
+import {
+  US_CITY_OPTIONS,
+  isVerifiedCityForState,
+  normalizeStateCode,
+} from '@/lib/locations/usLocationCatalog'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { toUserFacingErrorMessage } from '@/lib/errors/userFacingError'
 import type { CanonicalMajor } from '@/components/account/MajorCombobox'
@@ -53,12 +58,14 @@ type StudentProfileRow = {
   school: string | null
   gender: string | null
   major_id: string | null
-  second_major_id: string | null
+  second_major_id?: string | null
   majors: string[] | string | null
   year: string | null
   availability_start_month: string | null
   availability_hours_per_week: number | null
   interests: string | null
+  preferred_city: string | null
+  preferred_state: string | null
 }
 
 type StudentDraft = {
@@ -113,6 +120,54 @@ function readStudentDraft() {
   } catch {
     return null
   }
+}
+
+function isMissingSecondMajorIdSchemaError(message: string | null | undefined) {
+  const normalized = (message ?? '').toLowerCase()
+  return normalized.includes('second_major_id') && normalized.includes('schema cache')
+}
+
+function formatPreferredLocation(city: string, state: string) {
+  return `${city}, ${state}`
+}
+
+function canonicalPreferredLocationFromCityState(city: string | null | undefined, state: string | null | undefined) {
+  const normalizedCity = (city ?? '').trim()
+  const normalizedState = normalizeStateCode(state)
+  if (!normalizedCity || !normalizedState) return ''
+  return isVerifiedCityForState(normalizedCity, normalizedState)
+    ? formatPreferredLocation(normalizedCity, normalizedState)
+    : ''
+}
+
+function canonicalPreferredLocationFromRaw(value: string | null | undefined) {
+  const raw = (value ?? '').trim()
+  if (!raw) return ''
+  const direct = US_CITY_OPTIONS.find(
+    (option) => formatPreferredLocation(option.city, option.state).toLowerCase() === raw.toLowerCase()
+  )
+  if (direct) return formatPreferredLocation(direct.city, direct.state)
+
+  const cityOnlyMatches = US_CITY_OPTIONS.filter((option) => option.city.toLowerCase() === raw.toLowerCase())
+  if (cityOnlyMatches.length === 1) {
+    const only = cityOnlyMatches[0]
+    return formatPreferredLocation(only.city, only.state)
+  }
+
+  return ''
+}
+
+function parsePreferredLocation(value: string) {
+  const raw = value.trim()
+  if (!raw) return { city: null, state: null }
+  const parts = raw.split(',').map((part) => part.trim())
+  if (parts.length < 2) return { city: null, state: null }
+  const state = normalizeStateCode(parts[parts.length - 1] ?? '')
+  const city = parts.slice(0, -1).join(', ').trim()
+  if (!city || !state || !isVerifiedCityForState(city, state)) {
+    return { city: null, state: null }
+  }
+  return { city, state }
 }
 
 export default function StudentSignupDetailsPage() {
@@ -201,7 +256,7 @@ export default function StudentSignupDetailsPage() {
       if (!firstName.trim()) return 'First name is required.'
       if (!lastName.trim()) return 'Last name is required.'
       if (!school.trim()) return 'Please select your school.'
-      if (!year.trim()) return 'Please select your graduation year.'
+      if (!year.trim()) return 'Please select your class standing.'
       if (!selectedMajor) return 'Please select a verified major.'
       if (selectedSecondMajor && selectedSecondMajor.id === selectedMajor.id) {
         return 'Choose a different second major or leave it blank.'
@@ -212,6 +267,9 @@ export default function StudentSignupDetailsPage() {
     if (index === 1) {
       if (selectedSecondMajor && selectedMajor && selectedSecondMajor.id === selectedMajor.id) {
         return 'Choose a different second major or leave it blank.'
+      }
+      if (coursework.length === 0) {
+        return 'Add at least one coursework item to continue.'
       }
       return null
     }
@@ -230,12 +288,15 @@ export default function StudentSignupDetailsPage() {
     if (stepIndex === 0) {
       return Boolean(firstName.trim() && lastName.trim() && school.trim() && year.trim() && selectedMajor)
     }
+    if (stepIndex === 1) {
+      return coursework.length > 0
+    }
     if (stepIndex === 3) {
       const parsedHours = Number(hoursPerWeek)
       return Number.isFinite(parsedHours) && parsedHours > 0
     }
     return true
-  }, [firstName, lastName, school, year, selectedMajor, stepIndex, hoursPerWeek])
+  }, [firstName, lastName, school, year, selectedMajor, stepIndex, coursework.length, hoursPerWeek])
 
   useEffect(() => {
     const supabase = supabaseBrowser()
@@ -312,13 +373,24 @@ export default function StudentSignupDetailsPage() {
         setMajorsLoading(false)
       }
 
-      const { data: profile } = await supabase
+      const profileSelectWithSecondMajor =
+        'school, gender, major_id, second_major_id, majors, year, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state'
+      const profileSelectWithoutSecondMajor =
+        'school, gender, major_id, majors, year, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state'
+      const initialProfileResult = await supabase
         .from('student_profiles')
-        .select(
-          'school, gender, major_id, second_major_id, majors, year, availability_start_month, availability_hours_per_week, interests'
-        )
+        .select(profileSelectWithSecondMajor)
         .eq('user_id', user.id)
         .maybeSingle<StudentProfileRow>()
+      const profileResult =
+        initialProfileResult.error && isMissingSecondMajorIdSchemaError(initialProfileResult.error.message)
+          ? await supabase
+              .from('student_profiles')
+              .select(profileSelectWithoutSecondMajor)
+              .eq('user_id', user.id)
+              .maybeSingle<StudentProfileRow>()
+          : initialProfileResult
+      const profile = profileResult.data
 
       const { data: selectedCourseRows } = await supabase
         .from('student_courses')
@@ -342,6 +414,7 @@ export default function StudentSignupDetailsPage() {
         setGender(profile.gender || '')
         setHoursPerWeek(profile.availability_hours_per_week ? String(profile.availability_hours_per_week) : '15')
         setInterests(profile.interests || '')
+        setPreferredLocation(canonicalPreferredLocationFromCityState(profile.preferred_city, profile.preferred_state))
 
         const primaryMajor =
           profile.major_id && catalog.length > 0 ? catalog.find((item) => item.id === profile.major_id) || null : null
@@ -412,7 +485,9 @@ export default function StudentSignupDetailsPage() {
         if (typeof draft.desiredRoles === 'string') setDesiredRoles(draft.desiredRoles)
         if (typeof draft.interests === 'string') setInterests(draft.interests)
         if (typeof draft.hoursPerWeek === 'string') setHoursPerWeek(draft.hoursPerWeek)
-        if (typeof draft.preferredLocation === 'string') setPreferredLocation(draft.preferredLocation)
+        if (typeof draft.preferredLocation === 'string') {
+          setPreferredLocation(canonicalPreferredLocationFromRaw(draft.preferredLocation))
+        }
         if (typeof draft.preferredWorkMode === 'string') setPreferredWorkMode(draft.preferredWorkMode)
         if (typeof draft.stepIndex === 'number') setStepIndex(Math.min(Math.max(draft.stepIndex, 0), STUDENT_STEPS - 1))
 
@@ -597,31 +672,32 @@ export default function StudentSignupDetailsPage() {
     }
 
     const parsedHours = Number(hoursPerWeek)
+    const parsedPreferredLocation = parsePreferredLocation(preferredLocation)
     const fullName = `${firstName.trim()} ${lastName.trim()}`.trim()
 
-    const [{ error: userError }, { error: profileError }, { error: authError }] = await Promise.all([
+    const profileUpsertPayload = {
+      user_id: user.id,
+      school,
+      gender: gender || null,
+      major_id: selectedMajor.id,
+      second_major_id: selectedSecondMajor?.id ?? null,
+      majors: majorNames,
+      year,
+      experience_level: 'none',
+      availability_start_month: 'May',
+      availability_hours_per_week: parsedHours,
+      interests: interests || null,
+      preferred_city: parsedPreferredLocation.city,
+      preferred_state: parsedPreferredLocation.state,
+    }
+
+    const [{ error: userError }, authResult] = await Promise.all([
       supabase.from('users').upsert(
         {
           id: user.id,
           role: 'student',
         },
         { onConflict: 'id' }
-      ),
-      supabase.from('student_profiles').upsert(
-        {
-          user_id: user.id,
-          school,
-          gender: gender || null,
-          major_id: selectedMajor.id,
-          second_major_id: selectedSecondMajor?.id ?? null,
-          majors: majorNames,
-          year,
-          experience_level: 'none',
-          availability_start_month: 'May',
-          availability_hours_per_week: parsedHours,
-          interests: interests || null,
-        },
-        { onConflict: 'user_id' }
       ),
       supabase.auth.updateUser({
         data: {
@@ -633,6 +709,24 @@ export default function StudentSignupDetailsPage() {
         },
       }),
     ])
+    const initialProfileUpsertResult = await supabase
+      .from('student_profiles')
+      .upsert(profileUpsertPayload, { onConflict: 'user_id' })
+    const profileError =
+      initialProfileUpsertResult.error && isMissingSecondMajorIdSchemaError(initialProfileUpsertResult.error.message)
+        ? (
+            await supabase
+              .from('student_profiles')
+              .upsert(
+                {
+                  ...profileUpsertPayload,
+                  second_major_id: undefined,
+                },
+                { onConflict: 'user_id' }
+              )
+          ).error
+        : initialProfileUpsertResult.error
+    const authError = authResult.error
 
     setSaving(false)
 
@@ -792,11 +886,12 @@ export default function StudentSignupDetailsPage() {
           lastName={lastName}
           school={school}
           schoolQuery={schoolQuery}
-          schoolOpen={schoolOpen}
           year={year}
           yearOpen={yearOpen}
           selectedMajor={selectedMajor}
           majorQuery={majorQuery}
+          secondMajorQuery={secondMajorQuery}
+          selectedSecondMajor={selectedSecondMajor}
           majorCatalog={majorCatalog}
           majorsLoading={majorsLoading}
           majorError={majorError}
@@ -829,27 +924,6 @@ export default function StudentSignupDetailsPage() {
             setSelectedMajor(major)
             setMajorQuery(major.name)
           }}
-          onMajorErrorClear={() => setMajorError(null)}
-        />
-      )
-    }
-
-    if (stepIndex === 1) {
-      return (
-        <StudentStep2
-          fieldClassName={FIELD}
-          secondMajorQuery={secondMajorQuery}
-          selectedSecondMajor={selectedSecondMajor}
-          majorCatalog={majorCatalog}
-          majorsLoading={majorsLoading}
-          majorError={majorError}
-          schoolName={selectedSchoolForCatalog}
-          hasSchoolSpecificCoursework={hasSchoolSpecificCoursework}
-          courseworkSelections={coursework.map((label) => ({
-            label,
-            verified: !courseworkUnverified.some((item) => item.toLowerCase() === label.toLowerCase()),
-          }))}
-          desiredRoles={desiredRoles}
           onSecondMajorQueryChange={(value) => {
             setSecondMajorQuery(value)
             if (selectedSecondMajor && value.trim() !== selectedSecondMajor.name) {
@@ -861,6 +935,21 @@ export default function StudentSignupDetailsPage() {
             setSecondMajorQuery(major.name)
           }}
           onMajorErrorClear={() => setMajorError(null)}
+        />
+      )
+    }
+
+    if (stepIndex === 1) {
+      return (
+        <StudentStep2
+          fieldClassName={FIELD}
+          schoolName={selectedSchoolForCatalog}
+          hasSchoolSpecificCoursework={hasSchoolSpecificCoursework}
+          courseworkSelections={coursework.map((label) => ({
+            label,
+            verified: !courseworkUnverified.some((item) => item.toLowerCase() === label.toLowerCase()),
+          }))}
+          desiredRoles={desiredRoles}
           onAddCoursework={addCoursework}
           onRemoveCoursework={removeCoursework}
           onDesiredRolesChange={setDesiredRoles}

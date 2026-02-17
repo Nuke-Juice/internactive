@@ -30,6 +30,8 @@ export default async function RootLayout({
   let email: string | null = null
   let avatarUrl: string | null = null
   let isEmailVerified = true
+  let showInboxNotificationDot = false
+  let showNotificationsDot = false
   if (user) {
     email = user.email ?? null
     const metadata = (user.user_metadata ?? {}) as { avatar_url?: string }
@@ -38,6 +40,25 @@ export default async function RootLayout({
     const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle()
     if (isUserRole(userRow?.role)) {
       role = userRow.role
+    }
+
+    if (role === 'employer') {
+      const { data: internships } = await supabase
+        .from('internships')
+        .select('id')
+        .eq('employer_id', user.id)
+        .limit(200)
+      const internshipIds = (internships ?? []).map((row) => row.id).filter((id): id is string => typeof id === 'string')
+      if (internshipIds.length > 0) {
+        const { count } = await supabase
+          .from('applications')
+          .select('id', { count: 'exact', head: true })
+          .in('internship_id', internshipIds)
+          .is('employer_viewed_at', null)
+        const hasUnseenApplicants = (count ?? 0) > 0
+        showInboxNotificationDot = hasUnseenApplicants
+        showNotificationsDot = hasUnseenApplicants
+      }
     }
 
   }
@@ -53,6 +74,8 @@ export default async function RootLayout({
           isEmailVerified={isEmailVerified}
           showFinishProfilePrompt={false}
           finishProfileHref={null}
+          showInboxNotificationDot={showInboxNotificationDot}
+          showNotificationsDot={showNotificationsDot}
         >
           {children}
         </AppShellClient>

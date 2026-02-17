@@ -15,6 +15,8 @@ type Props = {
   isEmailVerified?: boolean
   showFinishProfilePrompt?: boolean
   finishProfileHref?: string | null
+  showInboxNotificationDot?: boolean
+  showNotificationsDot?: boolean
 }
 
 export default function AppShellClient({
@@ -26,6 +28,8 @@ export default function AppShellClient({
   isEmailVerified,
   showFinishProfilePrompt = false,
   finishProfileHref = null,
+  showInboxNotificationDot = false,
+  showNotificationsDot = false,
 }: Props) {
   return (
     <ToastProvider>
@@ -39,6 +43,8 @@ export default function AppShellClient({
         isEmailVerified={isEmailVerified}
         showFinishProfilePrompt={showFinishProfilePrompt}
         finishProfileHref={finishProfileHref}
+        showInboxNotificationDot={showInboxNotificationDot}
+        showNotificationsDot={showNotificationsDot}
       />
       {children}
     </ToastProvider>

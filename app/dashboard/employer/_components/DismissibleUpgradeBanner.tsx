@@ -19,11 +19,11 @@ export default function DismissibleUpgradeBanner({ userId }: Props) {
   if (dismissed) return null
 
   return (
-    <div className="mt-4 overflow-hidden rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 transition-all duration-200">
+    <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 transition-all duration-200">
       <div className="flex items-start justify-between gap-3">
-        <p>
-          Upgrade to unlock Best Match sorting and “Why this matches” reasons.
-          <Link href="/upgrade" className="ml-2 font-semibold underline">
+        <p className="leading-6">
+          Best Match ranking and match-reason insights are part of Pro.
+          <Link href="/upgrade" className="ml-2 font-semibold underline decoration-amber-700 underline-offset-2">
             View plans
           </Link>
         </p>
@@ -34,7 +34,7 @@ export default function DismissibleUpgradeBanner({ userId }: Props) {
             setDismissed(true)
           }}
           aria-label="Dismiss banner"
-          className="rounded-md p-1 text-blue-700 hover:bg-blue-100"
+          className="rounded-md p-1 text-amber-700 hover:bg-amber-100"
         >
           <X className="h-4 w-4" />
         </button>

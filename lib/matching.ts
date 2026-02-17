@@ -1,3 +1,5 @@
+import { normalizeSkillForMatching, normalizeSkillListForMatching } from './skills/normalizeForMatching.ts'
+
 export type WorkMode = 'remote' | 'hybrid' | 'in_person'
 
 export type InternshipMatchInput = {
@@ -17,6 +19,7 @@ export type InternshipMatchInput = {
   target_student_year?: string | null
   desired_coursework_strength?: string | null
   required_course_category_ids?: string[] | null
+  required_course_category_names?: string[] | null
   category?: string | null
   required_skills?: string[] | string | null
   preferred_skills?: string[] | string | null
@@ -34,6 +37,9 @@ export type StudentMatchProfile = {
   experience_level?: string | null
   skills?: string[]
   skill_ids?: string[]
+  canonical_coursework_category_ids?: string[]
+  canonical_coursework_category_names?: string[]
+  canonical_coursework_level_bands?: string[]
   coursework_item_ids?: string[]
   coursework_category_ids?: string[]
   coursework?: string[]
@@ -115,7 +121,7 @@ export const MATCH_SIGNAL_DEFINITIONS: Record<MatchSignalKey, { label: string; d
 export const DEFAULT_MATCHING_WEIGHTS: MatchWeights = {
   skillsRequired: 4,
   majorCategoryAlignment: 3,
-  courseworkAlignment: 2,
+  courseworkAlignment: 2.5,
   skillsPreferred: 2,
   experienceAlignment: 1.5,
   availability: 2,
@@ -158,6 +164,7 @@ export type InternshipMatchResult = {
   matchingVersion: string
   maxScore: number
   normalizedScore: number
+  courseworkSignalPathUsed?: 'canonical' | 'legacy' | 'text' | 'none'
   breakdown?: InternshipMatchBreakdown
 }
 
@@ -264,15 +271,15 @@ function seasonFromTerm(term: string) {
 function inferSkills(internship: InternshipMatchInput) {
   const requiredIds = Array.from(new Set((internship.required_skill_ids ?? []).filter(Boolean)))
   const preferredIds = Array.from(new Set((internship.preferred_skill_ids ?? []).filter(Boolean)))
-  const required = parseList(internship.required_skills)
-  const preferred = parseList(internship.preferred_skills)
+  const required = normalizeSkillListForMatching(parseList(internship.required_skills))
+  const preferred = normalizeSkillListForMatching(parseList(internship.preferred_skills))
 
   const description = internship.description ?? ''
   const requiredMatch = description.match(/^required skills?:\s*(.+)$/im)
   const preferredMatch = description.match(/^preferred skills?:\s*(.+)$/im)
 
-  const requiredFromDescription = requiredMatch ? parseList(requiredMatch[1]) : []
-  const preferredFromDescription = preferredMatch ? parseList(preferredMatch[1]) : []
+  const requiredFromDescription = requiredMatch ? normalizeSkillListForMatching(parseList(requiredMatch[1])) : []
+  const preferredFromDescription = preferredMatch ? normalizeSkillListForMatching(parseList(preferredMatch[1])) : []
 
   return {
     requiredIds,
@@ -452,6 +459,7 @@ function emptySignalContributions(weights: MatchWeights): Record<MatchSignalKey,
 function gapSeverity(gap: string) {
   const normalized = gap.toLowerCase()
   if (normalized.includes('missing required skills')) return 100
+  if (normalized.includes('required coursework categories')) return 85
   if (normalized.includes('experience mismatch')) return 90
   if (normalized.includes('hours exceed availability')) return 80
   if (normalized.includes('start before')) return 70
@@ -469,6 +477,7 @@ function finalizeMatchResult(params: {
   explain: boolean
   signalContributions: Record<MatchSignalKey, MatchSignalContribution>
   weights: MatchWeights
+  courseworkSignalPathUsed?: 'canonical' | 'legacy' | 'text' | 'none'
 }) {
   const totalScoreRaw = MATCH_SIGNAL_KEYS.reduce((sum, signalKey) => sum + params.signalContributions[signalKey].pointsAwarded, 0)
   const maxScoreRaw = getMatchMaxScore(params.weights)
@@ -490,6 +499,7 @@ function finalizeMatchResult(params: {
     matchingVersion: MATCHING_VERSION,
     maxScore: 100,
     normalizedScore: Number(normalizedScore.toFixed(4)),
+    courseworkSignalPathUsed: params.courseworkSignalPathUsed ?? 'none',
   }
 
   if (params.explain) {
@@ -568,21 +578,12 @@ export function evaluateInternshipMatch(
     })
   }
 
-  if (
+  const exceedsAvailabilityHours =
     typeof internship.hours_per_week === 'number' &&
     typeof profile.availability_hours_per_week === 'number' &&
     internship.hours_per_week > profile.availability_hours_per_week
-  ) {
+  if (exceedsAvailabilityHours) {
     gaps.push(`Hours exceed availability (${internship.hours_per_week} > ${profile.availability_hours_per_week} hrs/week).`)
-    return finalizeMatchResult({
-      internshipId: internship.id,
-      reasonsWithPoints,
-      gaps,
-      eligible: false,
-      explain,
-      signalContributions,
-      weights,
-    })
   }
 
   const strictPreferences = profile.strict_preferences === true
@@ -645,14 +646,15 @@ export function evaluateInternshipMatch(
   )
   const internshipCategory = internship.category ? normalizeText(internship.category) : internshipMajors[0] ?? ''
 
-  const studentSkills = [
+  const studentSkills = normalizeSkillListForMatching([
     ...(profile.skills ?? []),
     ...(profile.coursework ?? []),
     ...studentMajors,
-  ]
-    .map(normalizeText)
-    .filter(Boolean)
+  ])
   const studentSkillIds = Array.from(new Set((profile.skill_ids ?? []).filter(Boolean)))
+  const studentCanonicalCourseworkCategoryIds = Array.from(new Set((profile.canonical_coursework_category_ids ?? []).filter(Boolean)))
+  const studentCanonicalCourseworkCategoryNames = Array.from(new Set(parseList(profile.canonical_coursework_category_names)))
+  const studentCanonicalCourseworkLevelBands = Array.from(new Set(parseList(profile.canonical_coursework_level_bands)))
   const studentCourseworkIds = Array.from(new Set((profile.coursework_item_ids ?? []).filter(Boolean)))
   const studentCourseworkCategoryIds = Array.from(new Set((profile.coursework_category_ids ?? []).filter(Boolean)))
 
@@ -704,7 +706,8 @@ export function evaluateInternshipMatch(
       })
     }
 
-    const missingRequired = required.filter((skill) => !studentSkills.includes(skill))
+    const studentSkillSet = new Set(studentSkills.map((skill) => normalizeSkillForMatching(skill)))
+    const missingRequired = required.filter((skill) => !studentSkillSet.has(normalizeSkillForMatching(skill)))
     if (missingRequired.length > 0) {
       gaps.push(`Missing required skills: ${missingRequired.join(', ')}`)
     }
@@ -752,12 +755,66 @@ export function evaluateInternshipMatch(
     }
   }
 
-  const recommendedCourseworkCategoryIds = Array.from(
-    new Set([...(internship.required_course_category_ids ?? []), ...(internship.coursework_category_ids ?? [])].filter(Boolean))
-  )
+  let courseworkSignalPathUsed: 'canonical' | 'legacy' | 'text' | 'none' = 'none'
+  const requiredCanonicalCourseworkCategoryIds = Array.from(new Set((internship.required_course_category_ids ?? []).filter(Boolean)))
+  const requiredCanonicalCourseworkCategoryNames = Array.from(new Set(parseList(internship.required_course_category_names)))
+  const recommendedCourseworkCategoryIds = Array.from(new Set((internship.coursework_category_ids ?? []).filter(Boolean)))
   const recommendedCourseworkCategoryNames = Array.from(new Set(parseList(internship.coursework_category_names)))
 
-  if (recommendedCourseworkCategoryIds.length > 0 && studentCourseworkCategoryIds.length > 0) {
+  if (requiredCanonicalCourseworkCategoryIds.length > 0) {
+    courseworkSignalPathUsed = 'canonical'
+    const categoryHits = overlapCount(requiredCanonicalCourseworkCategoryIds, studentCanonicalCourseworkCategoryIds)
+    const requiredHitsByStrength = courseworkStrengthMinimumCount(internship.desired_coursework_strength)
+    const strengthRatio = ratio(Math.min(categoryHits, requiredHitsByStrength), requiredHitsByStrength)
+    const categoryRatio = ratio(categoryHits, requiredCanonicalCourseworkCategoryIds.length)
+    const hasAdvancedSignals = studentCanonicalCourseworkLevelBands.some((band) => band === 'advanced')
+    const listingWantsAdvancedSignal =
+      normalizeText(internship.desired_coursework_strength ?? '') === 'high' ||
+      normalizeText(internship.target_student_year ?? internship.experience_level ?? '') === 'senior'
+    const levelBonus = hasAdvancedSignals && listingWantsAdvancedSignal ? 0.12 : 0
+    const adjustedRaw = clamp01(Math.max(categoryRatio, strengthRatio) + levelBonus)
+    const points = weights.courseworkAlignment * adjustedRaw
+    signalContributions.courseworkAlignment = {
+      signalKey: 'courseworkAlignment',
+      weight: weights.courseworkAlignment,
+      rawMatchValue: adjustedRaw,
+      pointsAwarded: points,
+      evidence: [
+        `${categoryHits}/${requiredCanonicalCourseworkCategoryIds.length} canonical required coursework categories matched`,
+        `student_canonical_categories=${studentCanonicalCourseworkCategoryIds.length}`,
+        `strength=${internship.desired_coursework_strength ?? 'low'}`,
+        `advanced_bonus=${levelBonus > 0 ? 'yes' : 'no'}`,
+      ],
+    }
+
+    if (studentCanonicalCourseworkCategoryIds.length === 0) {
+      gaps.push('Missing canonical coursework signals on your profile for required listing coursework.')
+    }
+
+    const missingRequiredCanonicalNames = requiredCanonicalCourseworkCategoryNames.filter(
+      (name) => !studentCanonicalCourseworkCategoryNames.includes(name)
+    )
+    if (missingRequiredCanonicalNames.length > 0) {
+      gaps.push(`Missing required coursework categories: ${missingRequiredCanonicalNames.slice(0, 3).join(', ')}`)
+    }
+
+    if (categoryHits > 0) {
+      const categoryDetail =
+        requiredCanonicalCourseworkCategoryNames.length > 0
+          ? requiredCanonicalCourseworkCategoryNames
+              .filter((name) => studentCanonicalCourseworkCategoryNames.includes(name))
+              .slice(0, 3)
+              .join(', ')
+          : `${categoryHits}/${requiredCanonicalCourseworkCategoryIds.length} canonical matches`
+      reasonsWithPoints.push({
+        reasonKey: 'coursework.required_categories.canonical_overlap',
+        text: describeReason('Required coursework categories', points, `matches ${categoryDetail}`),
+        points,
+        evidence: requiredCanonicalCourseworkCategoryNames.slice(0, 3),
+      })
+    }
+  } else if (recommendedCourseworkCategoryIds.length > 0 && studentCourseworkCategoryIds.length > 0) {
+    courseworkSignalPathUsed = 'legacy'
     const categoryHits = overlapCount(recommendedCourseworkCategoryIds, studentCourseworkCategoryIds)
     const requiredHitsByStrength = courseworkStrengthMinimumCount(internship.desired_coursework_strength)
     const strengthRatio = ratio(Math.min(categoryHits, requiredHitsByStrength), requiredHitsByStrength)
@@ -769,7 +826,7 @@ export function evaluateInternshipMatch(
       rawMatchValue: categoryRatio,
       pointsAwarded: points,
       evidence: [
-        `${categoryHits}/${recommendedCourseworkCategoryIds.length} coursework categories matched`,
+        `${categoryHits}/${recommendedCourseworkCategoryIds.length} legacy coursework categories matched`,
         `strength=${internship.desired_coursework_strength ?? 'low'}`,
       ],
     }
@@ -780,7 +837,7 @@ export function evaluateInternshipMatch(
           ? recommendedCourseworkCategoryNames.slice(0, categoryHits).join(', ')
           : `${categoryHits}/${recommendedCourseworkCategoryIds.length} category matches (${internship.desired_coursework_strength ?? 'low'} strength)`
       reasonsWithPoints.push({
-        reasonKey: 'coursework.categories.canonical_overlap',
+        reasonKey: 'coursework.categories.legacy_overlap',
         text: describeReason('Coursework categories', points, categoryDetail),
         points,
         evidence: recommendedCourseworkCategoryNames.slice(0, categoryHits),
@@ -789,6 +846,7 @@ export function evaluateInternshipMatch(
   } else {
     const recommendedCourseworkIds = Array.from(new Set((internship.coursework_item_ids ?? []).filter(Boolean)))
     if (recommendedCourseworkIds.length > 0 && studentCourseworkIds.length > 0) {
+      courseworkSignalPathUsed = 'legacy'
       const courseworkHits = overlapCount(recommendedCourseworkIds, studentCourseworkIds)
       const courseworkRatio = ratio(courseworkHits, recommendedCourseworkIds.length)
       const points = weights.courseworkAlignment * courseworkRatio
@@ -797,12 +855,12 @@ export function evaluateInternshipMatch(
         weight: weights.courseworkAlignment,
         rawMatchValue: courseworkRatio,
         pointsAwarded: points,
-        evidence: [`${courseworkHits}/${recommendedCourseworkIds.length} coursework items matched`],
+        evidence: [`${courseworkHits}/${recommendedCourseworkIds.length} legacy coursework items matched`],
       }
 
       if (courseworkHits > 0) {
         reasonsWithPoints.push({
-          reasonKey: 'coursework.items.canonical_overlap',
+          reasonKey: 'coursework.items.legacy_overlap',
           text: describeReason('Recommended coursework', points, `${courseworkHits}/${recommendedCourseworkIds.length} matched`),
           points,
           evidence: [`matched=${courseworkHits}`, `recommended=${recommendedCourseworkIds.length}`],
@@ -812,27 +870,40 @@ export function evaluateInternshipMatch(
       const recommendedCoursework = parseList(internship.recommended_coursework)
       const studentCoursework = parseList(profile.coursework)
       if (recommendedCoursework.length > 0 && studentCoursework.length > 0) {
+        courseworkSignalPathUsed = 'text'
         const courseworkHits = overlapCount(recommendedCoursework, studentCoursework)
         const courseworkRatio = ratio(courseworkHits, recommendedCoursework.length)
-        const points = weights.courseworkAlignment * courseworkRatio
+        const points = weights.courseworkAlignment * courseworkRatio * 0.6
         signalContributions.courseworkAlignment = {
           signalKey: 'courseworkAlignment',
           weight: weights.courseworkAlignment,
-          rawMatchValue: courseworkRatio,
+          rawMatchValue: courseworkRatio * 0.6,
           pointsAwarded: points,
-          evidence: [`${courseworkHits}/${recommendedCoursework.length} coursework text tokens matched`],
+          evidence: [`${courseworkHits}/${recommendedCoursework.length} coursework text tokens matched (unverified fallback)`],
         }
 
         if (courseworkHits > 0) {
           reasonsWithPoints.push({
-            reasonKey: 'coursework.text_overlap',
-            text: describeReason('Recommended coursework', points, `${courseworkHits}/${recommendedCoursework.length} matched`),
+            reasonKey: 'coursework.text_overlap.fallback',
+            text: describeReason('Coursework text overlap used (unverified)', points, `${courseworkHits}/${recommendedCoursework.length} matched`),
             points,
             evidence: [`matched=${courseworkHits}`, `recommended=${recommendedCoursework.length}`],
           })
         }
       }
     }
+  }
+
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.MATCHING_DEBUG_COURSEWORK === '1'
+  ) {
+    console.info('[matching:coursework]', {
+      internshipId: internship.id,
+      listingHasCanonicalRequirements: requiredCanonicalCourseworkCategoryIds.length > 0,
+      studentHasCanonicalCoursework: studentCanonicalCourseworkCategoryIds.length > 0,
+      courseworkSignalPathUsed,
+    })
   }
 
   if (targetGradYears.length > 0 && studentYear) {
@@ -1057,6 +1128,7 @@ export function evaluateInternshipMatch(
     explain,
     signalContributions,
     weights,
+    courseworkSignalPathUsed,
   })
 }
 

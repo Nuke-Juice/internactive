@@ -81,15 +81,33 @@ export default function FiltersPanel({
   const [hoursMaxInput, setHoursMaxInput] = useState(state.hoursMax || String(Math.max(initialMin, initialMax)))
   const [cityInput, setCityInput] = useState(state.locationCity)
   const [stateInput, setStateInput] = useState(state.locationState)
-  const [stateTouched, setStateTouched] = useState(Boolean(state.locationState))
+  const [cityOpen, setCityOpen] = useState(false)
+  const [stateOpen, setStateOpen] = useState(false)
   const [autoFilledState, setAutoFilledState] = useState<string | null>(null)
 
   const normalizedStateInput = normalizeStateCode(stateInput)
 
-  const citySuggestions = useMemo(
-    () => Array.from(new Set(US_CITY_OPTIONS.map((option) => option.city))).sort((a, b) => a.localeCompare(b)),
+  const citySuggestionPairs = useMemo(
+    () =>
+      Array.from(new Set(US_CITY_OPTIONS.map((option) => `${option.city}, ${option.state}`))).sort((a, b) =>
+        a.localeCompare(b)
+      ),
     []
   )
+  const filteredCitySuggestions = useMemo(() => {
+    const query = normalizeCityKey(cityInput)
+    if (query.length < 2) return []
+    return citySuggestionPairs.filter((option) => normalizeCityKey(option).includes(query)).slice(0, 12)
+  }, [cityInput, citySuggestionPairs])
+  const filteredStateSuggestions = useMemo(() => {
+    const query = stateInput.trim().toLowerCase()
+    if (query.length < 1) return []
+    return US_STATE_OPTIONS.filter((option) => {
+      const code = option.code.toLowerCase()
+      const name = option.name.toLowerCase()
+      return code.includes(query) || name.includes(query)
+    }).slice(0, 12)
+  }, [stateInput])
 
   const cityToStateMap = useMemo(() => {
     const bucket = new Map<string, Set<string>>()
@@ -139,6 +157,23 @@ export default function FiltersPanel({
     }`
   }
 
+  function categoryChipClass(active: boolean, category: string) {
+    const categoryLength = category.length
+    const sizeClass =
+      categoryLength >= 28 ? 'text-[12px] sm:text-[13px] leading-4' : categoryLength >= 20 ? 'text-[13px] sm:text-sm leading-5' : 'text-sm leading-5'
+    return `inline-flex min-h-12 w-full items-center justify-center rounded-md border px-3 py-2.5 text-center font-medium leading-5 transition-colors ${
+      sizeClass
+    } ${
+      active
+        ? 'border-blue-300 bg-blue-50 text-blue-700'
+        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+    }`
+  }
+
+  function renderCategoryLabel(category: string) {
+    return category.replace(/\//g, '/\u200B')
+  }
+
   function setMinFromSlider(next: number) {
     const bounded = clamp(next, SLIDER_MIN, hoursMaxValue)
     setHoursMinValue(bounded)
@@ -173,14 +208,11 @@ export default function FiltersPanel({
     const parsed = parseCityStateInput(rawValue)
     if (parsed) {
       setCityInput(parsed.city)
-      if (!stateTouched || !normalizedStateInput) {
-        setStateInput(parsed.state)
-        setAutoFilledState(parsed.state)
-      }
+      setStateInput(parsed.state)
+      setAutoFilledState(parsed.state)
       return
     }
 
-    if (stateTouched || normalizedStateInput) return
     const inferredState = cityToStateMap.get(normalizeCityKey(rawValue))
     if (inferredState) {
       setStateInput(inferredState)
@@ -189,7 +221,6 @@ export default function FiltersPanel({
   }
 
   function onStateChange(rawValue: string) {
-    setStateTouched(true)
     setStateInput(rawValue.toUpperCase())
     setAutoFilledState(null)
   }
@@ -257,12 +288,12 @@ export default function FiltersPanel({
       <div className="mt-4 space-y-4">
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Category</h3>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-2 grid grid-cols-2 gap-2">
             {categories.map((category) => {
               const active = state.category === category
               return (
-                <Link key={category} href={href({ category: active ? '' : category })} className={chipClass(active)}>
-                  {category}
+                <Link key={category} href={href({ category: active ? '' : category })} className={categoryChipClass(active, category)}>
+                  <span className="whitespace-normal break-words [overflow-wrap:anywhere]">{renderCategoryLabel(category)}</span>
                 </Link>
               )
             })}
@@ -384,40 +415,89 @@ export default function FiltersPanel({
           <div>
             <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Location</label>
             <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <div>
+              <div className="relative">
                 <input
                   id="city"
                   name="city"
                   type="text"
                   value={cityInput}
-                  onChange={(event) => onCityChange(event.target.value)}
+                  onFocus={() => setCityOpen(normalizeCityKey(cityInput).length >= 2)}
+                  onBlur={() => {
+                    setTimeout(() => setCityOpen(false), 120)
+                  }}
+                  onChange={(event) => {
+                    onCityChange(event.target.value)
+                    setCityOpen(normalizeCityKey(event.target.value).length >= 2)
+                  }}
                   placeholder="City"
-                  list="city-options"
                   className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
                 />
-                <datalist id="city-options">
-                  {citySuggestions.map((city) => (
-                    <option key={city} value={city} />
-                  ))}
-                </datalist>
+                {cityOpen ? (
+                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    {filteredCitySuggestions.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-slate-600">No city matches.</div>
+                    ) : (
+                      filteredCitySuggestions.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onMouseDown={() => {
+                            const parsed = parseCityStateInput(option)
+                            if (!parsed) return
+                            setCityInput(parsed.city)
+                            setStateInput(parsed.state)
+                            setAutoFilledState(parsed.state)
+                            setCityOpen(false)
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          {option}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : null}
               </div>
 
-              <div>
+              <div className="relative">
                 <input
                   id="state-input"
                   type="text"
                   value={stateInput}
-                  onChange={(event) => onStateChange(event.target.value)}
+                  onFocus={() => setStateOpen(stateInput.trim().length >= 1)}
+                  onBlur={() => {
+                    setTimeout(() => setStateOpen(false), 120)
+                  }}
+                  onChange={(event) => {
+                    onStateChange(event.target.value)
+                    setStateOpen(event.target.value.trim().length >= 1)
+                  }}
                   placeholder="State"
-                  list="state-options"
                   className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm uppercase text-slate-900 placeholder:text-slate-400"
                 />
                 <input type="hidden" name="state" value={normalizedStateInput} />
-                <datalist id="state-options">
-                  {US_STATE_OPTIONS.map((option) => (
-                    <option key={option.code} value={option.code}>{`${option.code} - ${option.name}`}</option>
-                  ))}
-                </datalist>
+                {stateOpen ? (
+                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    {filteredStateSuggestions.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-slate-600">No state matches.</div>
+                    ) : (
+                      filteredStateSuggestions.map((option) => (
+                        <button
+                          key={option.code}
+                          type="button"
+                          onMouseDown={() => {
+                            setStateInput(option.code)
+                            setAutoFilledState(null)
+                            setStateOpen(false)
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                        >
+                          {option.code} - {option.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                ) : null}
                 {autoFilledState ? <p className="mt-1 text-[11px] text-slate-500">Auto-filled {autoFilledState}</p> : null}
               </div>
             </div>

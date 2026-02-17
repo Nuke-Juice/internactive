@@ -13,6 +13,8 @@ import {
   type StudentMatchProfile,
 } from '../matching.ts'
 import { parseStudentPreferenceSignals } from '../student/preferenceSignals.ts'
+import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
+import { inferLevelBandFromCourseNumber } from '@/lib/coursework/classification'
 
 export type MatchingPreviewFilters = {
   category?: string
@@ -97,6 +99,21 @@ type StudentCourseworkItemRow = {
   coursework_item_id: string | null
 }
 
+type StudentCanonicalCourseRow = {
+  student_profile_id: string | null
+  course?: {
+    category_id?: string | null
+    course_number?: string | null
+    level?: string | null
+    category?: { id?: string | null; name?: string | null } | Array<{ id?: string | null; name?: string | null }> | null
+  } | Array<{
+    category_id?: string | null
+    course_number?: string | null
+    level?: string | null
+    category?: { id?: string | null; name?: string | null } | Array<{ id?: string | null; name?: string | null }> | null
+  }> | null
+}
+
 type InternshipRow = {
   id: string
   title: string | null
@@ -121,6 +138,7 @@ type InternshipRow = {
   remote_allowed: boolean | null
   internship_required_skill_items?: Array<{ skill_id: string | null }> | null
   internship_preferred_skill_items?: Array<{ skill_id: string | null }> | null
+  internship_required_course_categories?: Array<{ category_id: string | null; category?: { name?: string | null; slug?: string | null } | null }> | null
   internship_coursework_items?: Array<{ coursework_item_id: string | null }> | null
   internship_coursework_category_links?: Array<{ category_id: string | null; category?: { name?: string | null } | null }> | null
 }
@@ -203,7 +221,13 @@ function buildInternshipCoverage(internship: InternshipRow) {
   const majors = parseMajors(internship.majors)
   const requiredSkillCount = internship.required_skills?.length ?? 0
   const preferredSkillCount = internship.preferred_skills?.length ?? 0
-  const courseworkCategoryCount = (internship.internship_coursework_category_links ?? []).filter((item) => item.category_id).length
+  const normalizedCoursework = normalizeListingCoursework({
+    internship_required_course_categories: internship.internship_required_course_categories,
+    internship_coursework_category_links: internship.internship_coursework_category_links,
+    internship_coursework_items: internship.internship_coursework_items,
+  })
+  const courseworkCategoryCount =
+    normalizedCoursework.requiredCanonicalCategoryIds.length + normalizedCoursework.legacyCategoryIds.length
 
   const checks = [
     ['majors', majors.length > 0],
@@ -224,9 +248,11 @@ function buildInternshipCoverage(internship: InternshipRow) {
 }
 
 function toInternshipPreviewItem(row: InternshipRow): AdminInternshipPreviewItem {
-  const courseworkCategoryNames = (row.internship_coursework_category_links ?? [])
-    .map((item) => extractLabel(item.category ?? null))
-    .filter(Boolean)
+  const normalizedCoursework = normalizeListingCoursework({
+    internship_required_course_categories: row.internship_required_course_categories,
+    internship_coursework_category_links: row.internship_coursework_category_links,
+    internship_coursework_items: row.internship_coursework_items,
+  })
 
   const matchInput: InternshipMatchInput = {
     id: row.id,
@@ -245,19 +271,17 @@ function toInternshipPreviewItem(row: InternshipRow): AdminInternshipPreviewItem
     required_skills: row.required_skills,
     preferred_skills: row.preferred_skills,
     recommended_coursework: row.recommended_coursework,
+    required_course_category_ids: normalizedCoursework.requiredCanonicalCategoryIds,
+    required_course_category_names: normalizedCoursework.requiredCanonicalCategoryNames,
     required_skill_ids: (row.internship_required_skill_items ?? [])
       .map((item) => item.skill_id)
       .filter((value): value is string => typeof value === 'string'),
     preferred_skill_ids: (row.internship_preferred_skill_items ?? [])
       .map((item) => item.skill_id)
       .filter((value): value is string => typeof value === 'string'),
-    coursework_item_ids: (row.internship_coursework_items ?? [])
-      .map((item) => item.coursework_item_id)
-      .filter((value): value is string => typeof value === 'string'),
-    coursework_category_ids: (row.internship_coursework_category_links ?? [])
-      .map((item) => item.category_id)
-      .filter((value): value is string => typeof value === 'string'),
-    coursework_category_names: courseworkCategoryNames,
+    coursework_item_ids: normalizedCoursework.legacyItemIds,
+    coursework_category_ids: normalizedCoursework.legacyCategoryIds,
+    coursework_category_names: normalizedCoursework.legacyCategoryNames,
   }
 
   return {
@@ -289,7 +313,7 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
 
   const studentRows = (studentRowsData ?? []) as StudentProfileRow[]
 
-  const [skillRowsResult, courseworkCategoryRowsResult, courseworkItemRowsResult] = await Promise.all([
+  const [skillRowsResult, courseworkCategoryRowsResult, courseworkItemRowsResult, canonicalCourseRowsResult] = await Promise.all([
     admin
       .from('student_skill_items')
       .select('student_id, skill_id, skill:skills(label)')
@@ -302,11 +326,16 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
       .from('student_coursework_items')
       .select('student_id, coursework_item_id')
       .in('student_id', studentRows.map((row) => row.user_id)),
+    admin
+      .from('student_courses')
+      .select('student_profile_id, course:canonical_courses(category_id, course_number, level, category:canonical_course_categories(id, name))')
+      .in('student_profile_id', studentRows.map((row) => row.user_id)),
   ])
 
   const skillRows = (skillRowsResult.data ?? []) as StudentSkillRow[]
   const courseworkCategoryRows = (courseworkCategoryRowsResult.data ?? []) as StudentCourseworkCategoryRow[]
   const courseworkItemRows = (courseworkItemRowsResult.data ?? []) as StudentCourseworkItemRow[]
+  const canonicalCourseRows = (canonicalCourseRowsResult.data ?? []) as StudentCanonicalCourseRow[]
 
   const skillIdsByStudent = new Map<string, string[]>()
   const skillLabelsByStudent = new Map<string, string[]>()
@@ -353,6 +382,44 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
     courseworkItemIdsByStudent.set(studentId, values)
   }
 
+  const canonicalCategoryIdsByStudent = new Map<string, string[]>()
+  const canonicalCategoryNamesByStudent = new Map<string, string[]>()
+  const canonicalLevelBandsByStudent = new Map<string, Array<'intro' | 'intermediate' | 'advanced'>>()
+  for (const row of canonicalCourseRows) {
+    const studentId = row.student_profile_id
+    if (!studentId) continue
+    const courseRecords = asArray(row.course)
+    for (const course of courseRecords) {
+      const categoryRecords = asArray(course.category)
+      for (const category of categoryRecords) {
+        if (typeof category.id === 'string') {
+          const values = canonicalCategoryIdsByStudent.get(studentId) ?? []
+          values.push(category.id)
+          canonicalCategoryIdsByStudent.set(studentId, values)
+        } else if (typeof course.category_id === 'string') {
+          const values = canonicalCategoryIdsByStudent.get(studentId) ?? []
+          values.push(course.category_id)
+          canonicalCategoryIdsByStudent.set(studentId, values)
+        }
+        const label = extractLabel(category)
+        if (label) {
+          const values = canonicalCategoryNamesByStudent.get(studentId) ?? []
+          values.push(label)
+          canonicalCategoryNamesByStudent.set(studentId, values)
+        }
+      }
+
+      const explicitLevel = String(course.level ?? '').trim().toLowerCase()
+      const levelBand =
+        explicitLevel === 'intro' || explicitLevel === 'intermediate' || explicitLevel === 'advanced'
+          ? (explicitLevel as 'intro' | 'intermediate' | 'advanced')
+          : inferLevelBandFromCourseNumber(course.course_number)
+      const levels = canonicalLevelBandsByStudent.get(studentId) ?? []
+      levels.push(levelBand)
+      canonicalLevelBandsByStudent.set(studentId, levels)
+    }
+  }
+
   const authUsersEntries = await Promise.all(
     studentRows.map(async (student) => {
       const { data: authData } = await admin.auth.admin.getUserById(student.user_id)
@@ -378,6 +445,9 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
     const skillIds = Array.from(new Set(skillIdsByStudent.get(row.user_id) ?? []))
     const courseworkCategoryIds = Array.from(new Set(courseworkCategoryIdsByStudent.get(row.user_id) ?? []))
     const courseworkItemIds = Array.from(new Set(courseworkItemIdsByStudent.get(row.user_id) ?? []))
+    const canonicalCourseworkCategoryIds = Array.from(new Set(canonicalCategoryIdsByStudent.get(row.user_id) ?? []))
+    const canonicalCourseworkCategoryNames = Array.from(new Set(canonicalCategoryNamesByStudent.get(row.user_id) ?? []))
+    const canonicalCourseLevelBands = Array.from(new Set(canonicalLevelBandsByStudent.get(row.user_id) ?? []))
     const skillLabels = Array.from(new Set(skillLabelsByStudent.get(row.user_id) ?? []))
     const courseworkCategoryNames = Array.from(new Set(courseworkCategoryNamesByStudent.get(row.user_id) ?? []))
 
@@ -390,7 +460,7 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
       preferredLocations: preferenceSignals.preferredLocations,
       preferredWorkModes: preferenceSignals.preferredWorkModes,
       skillCount: skillIds.length,
-      courseworkCategoryCount: courseworkCategoryIds.length,
+      courseworkCategoryCount: canonicalCourseworkCategoryIds.length > 0 ? canonicalCourseworkCategoryIds.length : courseworkCategoryIds.length,
     })
 
     const profile: StudentMatchProfile = {
@@ -399,6 +469,9 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
       experience_level: row.experience_level,
       skills: preferenceSignals.skills,
       skill_ids: skillIds,
+      canonical_coursework_category_ids: canonicalCourseworkCategoryIds,
+      canonical_coursework_category_names: canonicalCourseworkCategoryNames,
+      canonical_coursework_level_bands: canonicalCourseLevelBands,
       coursework_item_ids: courseworkItemIds,
       coursework_category_ids: courseworkCategoryIds,
       coursework: [],
@@ -455,7 +528,7 @@ export async function loadAdminInternshipPreviewItems(
   let query = admin
     .from('internships')
     .select(
-      'id, title, company_name, description, majors, target_graduation_years, experience_level, role_category, category, hours_per_week, location, location_city, location_state, remote_allowed, work_mode, term, start_date, application_deadline, required_skills, preferred_skills, recommended_coursework, is_active, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+      'id, title, company_name, description, majors, target_graduation_years, experience_level, role_category, category, hours_per_week, location, location_city, location_state, remote_allowed, work_mode, term, start_date, application_deadline, required_skills, preferred_skills, recommended_coursework, is_active, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
     )
     .order('created_at', { ascending: false })
     .limit(600)

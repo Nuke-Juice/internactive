@@ -17,6 +17,8 @@ type SiteHeaderProps = {
   isEmailVerified?: boolean
   showFinishProfilePrompt?: boolean
   finishProfileHref?: string | null
+  showInboxNotificationDot?: boolean
+  showNotificationsDot?: boolean
 }
 
 type SearchSuggestion = {
@@ -61,6 +63,8 @@ export default function SiteHeader({
   avatarUrl = null,
   isEmailVerified = true,
   showFinishProfilePrompt = false,
+  showInboxNotificationDot = false,
+  showNotificationsDot = false,
 }: SiteHeaderProps) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -425,17 +429,27 @@ export default function SiteHeader({
                     <FileText className="h-5 w-5" />
                   </Link>
                 ) : null}
-                <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
-                  <Mail className="h-5 w-5" />
-                </Link>
-                <Link
-                  href="/notifications"
-                  className={iconNavClasses(notificationsActive)}
-                  aria-label="Notifications"
-                  title="Notifications"
-                >
-                  <Bell className="h-5 w-5" />
-                </Link>
+                <div className="relative">
+                  <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
+                    <Mail className="h-5 w-5" />
+                  </Link>
+                  {showInboxNotificationDot ? (
+                    <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
+                  ) : null}
+                </div>
+                <div className="relative">
+                  <Link
+                    href="/notifications"
+                    className={iconNavClasses(notificationsActive)}
+                    aria-label="Notifications"
+                    title="Notifications"
+                  >
+                    <Bell className="h-5 w-5" />
+                  </Link>
+                  {showNotificationsDot ? (
+                    <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
+                  ) : null}
+                </div>
               </div>
 
               {isAuthenticated ? (
@@ -478,17 +492,27 @@ export default function SiteHeader({
                   <FileText className="h-5 w-5" />
                 </Link>
               ) : null}
-              <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
-                <Mail className="h-5 w-5" />
-              </Link>
-              <Link
-                href="/notifications"
-                className={iconNavClasses(notificationsActive)}
-                aria-label="Notifications"
-                title="Notifications"
-              >
-                <Bell className="h-5 w-5" />
-              </Link>
+              <div className="relative">
+                <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
+                  <Mail className="h-5 w-5" />
+                </Link>
+                {showInboxNotificationDot ? (
+                  <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
+                ) : null}
+              </div>
+              <div className="relative">
+                <Link
+                  href="/notifications"
+                  className={iconNavClasses(notificationsActive)}
+                  aria-label="Notifications"
+                  title="Notifications"
+                >
+                  <Bell className="h-5 w-5" />
+                </Link>
+                {showNotificationsDot ? (
+                  <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
+                ) : null}
+              </div>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen((prev) => !prev)}

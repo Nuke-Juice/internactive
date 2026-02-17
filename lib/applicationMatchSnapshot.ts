@@ -24,6 +24,8 @@ type SnapshotInternship = {
   required_skills?: string[] | string | null
   preferred_skills?: string[] | string | null
   recommended_coursework?: string[] | string | null
+  required_course_category_ids?: string[] | null
+  required_course_category_names?: string[] | null
   coursework_category_ids?: string[] | null
   coursework_category_names?: string[] | null
 }
@@ -41,7 +43,10 @@ type SnapshotProfile = {
   preferred_locations?: string[] | string | null
   preferred_work_modes?: string[] | string | null
   remote_only?: boolean | null
+  canonical_coursework_category_ids?: string[] | null
+  canonical_coursework_level_bands?: string[] | null
   coursework_category_ids?: string[] | null
+  coursework_unverified?: string[] | null
 } | null
 
 export type ApplicationMatchSnapshot = {
@@ -107,6 +112,8 @@ export function buildApplicationMatchSnapshot(input: {
     required_skills: input.internship.required_skills ?? null,
     preferred_skills: input.internship.preferred_skills ?? null,
     recommended_coursework: input.internship.recommended_coursework ?? null,
+    required_course_category_ids: input.internship.required_course_category_ids ?? null,
+    required_course_category_names: input.internship.required_course_category_names ?? null,
     coursework_category_ids: input.internship.coursework_category_ids ?? null,
     coursework_category_names: input.internship.coursework_category_names ?? null,
   }
@@ -127,6 +134,8 @@ export function buildApplicationMatchSnapshot(input: {
     experience_level: input.profile?.experience_level ?? null,
     skills: [...asStringArray(input.profile?.skills ?? null), ...preferenceSignals.skills],
     coursework: asStringArray(input.profile?.coursework ?? null),
+    canonical_coursework_category_ids: asStringArray(input.profile?.canonical_coursework_category_ids ?? null),
+    canonical_coursework_level_bands: asStringArray(input.profile?.canonical_coursework_level_bands ?? null),
     coursework_category_ids: asStringArray(input.profile?.coursework_category_ids ?? null),
     availability_hours_per_week: input.profile?.availability_hours_per_week ?? null,
     availability_start_month: input.profile?.availability_start_month ?? null,

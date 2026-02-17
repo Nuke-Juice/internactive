@@ -26,7 +26,7 @@ export default function StudentStep3({
   return (
     <div className="grid gap-6 sm:grid-cols-2">
       <div>
-        <label className="text-sm font-medium text-slate-700">Gender</label>
+        <label className="text-sm font-medium text-slate-700">Gender (optional)</label>
         <select className={fieldClassName} value={gender} onChange={(e) => onGenderChange(e.target.value)}>
           <option value="">Prefer not to say</option>
           <option value="female">Female</option>
@@ -35,7 +35,7 @@ export default function StudentStep3({
       </div>
 
       <div>
-        <label className="text-sm font-medium text-slate-700">Resume (PDF)</label>
+        <label className="text-sm font-medium text-slate-700">Resume (PDF, optional)</label>
         <input
           type="file"
           accept="application/pdf"
@@ -52,7 +52,7 @@ export default function StudentStep3({
       </div>
 
       <div className="sm:col-span-2">
-        <label className="text-sm font-medium text-slate-700">Short bio or summary</label>
+        <label className="text-sm font-medium text-slate-700">Bio</label>
         <textarea
           rows={4}
           className={fieldClassName}

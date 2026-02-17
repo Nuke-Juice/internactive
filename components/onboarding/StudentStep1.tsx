@@ -9,11 +9,12 @@ type Props = {
   lastName: string
   school: string
   schoolQuery: string
-  schoolOpen: boolean
   year: string
   yearOpen: boolean
   selectedMajor: CanonicalMajor | null
   majorQuery: string
+  secondMajorQuery: string
+  selectedSecondMajor: CanonicalMajor | null
   majorCatalog: CanonicalMajor[]
   majorsLoading: boolean
   majorError: string | null
@@ -30,6 +31,8 @@ type Props = {
   onYearOpenChange: (open: boolean) => void
   onMajorQueryChange: (value: string) => void
   onMajorSelect: (major: CanonicalMajor) => void
+  onSecondMajorQueryChange: (value: string) => void
+  onSecondMajorSelect: (major: CanonicalMajor) => void
   onMajorErrorClear: () => void
 }
 
@@ -39,11 +42,12 @@ export default function StudentStep1({
   lastName,
   school,
   schoolQuery,
-  schoolOpen,
   year,
   yearOpen,
   selectedMajor,
   majorQuery,
+  secondMajorQuery,
+  selectedSecondMajor,
   majorCatalog,
   majorsLoading,
   majorError,
@@ -59,6 +63,8 @@ export default function StudentStep1({
   onYearOpenChange,
   onMajorQueryChange,
   onMajorSelect,
+  onSecondMajorQueryChange,
+  onSecondMajorSelect,
   onMajorErrorClear,
 }: Props) {
   return (
@@ -117,7 +123,7 @@ export default function StudentStep1({
       </div>
 
       <div>
-        <label className="text-sm font-medium text-slate-700">Graduation year</label>
+        <label className="text-sm font-medium text-slate-700">Class standing</label>
         <div className="relative">
           <button
             type="button"
@@ -151,7 +157,7 @@ export default function StudentStep1({
       <div className="sm:col-span-2">
         <MajorCombobox
           inputId="student-signup-major"
-          label="Major (primary)"
+          label="Major"
           query={majorQuery}
           onQueryChange={onMajorQueryChange}
           options={majorCatalog}
@@ -167,6 +173,24 @@ export default function StudentStep1({
         {!selectedMajor && majorQuery.trim().length > 0 ? (
           <p className="mt-1 text-xs text-amber-700">Select a verified major from the dropdown.</p>
         ) : null}
+      </div>
+
+      <div className="sm:col-span-2">
+        <MajorCombobox
+          inputId="student-signup-second-major"
+          label="Second major (optional)"
+          query={secondMajorQuery}
+          onQueryChange={onSecondMajorQueryChange}
+          options={majorCatalog}
+          selectedMajor={selectedSecondMajor}
+          onSelect={(major) => {
+            onSecondMajorSelect(major)
+            onMajorErrorClear()
+          }}
+          loading={majorsLoading}
+          error={majorError}
+          placeholder="Add a second major"
+        />
       </div>
     </div>
   )

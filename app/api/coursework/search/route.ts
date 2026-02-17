@@ -34,6 +34,26 @@ function normalizeLabelToken(value: string) {
   return normalizeWhitespace(value).toLowerCase()
 }
 
+function normalizeUniversityToken(value: string) {
+  return normalizeWhitespace(value).toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function insertCourseBoundaries(value: string) {
+  return value
+    .replace(/([A-Za-z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([A-Za-z]{2,})/g, '$1 $2')
+}
+
+function toShortCourseLabel(value: string) {
+  const normalized = normalizeWhitespace(value)
+  const withBoundaries = insertCourseBoundaries(normalized)
+  const match = withBoundaries.match(/^([A-Za-z][A-Za-z&\-\s]{0,20}?)\s+([0-9]{2,4}[A-Za-z]?)\b/)
+  if (!match) return normalized
+  const subject = normalizeWhitespace(match[1]).toUpperCase()
+  const number = match[2].toUpperCase()
+  return `${subject} ${number}`
+}
+
 function expandCodeAliases(token: string) {
   const aliases = new Set([token])
   if (token.startsWith('ACC')) aliases.add(token.replace(/^ACC/, 'ACCTG'))
@@ -78,7 +98,55 @@ function mergeAndSortResults(items: CourseResult[], query: string) {
     .slice(0, MAX_RESULTS)
 }
 
+function extractCourseKey(label: string) {
+  const normalized = toShortCourseLabel(label)
+  const codeMatch = normalized.match(/^([A-Za-z]{2,12})\s*([0-9]{2,4}[A-Za-z]?)\b/)
+  if (!codeMatch) return normalizeLabelToken(normalized)
+  const subject = codeMatch[1].toUpperCase()
+  const number = codeMatch[2].toUpperCase()
+  return `${subject}:${number}`
+}
+
+function dedupeByCourseKey(items: CourseResult[], query: string) {
+  const bestByKey = new Map<string, CourseResult>()
+
+  for (const item of items) {
+    const key = extractCourseKey(item.label)
+    const existing = bestByKey.get(key)
+    if (!existing) {
+      bestByKey.set(key, item)
+      continue
+    }
+
+    const existingScore = rankCourse(existing.label, query)
+    const candidateScore = rankCourse(item.label, query)
+    if (candidateScore > existingScore) {
+      bestByKey.set(key, item)
+      continue
+    }
+
+    if (candidateScore === existingScore && item.label.length < existing.label.length) {
+      bestByKey.set(key, item)
+    }
+  }
+
+  return Array.from(bestByKey.values())
+}
+
 function toCourseLabel(row: DbCourseRow) {
+  const subjectCode = typeof row.subject_code === 'string' ? normalizeWhitespace(row.subject_code) : ''
+  const courseNumber = typeof row.course_number === 'string' ? normalizeWhitespace(row.course_number) : ''
+  if (subjectCode && courseNumber) {
+    return normalizeWhitespace(`${subjectCode} ${courseNumber}`)
+  }
+
+  const code = typeof row.code === 'string' ? normalizeWhitespace(row.code) : ''
+  if (code) return toShortCourseLabel(code)
+  const name = typeof row.name === 'string' ? normalizeWhitespace(row.name) : ''
+  return name
+}
+
+function toCourseSearchText(row: DbCourseRow) {
   const subjectCode = typeof row.subject_code === 'string' ? normalizeWhitespace(row.subject_code) : ''
   const courseNumber = typeof row.course_number === 'string' ? normalizeWhitespace(row.course_number) : ''
   const title = typeof row.title === 'string' ? normalizeWhitespace(row.title) : ''
@@ -89,6 +157,17 @@ function toCourseLabel(row: DbCourseRow) {
   const code = typeof row.code === 'string' ? normalizeWhitespace(row.code) : ''
   const name = typeof row.name === 'string' ? normalizeWhitespace(row.name) : ''
   return normalizeWhitespace(`${code} ${name}`)
+}
+
+function withInstitutionSuffix(label: string, row: DbCourseRow, selectedUniversity: string) {
+  const institution = typeof row.institution === 'string' ? normalizeWhitespace(row.institution) : ''
+  if (!institution) return label
+
+  const selectedToken = normalizeUniversityToken(selectedUniversity)
+  const institutionToken = normalizeUniversityToken(institution)
+
+  if (selectedToken && selectedToken === institutionToken) return label
+  return `${label} (${institution})`
 }
 
 export async function GET(request: Request) {
@@ -144,21 +223,29 @@ export async function GET(request: Request) {
     .filter((row): row is DbCourseRow => {
       return typeof row.id === 'string'
     })
-    .map((row) => ({ id: row.id ?? `db:${normalizeCodeToken(toCourseLabel(row))}`, label: toCourseLabel(row) }))
+    .map((row) => {
+      const baseLabel = toCourseLabel(row)
+      return {
+        id: row.id ?? `db:${normalizeCodeToken(baseLabel)}`,
+        label: withInstitutionSuffix(baseLabel, row, university),
+        searchText: toCourseSearchText(row),
+      }
+    })
     .filter((row) => row.label.length > 0)
-    .filter((row) => matchesQuery(row.label, safeQuery))
+    .filter((row) => matchesQuery(row.searchText, safeQuery))
+    .map((row) => ({ id: row.id, label: row.label }))
 
   const scopedResults: CourseResult[] = !searchAll
     ? getUniversityCourseCatalog(university)
         .filter((item) => matchesQuery(item, safeQuery))
-        .map((item) => ({ id: `scoped:${normalizeCodeToken(item)}`, label: item }))
+        .map((item) => {
+          const shortLabel = toShortCourseLabel(item)
+          return { id: `scoped:${normalizeCodeToken(shortLabel)}`, label: shortLabel }
+        })
     : []
 
-  const merged = mergeAndSortResults([...scopedResults, ...dbResults], safeQuery)
-  const deduped = merged.filter((item, index, source) => {
-    const token = normalizeLabelToken(item.label)
-    return source.findIndex((candidate) => normalizeLabelToken(candidate.label) === token) === index
-  })
+  const deduped = dedupeByCourseKey([...scopedResults, ...dbResults], safeQuery)
+  const merged = mergeAndSortResults(deduped, safeQuery)
 
-  return NextResponse.json({ results: deduped.slice(0, MAX_RESULTS) })
+  return NextResponse.json({ results: merged })
 }

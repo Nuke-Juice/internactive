@@ -6,6 +6,7 @@ import { startVerifiedEmployerCheckoutAction } from '@/lib/billing/actions'
 import { getEmployerPlanFeatures } from '@/lib/billing/plan'
 import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import { requireRole } from '@/lib/auth/requireRole'
+import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
 import { supabaseServer } from '@/lib/supabase/server'
 import ApplicantsInboxGroup from '@/app/dashboard/employer/_components/ApplicantsInboxGroup'
 import ApplicantsSortControls, { type ApplicantsSort } from '@/app/dashboard/employer/_components/ApplicantsSortControls'
@@ -74,13 +75,38 @@ function normalizeReadinessFilter(value: string | undefined, enabled: boolean): 
   return 'all'
 }
 
-function parseReasons(value: unknown) {
+function parseReasons(value: unknown, matchScore: number | null) {
   if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((reason) => {
+      const parsed = reason.match(/^([^:]+):\s*(.+)\s+\(\+([0-9]+(?:\.[0-9]+)?)\)$/)
+      if (!parsed) return reason
+      const [, label, details, pointsText] = parsed
+      const points = Number(pointsText)
+      if (!Number.isFinite(points) || typeof matchScore !== 'number' || matchScore <= 0) return reason
+      const contribution = Math.max(0, Math.round((points / matchScore) * 100))
+      return `${label.trim()}: ${details.trim()} (${contribution}% of total match score)`
+    })
 }
 
 function applicantName(studentId: string) {
   return `Applicant ${studentId.slice(0, 8)}`
+}
+
+function displayNameFromMetadata(input: {
+  firstName?: string | null
+  lastName?: string | null
+  email?: string | null
+  fallbackId: string
+}) {
+  const first = (input.firstName ?? '').trim()
+  const last = (input.lastName ?? '').trim()
+  const full = [first, last].filter(Boolean).join(' ').trim()
+  if (full) return full
+  const emailName = (input.email ?? '').split('@')[0]?.trim()
+  if (emailName && emailName.length > 0) return emailName
+  return applicantName(input.fallbackId)
 }
 
 function formatMajor(value: string[] | string | null | undefined, canonicalName?: string | null) {
@@ -88,6 +114,12 @@ function formatMajor(value: string[] | string | null | undefined, canonicalName?
   if (Array.isArray(value)) return value[0] ?? 'Major not set'
   if (typeof value === 'string' && value.trim()) return value
   return 'Major not set'
+}
+
+function formatClassStanding(value: string | null | undefined) {
+  if (typeof value !== 'string') return 'Class standing not set'
+  const normalized = value.trim()
+  return normalized.length > 0 ? normalized : 'Class standing not set'
 }
 
 function canonicalMajorName(value: unknown) {
@@ -143,7 +175,7 @@ function buildFitSummary(input: {
 }) {
   const parts: string[] = []
   if (input.major !== 'Major not set') parts.push('Major match signal')
-  if (input.graduationYear !== 'Grad year not set') parts.push('Grad year signal')
+  if (input.graduationYear !== 'Class standing not set') parts.push('Class standing signal')
   parts.push(input.hasResume ? 'Resume on file' : 'Resume missing')
   if (input.topReason) parts.push(input.topReason)
   return parts.join(' • ')
@@ -237,9 +269,11 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
   const studentIds = Array.from(new Set(applications.map((row) => row.student_id)))
   const quickApplicantsCount = applications.filter((row) => Boolean(row.external_apply_required)).length
   const pendingExternalCount = applications.filter((row) => Boolean(row.external_apply_required) && !row.external_apply_completed_at).length
+  const canUseAdminClient = hasSupabaseAdminCredentials()
+  const profileClient = canUseAdminClient ? supabaseAdmin() : supabase
   const { data: profiles } =
     studentIds.length > 0
-      ? await supabase
+      ? await profileClient
           .from('student_profiles')
           .select('user_id, school, major:canonical_majors(name), majors, year, coursework, availability_hours_per_week')
           .in('user_id', studentIds)
@@ -256,8 +290,31 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
         }
   const { data: studentSkillRows } =
     studentIds.length > 0
-      ? await supabase.from('student_skill_items').select('student_id, skill_id').in('student_id', studentIds)
+      ? await profileClient.from('student_skill_items').select('student_id, skill_id').in('student_id', studentIds)
       : { data: [] as Array<{ student_id: string; skill_id: string }> }
+  const authNameByStudentId = new Map<string, string>()
+  if (canUseAdminClient && studentIds.length > 0) {
+    const admin = supabaseAdmin()
+    const authUsersEntries = await Promise.all(
+      studentIds.map(async (studentId) => {
+        const { data } = await admin.auth.admin.getUserById(studentId)
+        const authUser = data.user
+        const metadata = (authUser?.user_metadata ?? {}) as { first_name?: string; last_name?: string }
+        return [
+          studentId,
+          displayNameFromMetadata({
+            firstName: metadata.first_name,
+            lastName: metadata.last_name,
+            email: authUser?.email,
+            fallbackId: studentId,
+          }),
+        ] as const
+      })
+    )
+    for (const [studentId, name] of authUsersEntries) {
+      authNameByStudentId.set(studentId, name)
+    }
+  }
   const skillIdsByStudent = new Map<string, string[]>()
   for (const row of studentSkillRows ?? []) {
     const list = skillIdsByStudent.get(row.student_id) ?? []
@@ -273,7 +330,7 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
       {
         school: profile.school ?? 'University not set',
         major: formatMajor(profile.majors, canonicalMajorName(profile.major)),
-        year: profile.year ?? 'Grad year not set',
+        year: formatClassStanding(profile.year),
         majorRaw: profile.majors,
         canonicalMajorName: canonicalMajorName(profile.major),
         coursework: profile.coursework ?? [],
@@ -291,7 +348,10 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
         .filter((application) => application.internship_id === internship.id)
         .map((application, index) => {
           const profile = profileByStudentId.get(application.student_id)
-          const topReasons = features.matchReasons && index < 3 ? parseReasons(application.match_reasons).slice(0, 2) : []
+          const topReasons =
+            features.matchReasons && index < 3
+              ? parseReasons(application.match_reasons, application.match_score).slice(0, 2)
+              : []
           const readinessLabel = buildReadinessLabel({
             hasResume: Boolean(application.resume_url),
             major: profile?.majorRaw,
@@ -304,13 +364,13 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
             id: `${internship.id}-${application.id}`,
             applicationId: application.id,
             studentId: application.student_id,
-            applicantName: applicantName(application.student_id),
+            applicantName: authNameByStudentId.get(application.student_id) ?? applicantName(application.student_id),
             university: profile?.school ?? 'University not set',
             major: profile?.major ?? 'Major not set',
-            graduationYear: profile?.year ?? 'Grad year not set',
+            graduationYear: profile?.year ?? 'Class standing not set',
             fitSummary: buildFitSummary({
               major: profile?.major ?? 'Major not set',
-              graduationYear: profile?.year ?? 'Grad year not set',
+              graduationYear: profile?.year ?? 'Class standing not set',
               hasResume: Boolean(application.resume_url),
               topReason: topReasons[0] ?? null,
             }),
@@ -319,7 +379,7 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
             topReasons,
             readinessLabel,
             resumeUrl: application.resume_url ?? null,
-            openApplicationHref: `/dashboard/employer/applicants/view/${encodeURIComponent(application.id)}`,
+            openApplicationHref: `/dashboard/employer/applicants/review/${encodeURIComponent(application.id)}`,
             employerViewedAt: application.employer_viewed_at,
             status: normalizeStatus(application.status),
             notes: application.notes ?? null,
@@ -570,6 +630,7 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
             {groups.map((group) => (
               <ApplicantsInboxGroup
                 key={group.internshipId}
+                employerUserId={user.id}
                 internshipId={group.internshipId}
                 internshipTitle={group.internshipTitle}
                 applicantCountText={group.applicantCountText}

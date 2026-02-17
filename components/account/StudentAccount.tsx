@@ -17,7 +17,11 @@ import {
   normalizeReturnTo,
   setStoredReturnTo,
 } from '@/lib/applyRecovery'
-import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
+import {
+  getMinimumProfileCompleteness,
+  getMinimumProfileFieldLabel,
+  type MinimumProfileField,
+} from '@/lib/profileCompleteness'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { normalizeSkillsClient } from '@/lib/skills/normalizeSkillsClient'
 
@@ -61,7 +65,7 @@ type Props = {
 const FIELD =
   'mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100'
 
-const graduationYears = ['2026', '2027', '2028', '2029', '2030']
+const classStandingOptions = ['Freshman', 'Sophomore', 'Junior', 'Senior']
 const experienceLevels: Array<{ label: string; value: ExperienceLevel }> = [
   { label: "I'm new to this (no relevant experience yet)", value: 'none' },
   { label: "I've taken classes / built projects related to it", value: 'projects' },
@@ -87,6 +91,13 @@ const transportModes = ['driving', 'transit', 'walking', 'cycling'] as const
 const maxProfilePhotoBytes = 2 * 1024 * 1024
 const maxResumeBytes = 5 * 1024 * 1024
 const profilePhotoBuckets = ['avatars', 'profile-photos']
+const applyFieldFocusByKey: Record<MinimumProfileField | 'resume', string> = {
+  school: 'university-input',
+  major: 'major-input',
+  availability_start_month: 'start-month-input',
+  availability_hours_per_week: 'hours-per-week-input',
+  resume: 'resume-input',
+}
 
 function normalizeExperienceLevel(value: string | null | undefined): ExperienceLevel {
   const normalized = String(value ?? '')
@@ -189,7 +200,12 @@ function parseLegacyInterests(value: string | null) {
     const parsed = JSON.parse(value) as unknown
     return parsePreferences(parsed)
   } catch {
-    return null
+    return {
+      remoteOk: false,
+      seasons: [] as string[],
+      profileHeadline: value,
+      skills: [] as string[],
+    }
   }
 }
 
@@ -206,6 +222,33 @@ function initialsForName(firstName: string, lastName: string) {
   const last = lastName.trim().slice(0, 1)
   if (first || last) return `${first}${last}`.toUpperCase()
   return 'S'
+}
+
+function maskEmail(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const [localPart, domainPart] = trimmed.split('@')
+  if (!localPart || !domainPart) return trimmed
+  const localVisible = localPart.length <= 2 ? localPart[0] ?? '' : `${localPart[0]}${localPart[1]}`
+  const maskedLocal = `${localVisible}${'*'.repeat(Math.max(2, localPart.length - localVisible.length))}`
+  const [domainName, ...tldParts] = domainPart.split('.')
+  if (!domainName) return `${maskedLocal}@${domainPart}`
+  const domainVisible = domainName[0] ?? ''
+  const maskedDomain = `${domainVisible}${'*'.repeat(Math.max(2, domainName.length - 1))}`
+  const suffix = tldParts.length > 0 ? `.${tldParts.join('.')}` : ''
+  return `${maskedLocal}@${maskedDomain}${suffix}`
+}
+
+function subjectBucketLabelFromCourse(course: string) {
+  const match = course.trim().toUpperCase().match(/^([A-Z]{2,6})/)
+  const subject = match?.[1] ?? ''
+  if (!subject) return null
+  if (subject === 'ACCT' || subject === 'ACCTG' || subject === 'ACC') return 'Accounting'
+  if (subject === 'FIN' || subject === 'FINAN') return 'Finance'
+  if (subject === 'MGT' || subject === 'MGMT' || subject === 'OSC') return 'Management'
+  if (subject === 'ECON') return 'Economics'
+  if (subject === 'STAT' || subject === 'MATH') return 'Quantitative'
+  return null
 }
 
 function includesCoursework(list: string[], value: string) {
@@ -282,11 +325,10 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
     defaultSeasonFromMonth(initialProfile?.availability_start_month ?? null)
   )
   const [remoteOk, setRemoteOk] = useState(false)
-  const [suggestedCoursework, setSuggestedCoursework] = useState<string[]>([])
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
 
   const [saving, setSaving] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [isProfileLoaded, setIsProfileLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -357,20 +399,31 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
     return Object.values(completionFlags).filter((done) => !done).length
   }, [completionFlags])
 
-  const minimumProfileReady = useMemo(() => {
+  const minimumProfile = useMemo(() => {
     return getMinimumProfileCompleteness({
       school: selectedUniversity?.name ?? universityQuery ?? null,
       majors: selectedMajorId && major ? [major] : [],
       availability_start_month: availabilityStartMonth,
       availability_hours_per_week: availabilityHoursPerWeek,
-    }).ok
+    })
   }, [availabilityHoursPerWeek, availabilityStartMonth, major, selectedMajorId, selectedUniversity?.name, universityQuery])
+  const minimumProfileReady = minimumProfile.ok
 
   const hasResumeForApply = useMemo(() => {
     return Boolean(resumeStoragePath.trim() || resumeFile)
   }, [resumeFile, resumeStoragePath])
 
   const recoveryReady = minimumProfileReady && hasResumeForApply
+  const applyMissingFields = useMemo(() => {
+    const missing: Array<{ key: MinimumProfileField | 'resume'; label: string }> = minimumProfile.missing.map((field) => ({
+      key: field,
+      label: getMinimumProfileFieldLabel(field),
+    }))
+    if (!hasResumeForApply) {
+      missing.push({ key: 'resume', label: 'Resume upload' })
+    }
+    return missing
+  }, [hasResumeForApply, minimumProfile.missing])
   const selectedMajor = useMemo(() => {
     if (selectedMajorId) {
       const byId = majorCatalog.find((item) => item.id === selectedMajorId)
@@ -384,6 +437,22 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   }, [major, majorCatalog, selectedMajorId])
 
   const showCardHints = mode === 'view' && isProfileLoaded && showIncompleteGuide && missingCount > 0
+  const maskedEmail = useMemo(() => maskEmail(email), [email])
+  const inferredCourseCategoryCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const course of coursework) {
+      const bucket = subjectBucketLabelFromCourse(course)
+      if (!bucket) continue
+      counts.set(bucket, (counts.get(bucket) ?? 0) + 1)
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])
+  }, [coursework])
+  const classStandingOptionsForSelect = useMemo(() => {
+    if (graduationYear && !classStandingOptions.includes(graduationYear)) {
+      return [graduationYear, ...classStandingOptions]
+    }
+    return classStandingOptions
+  }, [graduationYear])
 
   function cardClass(isMissing: boolean) {
     return `relative rounded-xl border p-4 ${
@@ -432,6 +501,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
         { data: canonicalSkillRows },
         { data: canonicalCourseworkRows },
         { data: canonicalCourseworkCategoryRows },
+        { data: canonicalStudentCourseRows },
       ] =
         await Promise.all([
           supabase
@@ -446,6 +516,11 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
             .from('student_coursework_category_links')
             .select('category_id, category:coursework_categories(name)')
             .eq('student_id', userId),
+          supabase
+            .from('student_courses')
+            .select('course_id, course:canonical_courses(subject_code, course_number, title, code, name)')
+            .eq('student_profile_id', userId)
+            .limit(250),
         ])
       const { data: authData } = await supabase.auth.getUser()
       const authUser = authData.user
@@ -486,13 +561,39 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
           return typeof courseworkItem?.name === 'string' ? courseworkItem.name.trim() : ''
         })
         .filter(Boolean)
+      const canonicalStudentCourseLabels = (canonicalStudentCourseRows ?? [])
+        .map((rowItem) => {
+          const course = rowItem.course as
+            | {
+                subject_code?: string | null
+                course_number?: string | null
+                title?: string | null
+                code?: string | null
+                name?: string | null
+              }
+            | null
+          const subject = typeof course?.subject_code === 'string' ? normalizeCourseworkName(course.subject_code) : ''
+          const number = typeof course?.course_number === 'string' ? normalizeCourseworkName(course.course_number) : ''
+          const title = typeof course?.title === 'string' ? normalizeCourseworkName(course.title) : ''
+          if (subject && number) return `${subject} ${number} ${title}`.trim()
+          const code = typeof course?.code === 'string' ? normalizeCourseworkName(course.code) : ''
+          const name = typeof course?.name === 'string' ? normalizeCourseworkName(course.name) : ''
+          return `${code} ${name}`.trim()
+        })
+        .filter(Boolean)
       const canonicalCourseworkCategoryLabels = (canonicalCourseworkCategoryRows ?? [])
         .map((rowItem) => {
           const categoryItem = rowItem.category as { name?: string | null } | null
           return typeof categoryItem?.name === 'string' ? categoryItem.name.trim() : ''
         })
         .filter(Boolean)
-      setCoursework(canonicalCourseworkLabels.length > 0 ? canonicalCourseworkLabels : dbCoursework)
+      setCoursework(
+        canonicalCourseworkLabels.length > 0
+          ? canonicalCourseworkLabels
+          : canonicalStudentCourseLabels.length > 0
+            ? Array.from(new Set(canonicalStudentCourseLabels))
+            : dbCoursework
+      )
       setCourseworkCategories(canonicalCourseworkCategoryLabels)
       setSkills(canonicalSkillLabels.length > 0 ? canonicalSkillLabels : (parsedPreferences?.skills ?? []))
       setExperienceLevel(normalizeExperienceLevel((row.experience_level as string) ?? null))
@@ -732,10 +833,10 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   }, [selectedUniversity, universityQuery])
 
   const addCourseworkOptions = useMemo(() => {
-    return [...new Set([...universityCourseworkCatalog, ...canonicalCourseworkOptions, ...suggestedCoursework])].filter(
+    return [...new Set([...universityCourseworkCatalog, ...canonicalCourseworkOptions])].filter(
       (course) => !includesCoursework(coursework, course)
     )
-  }, [canonicalCourseworkOptions, coursework, suggestedCoursework, universityCourseworkCatalog])
+  }, [canonicalCourseworkOptions, coursework, universityCourseworkCatalog])
 
   const filteredCourseworkOptions = useMemo(() => {
     const query = normalizeCatalogToken(courseworkInput)
@@ -758,70 +859,6 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
     if (!query) return available.slice(0, 8)
     return available.filter((category) => normalizeCatalogToken(category).includes(query)).slice(0, 8)
   }, [canonicalCourseworkCategoryOptions, courseworkCategories, courseworkCategoryInput])
-
-  useEffect(() => {
-    let active = true
-
-    const timer = setTimeout(() => {
-      void (async () => {
-        if (!active) return
-
-        if (!selectedUniversity || !selectedMajorId || !major.trim()) {
-          setSuggestedCoursework([])
-          return
-        }
-
-        const universityIdValue =
-          typeof selectedUniversity.id === 'number'
-            ? selectedUniversity.id
-            : Number(selectedUniversity.id)
-
-        if (!Number.isFinite(universityIdValue)) {
-          setSuggestedCoursework([])
-          return
-        }
-
-        const supabase = supabaseBrowser()
-        setSuggestionsLoading(true)
-
-        const { data, error: suggestionError } = await supabase.rpc('course_suggestions', {
-          p_university_id: universityIdValue,
-          p_major: major,
-          p_query: '',
-          p_limit: 12,
-        })
-
-        if (!active) return
-
-        if (suggestionError) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.error('[CourseSuggestions] error:', suggestionError.message)
-          }
-          setSuggestedCoursework([])
-          setSuggestionsLoading(false)
-          return
-        }
-
-        const nextSuggestions = (Array.isArray(data) ? data : []).reduce((acc: string[], row: unknown) => {
-          const code =
-            row && typeof row === 'object' && 'code' in row && typeof row.code === 'string'
-              ? row.code.trim()
-              : ''
-          if (!code || includesCoursework(acc, code)) return acc
-          acc.push(code)
-          return acc
-        }, [])
-
-        setSuggestedCoursework(nextSuggestions)
-        setSuggestionsLoading(false)
-      })()
-    }, 150)
-
-    return () => {
-      active = false
-      clearTimeout(timer)
-    }
-  }, [major, selectedMajorId, selectedUniversity])
 
 function addCourseworkItem(value: string) {
     const normalized = normalizeCourseworkName(value)
@@ -906,7 +943,7 @@ function addCourseworkItem(value: string) {
     const normalizedSkillsList = skills.map((skill) => normalizeSkillName(skill)).filter(Boolean)
     const normalizedCourseworkText =
       normalizedCourseworkList.length > 0 ? normalizedCourseworkList.join(', ') : ''
-    const [{ skillIds: normalizedSkillIds, unknown: unknownSkills }, { courseworkItemIds, unknown: unknownCoursework }] =
+    const [{ skillIds: normalizedSkillIds }, { courseworkItemIds }] =
       await Promise.all([
         normalizeSkillsClient(normalizedSkillsList),
         normalizeCourseworkClient(normalizedCourseworkList),
@@ -1026,6 +1063,7 @@ function addCourseworkItem(value: string) {
         options.includePreferences
           ? {
               ...payload,
+              interests: profileHeadline.trim() || null,
               preferences: {
                 remoteOk,
                 seasons: availability,
@@ -1033,7 +1071,10 @@ function addCourseworkItem(value: string) {
                 skills: normalizedSkillsList,
               },
             }
-          : payload
+          : {
+              ...payload,
+              interests: profileHeadline.trim() || null,
+            }
 
       return [
         attachPreferences({
@@ -1170,9 +1211,55 @@ function addCourseworkItem(value: string) {
         .in('name', normalizedCourseworkList)
         .limit(250)
 
-      const canonicalCourseIds = (canonicalCourseRows ?? [])
+      let canonicalCourseIds = (canonicalCourseRows ?? [])
         .map((row) => row.id)
         .filter((id): id is string => typeof id === 'string')
+
+      if (canonicalCourseIds.length === 0) {
+        canonicalCourseIds = Array.from(
+          new Set(
+            (
+              await Promise.all(
+                normalizedCourseworkList.map(async (course) => {
+                  const term = course.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+                  if (!term) return null
+                  const { data: courseRows } = await supabase
+                    .from('canonical_courses')
+                    .select('id, code, name')
+                    .or(`code.ilike.%${term}%,name.ilike.%${term}%`)
+                    .limit(8)
+
+                  const ranked = (courseRows ?? [])
+                    .filter(
+                      (row): row is { id: string; code: string; name: string } =>
+                        typeof row.id === 'string' && typeof row.code === 'string' && typeof row.name === 'string'
+                    )
+                    .sort((a, b) => {
+                      const aCode = normalizeCatalogToken(a.code)
+                      const bCode = normalizeCatalogToken(b.code)
+                      const queryCode = normalizeCatalogToken(course)
+                      const aLabel = normalizeCatalogToken(`${a.code} ${a.name}`)
+                      const bLabel = normalizeCatalogToken(`${b.code} ${b.name}`)
+                      const queryLabel = normalizeCatalogToken(course)
+                      const aScore =
+                        (aCode.startsWith(queryCode) ? 3 : 0) +
+                        (aLabel.includes(queryLabel) ? 2 : 0) +
+                        (normalizeCatalogToken(a.name).includes(queryLabel) ? 1 : 0)
+                      const bScore =
+                        (bCode.startsWith(queryCode) ? 3 : 0) +
+                        (bLabel.includes(queryLabel) ? 2 : 0) +
+                        (normalizeCatalogToken(b.name).includes(queryLabel) ? 1 : 0)
+                      if (aScore !== bScore) return bScore - aScore
+                      return a.name.localeCompare(b.name)
+                    })
+
+                  return ranked[0]?.id ?? null
+                })
+              )
+            ).filter((item): item is string => typeof item === 'string')
+          )
+        )
+      }
 
       if (canonicalCourseIds.length > 0) {
         const { error: insertStudentCoursesError } = await supabase.from('student_courses').insert(
@@ -1258,13 +1345,7 @@ function addCourseworkItem(value: string) {
 
     showToast({
       kind: 'success',
-      message:
-        unknownSkills.length > 0 || unknownCoursework.length > 0
-          ? `Preferences saved. Stored fallback text for unrecognized items: ${[
-              ...unknownSkills.map((item) => `skill: ${item}`),
-              ...unknownCoursework.map((item) => `coursework: ${item}`),
-            ].join(', ')}`
-          : 'Preferences saved.',
+      message: 'Preferences saved.',
       key: 'student-preferences-saved',
     })
     setProfilePhotoUrl(avatarUrl)
@@ -1280,13 +1361,11 @@ function addCourseworkItem(value: string) {
   }
 
   async function signOut() {
-    const confirmed = window.confirm('Are you sure you want to sign out?')
-    if (!confirmed) return
-
     setSigningOut(true)
     const supabase = supabaseBrowser()
     const { error: signOutError } = await supabase.auth.signOut()
     setSigningOut(false)
+    setSignOutConfirmOpen(false)
 
     if (signOutError) {
       setError(signOutError.message)
@@ -1357,11 +1436,30 @@ function addCourseworkItem(value: string) {
               </Link>
             </div>
           ) : (
-            <p>
-              {recoveryCode === 'RESUME_REQUIRED'
-                ? 'Upload a resume and complete required profile fields to continue your application.'
-                : 'Complete required profile fields to continue your application.'}
-            </p>
+            <div className="flex flex-col gap-3">
+              <p>
+                {recoveryCode === 'RESUME_REQUIRED'
+                  ? 'Upload a resume and complete required profile fields to continue your application.'
+                  : 'Complete required profile fields to continue your application.'}
+              </p>
+              {applyMissingFields.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {applyMissingFields.map((field) => (
+                    <button
+                      key={field.key}
+                      type="button"
+                      onClick={() => {
+                        setMode('edit')
+                        setPendingFocusId(applyFieldFocusByKey[field.key])
+                      }}
+                      className="rounded-full border border-blue-300 bg-white px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                      Add {field.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           )}
         </div>
       )}
@@ -1377,7 +1475,7 @@ function addCourseworkItem(value: string) {
           )}
 
           <div className={`${cardClass(!completionFlags.identity)} sm:col-span-2`}>
-            {showCardHints && !completionFlags.identity && (
+            {!completionFlags.identity && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
@@ -1406,7 +1504,7 @@ function addCourseworkItem(value: string) {
                   {[firstName.trim(), lastName.trim()].filter(Boolean).join(' ') || 'Student'}
                 </div>
                 {isProfileLoaded ? (
-                  <div className="text-sm text-slate-600">{email || 'No email on file'}</div>
+                  <div className="text-sm text-slate-600">{maskedEmail || 'No email on file'}</div>
                 ) : (
                   <div className="mt-1 h-4 w-40 animate-pulse rounded bg-slate-200" />
                 )}
@@ -1416,7 +1514,7 @@ function addCourseworkItem(value: string) {
           </div>
 
           <div className={cardClass(!completionFlags.university)}>
-            {showCardHints && !completionFlags.university && (
+            {!completionFlags.university && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
@@ -1438,7 +1536,7 @@ function addCourseworkItem(value: string) {
             )}
           </div>
           <div className={cardClass(!completionFlags.major)}>
-            {showCardHints && !completionFlags.major && (
+            {!completionFlags.major && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
@@ -1453,22 +1551,22 @@ function addCourseworkItem(value: string) {
             <div className="mt-1 text-sm font-medium text-slate-900">{major || 'Not set'}</div>
           </div>
           <div className={cardClass(!completionFlags.graduationYear)}>
-            {showCardHints && !completionFlags.graduationYear && (
+            {!completionFlags.graduationYear && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
               type="button"
-              aria-label="Edit graduation year"
+              aria-label="Edit class standing"
               onClick={() => editField('graduation-year-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
               <Pencil className="h-4 w-4" />
             </button>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Graduation year</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Class standing</div>
             <div className="mt-1 text-sm font-medium text-slate-900">{graduationYear || 'Not set'}</div>
           </div>
           <div className={cardClass(!completionFlags.experience)}>
-            {showCardHints && !completionFlags.experience && (
+            {!completionFlags.experience && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
@@ -1483,7 +1581,7 @@ function addCourseworkItem(value: string) {
             <div className="mt-1 text-sm font-medium text-slate-900">{getExperienceLabel(experienceLevel)}</div>
           </div>
           <div id="availability" className={cardClass(!completionFlags.startMonth)}>
-            {showCardHints && !completionFlags.startMonth && (
+            {!completionFlags.startMonth && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
@@ -1498,7 +1596,7 @@ function addCourseworkItem(value: string) {
             <div className="mt-1 text-sm font-medium text-slate-900">{availabilityStartMonth || 'Not set'}</div>
           </div>
           <div className={cardClass(!completionFlags.hours)}>
-            {showCardHints && !completionFlags.hours && (
+            {!completionFlags.hours && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
@@ -1516,7 +1614,7 @@ function addCourseworkItem(value: string) {
           </div>
 
           <div className={`${cardClass(!completionFlags.coursework)} sm:col-span-2`}>
-            {showCardHints && !completionFlags.coursework && (
+            {!completionFlags.coursework && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
@@ -1539,10 +1637,22 @@ function addCourseworkItem(value: string) {
                     {category}
                   </span>
                 ))
+              ) : inferredCourseCategoryCounts.length > 0 ? (
+                inferredCourseCategoryCounts.map(([label, count]) => (
+                  <span
+                    key={label}
+                    className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-800"
+                  >
+                    {label} ({count})
+                  </span>
+                ))
               ) : (
-                <span className="text-sm text-slate-700">Not set</span>
+                <span className="text-sm text-slate-700">Optional. Auto-derived from your selected courses.</span>
               )}
             </div>
+            {courseworkCategories.length === 0 && inferredCourseCategoryCounts.length > 0 ? (
+              <p className="mt-1 text-xs text-slate-500">Inferred from course subject prefixes.</p>
+            ) : null}
             <div className="mt-3 text-xs font-medium text-slate-500">Specific courses</div>
             <div className="mt-2 flex flex-wrap gap-2">
               {coursework.length > 0 ? (
@@ -1561,6 +1671,9 @@ function addCourseworkItem(value: string) {
           </div>
 
           <div id="skills" className="relative rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
+            {skills.length === 0 && (
+              <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
+            )}
             <button
               type="button"
               aria-label="Edit skills"
@@ -1603,7 +1716,7 @@ function addCourseworkItem(value: string) {
           </div>
 
           <div id="preferences" className={`${cardClass(!completionFlags.seasons)} sm:col-span-2`}>
-            {showCardHints && !completionFlags.seasons && (
+            {!completionFlags.seasons && (
               <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
             )}
             <button
@@ -1654,7 +1767,6 @@ function addCourseworkItem(value: string) {
               <span className="rounded-full border border-slate-300 bg-white px-3 py-1">
                 Max commute: {maxCommuteMinutes} min
               </span>
-              <span className="rounded-full border border-slate-300 bg-white px-3 py-1">Mode: {transportMode}</span>
             </div>
           </div>
 
@@ -1662,13 +1774,13 @@ function addCourseworkItem(value: string) {
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Account settings</div>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
               {isProfileLoaded ? (
-                <div className="text-sm text-slate-700">{email || 'No email on file'}</div>
+                <div className="text-sm text-slate-700">{maskedEmail || 'No email on file'}</div>
               ) : (
                 <div className="h-4 w-36 animate-pulse rounded bg-slate-200" />
               )}
               <button
                 type="button"
-                onClick={signOut}
+                onClick={() => setSignOutConfirmOpen(true)}
                 disabled={signingOut}
                 className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
               >
@@ -1847,14 +1959,14 @@ function addCourseworkItem(value: string) {
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700">Graduation year</label>
+              <label className="text-sm font-medium text-slate-700">Class standing</label>
               <select
                 id="graduation-year-input"
                 className={FIELD}
                 value={graduationYear}
                 onChange={(e) => setGraduationYear(e.target.value)}
               >
-                {graduationYears.map((year) => (
+                {classStandingOptionsForSelect.map((year) => (
                   <option key={year} value={year}>
                     {year}
                   </option>
@@ -1959,24 +2071,6 @@ function addCourseworkItem(value: string) {
               />
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-slate-700">Transportation mode</label>
-              <select
-                className={FIELD}
-                value={transportMode}
-                onChange={(e) => {
-                  const next = e.target.value as (typeof transportModes)[number]
-                  setTransportMode(transportModes.includes(next) ? next : 'driving')
-                }}
-              >
-                {transportModes.map((mode) => (
-                  <option key={mode} value={mode}>
-                    {mode}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-slate-700">Exact address (optional advanced)</label>
               <input
@@ -2031,44 +2125,23 @@ function addCourseworkItem(value: string) {
                       {category} ×
                     </button>
                   ))
+                ) : inferredCourseCategoryCounts.length > 0 ? (
+                  inferredCourseCategoryCounts.map(([label, count]) => (
+                    <span
+                      key={label}
+                      className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-800"
+                    >
+                      {label} ({count})
+                    </span>
+                  ))
                 ) : (
-                  <span className="text-sm text-slate-500">No categories selected yet.</span>
+                  <span className="text-sm text-slate-500">Optional. We can infer these from your coursework.</span>
                 )}
               </div>
             </div>
 
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-slate-700">Coursework</label>
-              {(suggestionsLoading || suggestedCoursework.length > 0) && (
-                <div className="mt-2">
-                  <div className="text-xs text-slate-500">Suggested coursework</div>
-                  {suggestionsLoading ? (
-                    <div className="mt-2 text-sm text-slate-500">Loading suggestions...</div>
-                  ) : (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {suggestedCoursework.map((course) => {
-                        const added = includesCoursework(coursework, course)
-                        return (
-                          <button
-                            key={course}
-                            type="button"
-                            onClick={() => addCourseworkItem(course)}
-                            disabled={added}
-                            className={`rounded-full border px-3 py-1 text-sm ${
-                              added
-                                ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500'
-                                : 'border-blue-600 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                            }`}
-                          >
-                            {course}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
               <div className="relative mt-3">
                 <input
                   id="coursework-input"
@@ -2216,7 +2289,17 @@ function addCourseworkItem(value: string) {
             </div>
           </div>
 
-          <div className="mt-8">
+          <div className="mt-8 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                window.location.reload()
+              }}
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
             <button
               type="button"
               onClick={saveProfile}
@@ -2228,6 +2311,32 @@ function addCourseworkItem(value: string) {
           </div>
         </>
       )}
+      {signOutConfirmOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+            <h2 className="text-base font-semibold text-slate-900">Sign out</h2>
+            <p className="mt-2 text-sm text-slate-600">Are you sure you want to sign out?</p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSignOutConfirmOpen(false)}
+                disabled={signingOut}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={signOut}
+                disabled={signingOut}
+                className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {signingOut ? 'Signing out...' : 'Sign out'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

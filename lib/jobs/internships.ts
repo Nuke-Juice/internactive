@@ -1,4 +1,5 @@
 import { supabaseServer } from '@/lib/supabase/server'
+import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 
 export type Internship = {
   id: string
@@ -98,11 +99,28 @@ export type Internship = {
         }> | null
       }>
     | null
+  internship_required_course_categories:
+    | Array<{
+        category_id: string
+        category: {
+          id: string
+          name: string
+          slug: string
+        } | Array<{
+          id: string
+          name: string
+          slug: string
+        }> | null
+      }>
+    | null
   required_skill_ids: string[]
   preferred_skill_ids: string[]
+  required_course_category_ids: string[]
+  required_course_category_names: string[]
   coursework_item_ids: string[]
   coursework_category_ids: string[]
   coursework_category_names: string[]
+  has_any_coursework_requirement: boolean
   resume_required: boolean | null
   application_deadline: string | null
   apply_deadline: string | null
@@ -164,6 +182,7 @@ const INTERNSHIP_SELECT_RICH_COLUMNS = [
   'target_graduation_years',
   'internship_required_skill_items(skill_id, skill:skills(id, slug, label, category))',
   'internship_preferred_skill_items(skill_id, skill:skills(id, slug, label, category))',
+  'internship_required_course_categories(category_id, category:canonical_course_categories(id, name, slug))',
   'internship_coursework_items(coursework_item_id, coursework:coursework_items(id, name, normalized_name))',
   'internship_coursework_category_links(category_id, category:coursework_categories(id, name, normalized_name))',
   'resume_required',
@@ -335,7 +354,14 @@ function buildInternshipsQuery(params: {
 
 type RawInternshipRow = Omit<
   Internship,
-  'required_skill_ids' | 'preferred_skill_ids' | 'coursework_item_ids' | 'coursework_category_ids' | 'coursework_category_names'
+  | 'required_skill_ids'
+  | 'preferred_skill_ids'
+  | 'required_course_category_ids'
+  | 'required_course_category_names'
+  | 'coursework_item_ids'
+  | 'coursework_category_ids'
+  | 'coursework_category_names'
+  | 'has_any_coursework_requirement'
 >
 
 function mapInternshipRows(rows: RawInternshipRow[]) {
@@ -350,19 +376,22 @@ function mapInternshipRows(rows: RawInternshipRow[]) {
     preferred_skill_ids: (row.internship_preferred_skill_items ?? [])
       .map((item) => item.skill_id)
       .filter((item): item is string => typeof item === 'string'),
-    coursework_item_ids: (row.internship_coursework_items ?? [])
-      .map((item) => item.coursework_item_id)
-      .filter((item): item is string => typeof item === 'string'),
-    coursework_category_ids: (row.internship_coursework_category_links ?? [])
-      .map((item) => item.category_id)
-      .filter((item): item is string => typeof item === 'string'),
-    coursework_category_names: (row.internship_coursework_category_links ?? [])
-      .map((item) => {
-        const category = item.category as { name?: string | null } | Array<{ name?: string | null }> | null
-        if (Array.isArray(category)) return typeof category[0]?.name === 'string' ? category[0].name : ''
-        return typeof category?.name === 'string' ? category.name : ''
+    ...(() => {
+      const normalizedCoursework = normalizeListingCoursework({
+        internship_required_course_categories: row.internship_required_course_categories,
+        internship_coursework_category_links: row.internship_coursework_category_links,
+        internship_coursework_items: row.internship_coursework_items,
       })
-      .filter((item): item is string => typeof item === 'string' && item.length > 0),
+
+      return {
+        required_course_category_ids: normalizedCoursework.requiredCanonicalCategoryIds,
+        required_course_category_names: normalizedCoursework.requiredCanonicalCategoryNames,
+        coursework_item_ids: normalizedCoursework.legacyItemIds,
+        coursework_category_ids: normalizedCoursework.legacyCategoryIds,
+        coursework_category_names: normalizedCoursework.legacyCategoryNames,
+        has_any_coursework_requirement: normalizedCoursework.hasAnyCourseworkRequirement,
+      }
+    })(),
   }))
 }
 
