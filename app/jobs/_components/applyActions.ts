@@ -40,6 +40,13 @@ function isSchemaCacheError(message: string | null | undefined) {
   return (message ?? '').toLowerCase().includes('schema cache')
 }
 
+function hasDeadlinePassed(value: string | null | undefined) {
+  if (!value) return false
+  const deadline = new Date(value)
+  if (!Number.isFinite(deadline.getTime())) return false
+  return deadline.getTime() < Date.now()
+}
+
 export async function applyFromMicroOnboardingAction({
   listingId,
 }: ApplyFromMicroOnboardingInput): Promise<ApplyFromMicroOnboardingResult> {
@@ -111,6 +118,14 @@ export async function applyFromMicroOnboardingAction({
       eventName: 'apply_blocked',
       userId: user.id,
       properties: { listing_id: listingId, code: APPLY_ERROR.LISTING_NOT_FOUND, missing: [] },
+    })
+    return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND }
+  }
+  if (hasDeadlinePassed(listing.application_deadline ?? null)) {
+    await trackAnalyticsEvent({
+      eventName: 'apply_blocked',
+      userId: user.id,
+      properties: { listing_id: listingId, code: APPLY_ERROR.LISTING_NOT_FOUND, missing: ['deadline_passed'] },
     })
     return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND }
   }
@@ -304,6 +319,9 @@ export async function submitApplicationFromListingModalAction(
   ])
 
   if (!listing?.id) return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND, error: 'Listing not found.' }
+  if (hasDeadlinePassed(listing.application_deadline ?? null)) {
+    return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND, error: 'Applications are closed for this listing.' }
+  }
   if (!userRow || userRow.role !== 'student') {
     return { ok: false, code: APPLY_ERROR.ROLE_NOT_STUDENT, error: 'Use a student account to apply.' }
   }

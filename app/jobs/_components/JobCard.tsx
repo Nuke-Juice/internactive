@@ -44,6 +44,7 @@ type Props = {
   listing: Listing
   isAuthenticated: boolean
   userRole?: 'student' | 'employer' | null
+  showMatchPrompt?: boolean
   showWhyMatch?: boolean
   whyMatchReasons?: string[]
   isSponsored?: boolean
@@ -166,16 +167,103 @@ function mapExperienceLevel(value: string | null | undefined) {
   return value
 }
 
-function getRolePreview(listing: Listing) {
-  const summary = listing.short_summary?.trim()
-  if (summary) return summary.slice(0, 110)
+function normalizeSummaryComparable(value: string | null | undefined) {
+  return (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
-  const source = listing.description?.replace(/\s+/g, ' ').trim()
+function isMeaningfulSummary(candidate: string, listing: Listing) {
+  const trimmed = candidate.trim()
+  if (!trimmed) return false
+
+  const normalized = normalizeSummaryComparable(trimmed)
+  if (!normalized) return false
+
+  const normalizedTitle = normalizeSummaryComparable(listing.title)
+  const normalizedCategory = normalizeSummaryComparable(listing.role_category)
+  const normalizedCategoryFallback = normalizeSummaryComparable(listing.role_category ?? listing.majorsText ?? null)
+
+  if (normalized === normalizedTitle || normalized === normalizedCategory || normalized === normalizedCategoryFallback) {
+    return false
+  }
+
+  const words = normalized.split(' ').filter(Boolean)
+  const isAllCaps = trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed)
+  const hasSentencePunctuation = /[.!?]/.test(trimmed)
+  if (words.length <= 2 && !hasSentencePunctuation) return false
+  if (isAllCaps && words.length <= 4) return false
+
+  return true
+}
+
+function trimSummaryForCard(value: string) {
+  const trimmed = value
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s•\-–—]+/, '')
+    .trim()
+  if (trimmed.length <= 180) return trimmed
+  return `${trimmed.slice(0, 177).trimEnd()}...`
+}
+
+function cleanDescriptionSummarySource(value: string) {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+
+  // Drop generated listing sections so card summary stays concise.
+  const sectionMarkers = [' Responsibilities:', ' Qualifications:', ' Screening question:']
+  let cutoff = normalized.length
+  for (const marker of sectionMarkers) {
+    const index = normalized.indexOf(marker)
+    if (index >= 0) cutoff = Math.min(cutoff, index)
+  }
+  return normalized.slice(0, cutoff).trim()
+}
+
+function extractFirstResponsibility(value: string | null | undefined) {
+  const normalized = (value ?? '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return null
+  const marker = 'Responsibilities:'
+  const markerIndex = normalized.indexOf(marker)
+  if (markerIndex < 0) return null
+  const afterMarker = normalized.slice(markerIndex + marker.length).trim()
+  if (!afterMarker) return null
+  const cutoffMarkers = [' Qualifications:', ' Screening question:']
+  let cutoff = afterMarker.length
+  for (const cutoffMarker of cutoffMarkers) {
+    const index = afterMarker.indexOf(cutoffMarker)
+    if (index >= 0) cutoff = Math.min(cutoff, index)
+  }
+  const section = afterMarker.slice(0, cutoff).trim()
+  if (!section) return null
+  const firstBullet = section
+    .replace(/^[\s•\-–—]+/, '')
+    .split(/\s+(?:-|•)\s+/)
+    .map((item) => item.trim())
+    .find(Boolean)
+  if (!firstBullet) return null
+  if (firstBullet.length <= 180) return firstBullet
+  return `${firstBullet.slice(0, 177).trimEnd()}...`
+}
+
+function getListingSummary(listing: Listing) {
+  const summary = listing.short_summary?.trim()
+  if (summary && isMeaningfulSummary(summary, listing)) {
+    return trimSummaryForCard(summary)
+  }
+
+  const source = cleanDescriptionSummarySource(listing.description ?? '')
   if (!source) return null
-  const firstSentence = source.match(/[^.!?]+[.!?]?/)
-  const chosen = (firstSentence?.[0] ?? source).trim()
-  if (chosen.length <= 110) return chosen
-  return `${chosen.slice(0, 107).trimEnd()}...`
+  const descriptionSentences = source.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [source]
+  const firstMeaningfulSentence = descriptionSentences.find((sentence) => isMeaningfulSummary(sentence, listing))
+  if (firstMeaningfulSentence) return trimSummaryForCard(firstMeaningfulSentence)
+
+  const responsibilityFallback = extractFirstResponsibility(listing.description)
+  if (responsibilityFallback) return responsibilityFallback
+  return null
 }
 
 function getPrimaryMajorLabel(majorsText: string | null | undefined) {
@@ -222,14 +310,16 @@ export default function JobCard({
   listing,
   isAuthenticated,
   userRole = null,
+  showMatchPrompt = false,
   showWhyMatch = false,
   whyMatchReasons = [],
   isSponsored = false,
 }: Props) {
   const locationChips = getLocationChips(listing)
   const levelLabel = mapExperienceLevel(listing.experience_level)
-  const rolePreview = getRolePreview(listing)
+  const listingSummary = getListingSummary(listing)
   const industryLabel = getIndustryLabel(listing.role_category, listing.majorsText)
+  const categoryLabel = listing.role_category?.trim() || listing.majorsText?.split(',')[0]?.trim() || null
   const hoursText = getHoursText(listing)
   const deadlineDays = listing.application_deadline ? daysUntil(listing.application_deadline) : null
   const deadlineShort = listing.application_deadline ? formatDateShort(listing.application_deadline) : null
@@ -274,10 +364,12 @@ export default function JobCard({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {typeof listing.matchScore === 'number' ? (
+          {isAuthenticated && userRole === 'student' && typeof listing.matchScore === 'number' ? (
             <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
               {Math.round(listing.matchScore)}% match
             </span>
+          ) : showMatchPrompt ? (
+            <span className="text-[11px] font-medium text-slate-500">Log in to see match score</span>
           ) : null}
           {listing.pay ? <span className={badgeClass(true)}>{listing.pay}</span> : null}
         </div>
@@ -294,7 +386,20 @@ export default function JobCard({
         {levelLabel ? <span className={badgeClass()}>{levelLabel}</span> : null}
       </div>
 
-      {rolePreview ? <p className="mt-3 line-clamp-1 text-sm text-slate-700">{rolePreview}</p> : null}
+      {categoryLabel ? (
+        <div className="mt-3">
+          <span className="inline-flex items-center rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-800">
+            {categoryLabel}
+          </span>
+        </div>
+      ) : null}
+
+      {listingSummary ? (
+        <div className="mt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Summary</p>
+          <p className="mt-1 line-clamp-2 text-sm text-slate-700">{listingSummary}</p>
+        </div>
+      ) : null}
 
       <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
         <div className="grid gap-1.5 text-xs text-slate-600 sm:grid-cols-2">
@@ -341,13 +446,16 @@ export default function JobCard({
       ) : null}
 
       {skillChips.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-2">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Skills</p>
+          <div className="flex flex-wrap gap-1.5">
           {skillChips.map((skill) => (
             <span key={skill} className={badgeClass()}>
               {skill}
             </span>
           ))}
           {skillsOverflow > 0 ? <span className={badgeClass()}>{`+${skillsOverflow}`}</span> : null}
+          </div>
         </div>
       ) : null}
 

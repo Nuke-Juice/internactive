@@ -64,6 +64,14 @@ function parseList(value: string) {
     .filter(Boolean)
 }
 
+function normalizeShortSummary(value: string) {
+  const cleaned = value
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s•\-–—]+/, '')
+    .trim()
+  return cleaned
+}
+
 function sanitizeErrorDetails(value: string | undefined) {
   if (!value) return null
   return value.replace(/\s+/g, ' ').trim().slice(0, 500)
@@ -591,7 +599,7 @@ export default async function EmployerDashboardPage({
         })
       )
     }
-    const shortSummary = String(formData.get('short_summary') ?? '').trim()
+    const shortSummary = normalizeShortSummary(String(formData.get('short_summary') ?? ''))
     const description = String(formData.get('description') ?? '').trim()
     const responsibilities = parseList(String(formData.get('responsibilities') ?? '').trim())
     const qualifications = parseList(String(formData.get('qualifications') ?? '').trim())

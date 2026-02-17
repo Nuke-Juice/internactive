@@ -517,6 +517,7 @@ export default async function JobDetailPage({
     deadlineDate && Number.isFinite(deadlineDate.getTime())
       ? Math.ceil((deadlineDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
       : null
+  const deadlinePassed = typeof daysToDeadline === 'number' && daysToDeadline < 0
   const isDeadlineSoon = typeof daysToDeadline === 'number' && daysToDeadline >= 0 && daysToDeadline <= 14
 
   await trackAnalyticsEvent({
@@ -887,7 +888,7 @@ export default async function JobDetailPage({
                 companyName={listing.company_name || 'this company'}
                 isAuthenticated={Boolean(user)}
                 userRole={userRole}
-                isClosed={capReached}
+                isClosed={capReached || deadlinePassed}
                 screeningQuestion={screeningQuestion}
                 hasSavedResume={hasSavedResume}
                 savedResumeFileName={savedResumeFileName}
@@ -895,6 +896,8 @@ export default async function JobDetailPage({
               </div>
               {capReached ? (
                 <p className="mt-2 text-xs text-slate-700">Applications closed ({applicationCap} applicants).</p>
+              ) : deadlinePassed ? (
+                <p className="mt-2 text-xs text-slate-700">Applications closed (deadline passed).</p>
               ) : null}
               {listing.apply_mode === 'ats_link' || listing.apply_mode === 'hybrid' ? (
                 <p className="mt-2 inline-flex items-start gap-1 text-xs text-slate-700">

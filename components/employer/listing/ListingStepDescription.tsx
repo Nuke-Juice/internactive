@@ -21,6 +21,12 @@ function splitToResponsibilityLines(value: string) {
     .filter(Boolean)
 }
 
+function sanitizeSummaryInput(value: string) {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s•\-–—]+/, '')
+}
+
 export default function ListingStepDescription(props: Props) {
   const summaryLength = props.shortSummary.length
 
@@ -37,12 +43,13 @@ export default function ListingStepDescription(props: Props) {
           maxLength={200}
           value={props.shortSummary}
           onChange={(event) => props.onChange({ shortSummary: event.target.value })}
+          onBlur={(event) => props.onChange({ shortSummary: sanitizeSummaryInput(event.target.value).trim() })}
           className={`mt-1 w-full rounded-md border bg-white p-2 text-sm ${
             props.fieldErrors?.short_summary ? 'border-red-300' : 'border-slate-300'
           }`}
-          placeholder="What makes this internship compelling?"
+          placeholder="One sentence students can scan quickly (e.g., 'Support monthly close and build weekly KPI reports for finance leadership.')"
         />
-        <p className="mt-1 text-xs text-slate-500">{summaryLength}/200</p>
+        <p className="mt-1 text-xs text-slate-500">{summaryLength}/200. Use one sentence, not bullets.</p>
       </div>
 
       <div>

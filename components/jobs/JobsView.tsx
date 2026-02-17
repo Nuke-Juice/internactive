@@ -78,12 +78,11 @@ const SORT_CONFIG: Record<SortMode, { label: string; matchingSignals: string[] }
   },
 }
 
-function normalizeSort(value: string | undefined, isStudent: boolean): SortMode {
+function normalizeSort(value: string | undefined, _isStudent: boolean): SortMode {
   if (value === 'best_match' || value === 'newest') {
-    if (!isStudent && value === 'best_match') return 'newest'
     return value
   }
-  return isStudent ? 'best_match' : 'newest'
+  return 'best_match'
 }
 
 function withSearchParams(basePath: string, params: URLSearchParams, anchorId?: string) {
@@ -494,7 +493,7 @@ export default async function JobsView({
   let filteredInternships = filteredCandidates
   let rankedMatches: ReturnType<typeof rankInternships> = []
 
-  if (isStudent && activeSortMode === 'best_match') {
+  if (activeSortMode === 'best_match') {
     rankedMatches = rankInternships(
       filteredCandidates.map((listing) => ({
         id: listing.id,
@@ -917,8 +916,6 @@ export default async function JobsView({
             noMatchesHint={noMatchesHint}
             basePath={basePath}
             anchorId={anchorId}
-            sortingLabel={SORT_CONFIG[activeSortMode].label}
-            matchingSignals={SORT_CONFIG[activeSortMode].matchingSignals}
           />
 
           <div className="space-y-4">
@@ -943,6 +940,7 @@ export default async function JobsView({
                         }}
                         isAuthenticated={Boolean(user)}
                         userRole={role ?? null}
+                        showMatchPrompt={!user}
                         showWhyMatch={false}
                         whyMatchReasons={[]}
                         isSponsored
@@ -1025,6 +1023,7 @@ export default async function JobsView({
                             }}
                             isAuthenticated={Boolean(user)}
                             userRole={role ?? null}
+                            showMatchPrompt={!user}
                             showWhyMatch={topBestMatchIds.has(listing.id)}
                             whyMatchReasons={whyMatchById.get(listing.id) ?? []}
                             isSponsored={false}
@@ -1053,6 +1052,7 @@ export default async function JobsView({
                     }}
                     isAuthenticated={Boolean(user)}
                     userRole={role ?? null}
+                    showMatchPrompt={!user}
                     showWhyMatch={topBestMatchIds.has(listing.id)}
                     whyMatchReasons={whyMatchById.get(listing.id) ?? []}
                     isSponsored={false}

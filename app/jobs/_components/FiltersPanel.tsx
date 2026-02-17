@@ -30,8 +30,6 @@ type Props = {
   noMatchesHint?: NoMatchesHint | null
   basePath?: string
   anchorId?: string
-  sortingLabel?: string
-  matchingSignals?: string[]
 }
 
 const SLIDER_MIN = 0
@@ -69,8 +67,6 @@ export default function FiltersPanel({
   noMatchesHint,
   basePath = '/jobs',
   anchorId,
-  sortingLabel = 'Newest',
-  matchingSignals = [],
 }: Props) {
   const initialMin = clamp(parseIntOrFallback(state.hoursMin, 10), SLIDER_MIN, SLIDER_MAX)
   const initialMax = clamp(parseIntOrFallback(state.hoursMax, 40), SLIDER_MIN, SLIDER_MAX)
@@ -258,18 +254,6 @@ export default function FiltersPanel({
           Clear
         </Link>
       </div>
-      <p className="mt-2 text-xs text-slate-500">Sorting by: {sortingLabel}</p>
-      {state.sort === 'best_match' && matchingSignals.length > 0 ? (
-        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Used for matching</p>
-          <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-slate-600">
-            {matchingSignals.map((signal) => (
-              <li key={signal}>{signal}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
       {noMatchesHint ? (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <p className="font-semibold">No matches with current filters</p>
