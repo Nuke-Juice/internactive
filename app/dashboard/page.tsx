@@ -18,7 +18,7 @@ export default async function DashboardPage() {
 
   const role = isUserRole(userRow.role) ? userRow.role : null
   if (isAdminRole(role)) redirect('/admin')
-  if (role === 'student') redirect('/')
+  if (role === 'student') redirect('/student/dashboard')
   if (role === 'employer') redirect('/dashboard/employer')
 
   redirect('/account')

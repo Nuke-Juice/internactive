@@ -2,37 +2,54 @@ import Stripe from 'stripe'
 import { getStripeClient, getStripeWebhookSecretForMode } from '@/lib/billing/stripe'
 import { isVerifiedEmployerStatus, resolveEmployerPlan } from '@/lib/billing/subscriptions'
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { STUDENT_PREMIUM_PLAN_KEY } from '@/lib/student/premiumPlan'
 
 export const runtime = 'nodejs'
 
-async function hasProcessedEvent(eventId: string) {
-  const supabase = supabaseAdmin()
-  const { data, error } = await supabase
-    .from('stripe_webhook_events')
-    .select('event_id')
-    .eq('event_id', eventId)
-    .maybeSingle()
-  if (error) {
-    throw new Error(error.message)
-  }
-  return Boolean((data as { event_id?: string } | null)?.event_id)
+type ClaimResult = 'claimed' | 'duplicate'
+
+export type StripeWebhookIdempotencyDeps = {
+  claimEvent: (event: Stripe.Event) => Promise<ClaimResult>
+  markDone: (event: Stripe.Event) => Promise<void>
+  markFailed: (event: Stripe.Event) => Promise<void>
 }
 
-async function markEventProcessed(event: Stripe.Event) {
+type StripeWebhookProcessorDeps = StripeWebhookIdempotencyDeps & {
+  handleCheckoutSessionCompleted: (event: Stripe.Event) => Promise<void>
+  handleSubscriptionUpdatedOrDeleted: (event: Stripe.Event) => Promise<void>
+}
+
+async function claimEvent(event: Stripe.Event): Promise<ClaimResult> {
+  const supabase = supabaseAdmin()
+  const { error } = await supabase.from('processed_stripe_events').insert({
+    event_id: event.id,
+    event_type: event.type,
+    status: 'processing',
+  })
+
+  if (!error) return 'claimed'
+  if (error.code === '23505') return 'duplicate'
+  throw new Error(error.message)
+}
+
+async function markEventStatus(event: Stripe.Event, status: 'done' | 'failed') {
   const supabase = supabaseAdmin()
   const { error } = await supabase
-    .from('stripe_webhook_events')
-    .upsert(
-      {
-        event_id: event.id,
-        type: event.type,
-      },
-      { onConflict: 'event_id' }
-    )
+    .from('processed_stripe_events')
+    .update({ status, event_type: event.type })
+    .eq('event_id', event.id)
 
   if (error) {
     throw new Error(error.message)
   }
+}
+
+async function markDone(event: Stripe.Event) {
+  await markEventStatus(event, 'done')
+}
+
+async function markFailed(event: Stripe.Event) {
+  await markEventStatus(event, 'failed')
 }
 
 function unixSecondsToIso(value: number | null | undefined) {
@@ -42,6 +59,17 @@ function unixSecondsToIso(value: number | null | undefined) {
 
 function getSubscriptionCurrentPeriodEnd(subscription: Stripe.Subscription) {
   return subscription.items.data[0]?.current_period_end ?? null
+}
+
+function resolveStudentPremiumStatus(status: string, currentPeriodEndIso: string | null) {
+  const normalized = status.trim().toLowerCase()
+  if (normalized === 'active' || normalized === 'trialing') return 'active'
+  if (normalized === 'canceled') {
+    if (currentPeriodEndIso && new Date(currentPeriodEndIso).getTime() > Date.now()) return 'canceled'
+    return 'expired'
+  }
+  if (normalized === 'past_due' || normalized === 'unpaid' || normalized === 'incomplete') return 'canceled'
+  return 'expired'
 }
 
 async function resolveUserIdForCustomer(stripeCustomerId: string) {
@@ -110,6 +138,39 @@ async function upsertSubscription(params: {
     .eq('employer_id', userId)
 }
 
+async function upsertStudentPremiumStatus(params: {
+  userId: string
+  stripeSubscriptionId: string
+  stripeCustomerId: string | null
+  status: string
+  currentPeriodEnd: string | null
+}) {
+  const supabase = supabaseAdmin()
+  const { userId, stripeSubscriptionId, stripeCustomerId, status, currentPeriodEnd } = params
+
+  const nextStatus = resolveStudentPremiumStatus(status, currentPeriodEnd)
+  const activeSince = nextStatus === 'active' ? new Date().toISOString() : null
+
+  const { error } = await supabase.from('student_premium_status').upsert(
+    {
+      user_id: userId,
+      status: nextStatus,
+      stripe_subscription_id: stripeSubscriptionId,
+      stripe_customer_id: stripeCustomerId,
+      active_since: activeSince,
+      current_period_end: currentPeriodEnd,
+      trial_started_at: null,
+      trial_expires_at: null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' }
+  )
+
+  if (error) {
+    throw new Error(error.message)
+  }
+}
+
 async function handleCheckoutSessionCompleted(event: Stripe.Event) {
   const session = event.data.object as Stripe.Checkout.Session
   if (session.mode !== 'subscription') {
@@ -148,13 +209,26 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event) {
   if (!userId) {
     return
   }
+  const currentPeriodEnd = unixSecondsToIso(getSubscriptionCurrentPeriodEnd(subscription))
+  const planKey = subscription.metadata?.plan_key ?? session.metadata?.plan_key ?? null
+
+  if (planKey === STUDENT_PREMIUM_PLAN_KEY) {
+    await upsertStudentPremiumStatus({
+      userId,
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId: stripeCustomerIdFromSubscription ?? null,
+      status: subscription.status,
+      currentPeriodEnd,
+    })
+    return
+  }
 
   await upsertSubscription({
     userId,
     stripeSubscriptionId: subscription.id,
     status: subscription.status,
     priceId: subscription.items.data[0]?.price.id ?? null,
-    currentPeriodEnd: unixSecondsToIso(getSubscriptionCurrentPeriodEnd(subscription)),
+    currentPeriodEnd,
   })
 }
 
@@ -170,13 +244,63 @@ async function handleSubscriptionUpdatedOrDeleted(event: Stripe.Event) {
     return
   }
 
+  const currentPeriodEnd = unixSecondsToIso(getSubscriptionCurrentPeriodEnd(subscription))
+  const planKey = subscription.metadata?.plan_key ?? null
+
+  if (planKey === STUDENT_PREMIUM_PLAN_KEY) {
+    await upsertStudentPremiumStatus({
+      userId,
+      stripeSubscriptionId: subscription.id,
+      stripeCustomerId,
+      status: subscription.status,
+      currentPeriodEnd,
+    })
+    return
+  }
+
   await upsertSubscription({
     userId,
     stripeSubscriptionId: subscription.id,
     status: subscription.status,
     priceId: subscription.items.data[0]?.price.id ?? null,
-    currentPeriodEnd: unixSecondsToIso(getSubscriptionCurrentPeriodEnd(subscription)),
+    currentPeriodEnd,
   })
+}
+
+export async function processStripeWebhookEvent(
+  event: Stripe.Event,
+  deps: StripeWebhookProcessorDeps = {
+    claimEvent,
+    markDone,
+    markFailed,
+    handleCheckoutSessionCompleted,
+    handleSubscriptionUpdatedOrDeleted,
+  }
+) {
+  const claimResult = await deps.claimEvent(event)
+  if (claimResult === 'duplicate') {
+    return { duplicate: true as const }
+  }
+
+  try {
+    if (event.type === 'checkout.session.completed') {
+      await deps.handleCheckoutSessionCompleted(event)
+    }
+
+    if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
+      await deps.handleSubscriptionUpdatedOrDeleted(event)
+    }
+
+    await deps.markDone(event)
+    return { duplicate: false as const }
+  } catch (error) {
+    try {
+      await deps.markFailed(event)
+    } catch {
+      // Preserve original processing error when failure status cannot be written.
+    }
+    throw error
+  }
 }
 
 export async function POST(request: Request) {
@@ -204,19 +328,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (await hasProcessedEvent(event.id)) {
+    const result = await processStripeWebhookEvent(event)
+    if (result.duplicate) {
       return Response.json({ received: true, duplicate: true })
     }
-
-    if (event.type === 'checkout.session.completed') {
-      await handleCheckoutSessionCompleted(event)
-    }
-
-    if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
-      await handleSubscriptionUpdatedOrDeleted(event)
-    }
-
-    await markEventProcessed(event)
 
     return Response.json({ received: true })
   } catch (error) {

@@ -128,9 +128,12 @@ export async function getCommuteMinutesForListings(params: {
   origin: OriginInput
   transportMode?: string | null
   destinations: DestinationInput[]
+  requirePrecisePoints?: boolean
 }) {
-  const { supabase, userId, origin, transportMode, destinations } = params
+  const { supabase, userId, origin, transportMode, destinations, requirePrecisePoints = false } = params
   const normalizedMode = normalizeTransportMode(transportMode)
+
+  if (requirePrecisePoints && !origin.point) return new Map<string, number>()
 
   const originToken = locationToken({ point: origin.point ?? null, city: origin.city, state: origin.state, zip: origin.zip })
   if (!originToken) return new Map<string, number>()
@@ -142,6 +145,7 @@ export async function getCommuteMinutesForListings(params: {
     if (isRemote(destinationInput.workMode)) continue
 
     const destination = buildDestination(destinationInput)
+    if (requirePrecisePoints && !destination.point) continue
     const destinationToken = locationToken(destination)
     if (!destinationToken) continue
 

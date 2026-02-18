@@ -86,10 +86,12 @@ export default function SiteHeader({
   const profilePageActive = pathname.startsWith('/profile')
   const adminActive = pathname.startsWith('/admin')
   const applicationsActive = pathname.startsWith('/applications')
-  const dashboardActive = pathname.startsWith('/dashboard/employer')
+  const employerDashboardActive = pathname.startsWith('/dashboard/employer')
+  const studentDashboardActive = pathname.startsWith('/student/dashboard') || pathname.startsWith('/dashboard/student')
   const employersActive = pathname.startsWith('/signup/employer') || pathname.startsWith('/for-employers')
   const loginActive = pathname.startsWith('/login')
-  const upgradeActive = pathname.startsWith('/upgrade')
+  const employerUpgradeActive = pathname.startsWith('/upgrade')
+  const studentUpgradeActive = pathname.startsWith('/student/upgrade')
   const isAdmin = isAdminRole(role)
   const showVerificationBanner = isAuthenticated && !isEmailVerified
   const inboxHref = role === 'employer' ? '/dashboard/employer/applicants' : '/inbox'
@@ -403,7 +405,13 @@ export default function SiteHeader({
               </form>
 
               {isAuthenticated && role === 'employer' ? (
-                <Link href="/dashboard/employer" className={navClasses(dashboardActive)}>
+                <Link href="/dashboard/employer" className={navClasses(employerDashboardActive)}>
+                  <LayoutDashboard className="h-4 w-4" />
+                  Dashboard
+                </Link>
+              ) : null}
+              {isAuthenticated && role === 'student' ? (
+                <Link href="/student/dashboard" className={navClasses(studentDashboardActive)}>
                   <LayoutDashboard className="h-4 w-4" />
                   Dashboard
                 </Link>
@@ -417,7 +425,13 @@ export default function SiteHeader({
               ) : null}
 
               {isAuthenticated && role === 'employer' ? (
-                <Link href="/upgrade" className={navClasses(upgradeActive)}>
+                <Link href="/upgrade" className={navClasses(employerUpgradeActive)}>
+                  <ShieldCheck className="h-4 w-4 text-amber-500" />
+                  Upgrade
+                </Link>
+              ) : null}
+              {isAuthenticated && role === 'student' ? (
+                <Link href="/student/upgrade" className={navClasses(studentUpgradeActive)}>
                   <ShieldCheck className="h-4 w-4 text-amber-500" />
                   Upgrade
                 </Link>
@@ -551,11 +565,23 @@ export default function SiteHeader({
                 )}
                 {isAuthenticated && role === 'employer' ? (
                   <>
-                    <Link href="/dashboard/employer" className={navClasses(dashboardActive)}>
+                    <Link href="/dashboard/employer" className={navClasses(employerDashboardActive)}>
                       <LayoutDashboard className="h-4 w-4" />
                       Dashboard
                     </Link>
-                    <Link href="/upgrade" className={navClasses(upgradeActive)}>
+                    <Link href="/upgrade" className={navClasses(employerUpgradeActive)}>
+                      <ShieldCheck className="h-4 w-4 text-amber-500" />
+                      Upgrade
+                    </Link>
+                  </>
+                ) : null}
+                {isAuthenticated && role === 'student' ? (
+                  <>
+                    <Link href="/student/dashboard" className={navClasses(studentDashboardActive)}>
+                      <LayoutDashboard className="h-4 w-4" />
+                      Dashboard
+                    </Link>
+                    <Link href="/student/upgrade" className={navClasses(studentUpgradeActive)}>
                       <ShieldCheck className="h-4 w-4 text-amber-500" />
                       Upgrade
                     </Link>

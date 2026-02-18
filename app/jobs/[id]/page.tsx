@@ -11,7 +11,7 @@ import EmployerVerificationBadge from '@/components/badges/EmployerVerificationB
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getCommuteMinutesForListings, toGeoPoint } from '@/lib/commute'
 import { supabaseServer } from '@/lib/supabase/server'
-import { evaluateInternshipMatch, parseMajors } from '@/lib/matching'
+import { evaluateInternshipMatch, MATCH_SIGNAL_DEFINITIONS, parseMajors } from '@/lib/matching'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
@@ -148,10 +148,13 @@ function isSchemaDriftError(message: string | null | undefined) {
 
 export default async function JobDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams?: Promise<{ debug_match?: string }>
 }) {
   const { id } = await params
+  const resolvedSearchParams = searchParams ? await searchParams : undefined
   const supabase = await supabaseServer()
 
   const {
@@ -176,9 +179,9 @@ export default async function JobDetailPage({
   }
 
   const listingSelectRich =
-        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
   const listingSelectBase =
-    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, experience_level, target_student_year, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
+    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
 
   const { data: richListing, error: richListingError } = await supabase
     .from('internships')
@@ -222,7 +225,20 @@ export default async function JobDetailPage({
       : null
   }
 
-  let matchBreakdown: { scorePercent: number; reasons: string[]; gaps: string[] } | null = null
+  let matchBreakdown:
+    | {
+        scorePercent: number
+        reasons: string[]
+        gaps: string[]
+        signalContributions?: Array<{
+          signalKey: string
+          pointsAwarded: number
+          rawMatchValue: number
+          weight: number
+          evidence: string[]
+        }>
+      }
+    | null = null
   let insufficientMatchData = true
   let missingMatchFields: string[] = []
   let missingSkillSignals = false
@@ -302,7 +318,9 @@ export default async function JobDetailPage({
         description: listing.description,
         majors: listing.majors,
         target_graduation_years: listing.target_graduation_years ?? null,
-        experience_level: listing.experience_level ?? null,
+        experience_level: (listing as { target_student_year?: string | null }).target_student_year ?? listing.experience_level ?? null,
+        target_student_year: (listing as { target_student_year?: string | null }).target_student_year ?? listing.experience_level ?? null,
+        desired_coursework_strength: (listing as { desired_coursework_strength?: string | null }).desired_coursework_strength ?? null,
         hours_per_week: listing.hours_per_week,
         location: listing.location,
         category: listing.role_category ?? null,
@@ -360,7 +378,9 @@ export default async function JobDetailPage({
         preferred_locations: preferenceSignals.preferredLocations,
         preferred_work_modes: preferenceSignals.preferredWorkModes,
         remote_only: preferenceSignals.remoteOnly,
-      }
+      },
+      undefined,
+      { explain: true }
     )
 
     if (process.env.MATCHING_DEBUG_PIPELINE === '1') {
@@ -384,6 +404,13 @@ export default async function JobDetailPage({
       scorePercent: match.score,
       reasons: match.reasons,
       gaps: match.gaps,
+      signalContributions: match.breakdown?.perSignalContributions.map((item) => ({
+        signalKey: item.signalKey,
+        pointsAwarded: item.pointsAwarded,
+        rawMatchValue: item.rawMatchValue,
+        weight: item.weight,
+        evidence: item.evidence,
+      })),
     }
 
     maxCommuteMinutes = typeof profile?.max_commute_minutes === 'number' ? profile.max_commute_minutes : null
@@ -411,7 +438,7 @@ export default async function JobDetailPage({
     if (listing.employer_id) {
       const { data: employerProfile } = await supabase
         .from('employer_profiles')
-        .select('location')
+        .select('location, location_lat, location_lng')
         .eq('user_id', listing.employer_id)
         .maybeSingle()
       if (employerProfile) {
@@ -420,7 +447,10 @@ export default async function JobDetailPage({
           city: parsed.city,
           state: parsed.state,
           zip: null,
-          point: null,
+          point: toGeoPoint(
+            typeof employerProfile.location_lat === 'number' ? employerProfile.location_lat : null,
+            typeof employerProfile.location_lng === 'number' ? employerProfile.location_lng : null
+          ),
         }
       }
     }
@@ -437,13 +467,17 @@ export default async function JobDetailPage({
           city: listing.location_city ?? null,
           state: listing.location_state ?? null,
           zip: null,
-          point: null,
+          point: toGeoPoint(
+            typeof listing.location_lat === 'number' ? listing.location_lat : null,
+            typeof listing.location_lng === 'number' ? listing.location_lng : null
+          ),
           fallbackCity: fallbackEmployerLocation?.city ?? listing.location_city,
           fallbackState: fallbackEmployerLocation?.state ?? listing.location_state,
           fallbackZip: fallbackEmployerLocation?.zip ?? null,
           fallbackPoint: fallbackEmployerLocation?.point ?? null,
         },
       ],
+      requirePrecisePoints: true,
     })
 
     commuteMinutes = commuteMap.get(listing.id) ?? null
@@ -490,6 +524,7 @@ export default async function JobDetailPage({
   const employerResponseRate =
     typeof responseStatsRow?.viewed_within_7d_rate === 'number' ? responseStatsRow.viewed_within_7d_rate : null
   const scoreUi = scoreLabel(matchBreakdown?.scorePercent ?? null, insufficientMatchData, missingSkillSignals)
+  const showMatchDebug = resolvedSearchParams?.debug_match === '1'
   const screeningQuestion = parseScreeningQuestion(listing.description)
   const scoreToneClasses =
     scoreUi.tone === 'high'
@@ -513,9 +548,10 @@ export default async function JobDetailPage({
       ? 'Low'
       : String(Math.round(matchBreakdown?.scorePercent ?? 0))
   const deadlineDate = listing.application_deadline ? new Date(listing.application_deadline) : null
+  const nowMs = new Date().getTime()
   const daysToDeadline =
     deadlineDate && Number.isFinite(deadlineDate.getTime())
-      ? Math.ceil((deadlineDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+      ? Math.ceil((deadlineDate.getTime() - nowMs) / (1000 * 60 * 60 * 24))
       : null
   const deadlinePassed = typeof daysToDeadline === 'number' && daysToDeadline < 0
   const isDeadlineSoon = typeof daysToDeadline === 'number' && daysToDeadline >= 0 && daysToDeadline <= 14
@@ -787,6 +823,51 @@ export default async function JobDetailPage({
                         <p className="mt-2 text-sm text-slate-600">No major gaps detected.</p>
                       )}
                     </div>
+
+                    {showMatchDebug && matchBreakdown.signalContributions && matchBreakdown.signalContributions.length > 0 ? (
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                          <FileText className="h-3.5 w-3.5" />
+                          Score factors (debug)
+                        </div>
+                        <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
+                          <table className="min-w-full divide-y divide-slate-200 text-xs">
+                            <thead className="bg-slate-50 text-slate-600">
+                              <tr>
+                                <th className="px-3 py-2 text-left font-semibold">Signal</th>
+                                <th className="px-3 py-2 text-left font-semibold">Points</th>
+                                <th className="px-3 py-2 text-left font-semibold">Raw</th>
+                                <th className="px-3 py-2 text-left font-semibold">Weight</th>
+                                <th className="px-3 py-2 text-left font-semibold">Evidence</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                              {matchBreakdown.signalContributions
+                                .slice()
+                                .sort((a, b) => Math.abs(b.pointsAwarded) - Math.abs(a.pointsAwarded))
+                                .map((item) => {
+                                  const definition = MATCH_SIGNAL_DEFINITIONS[item.signalKey as keyof typeof MATCH_SIGNAL_DEFINITIONS]
+                                  return (
+                                    <tr key={item.signalKey}>
+                                      <td className="px-3 py-2">{definition?.label ?? item.signalKey}</td>
+                                      <td className={`px-3 py-2 font-semibold ${item.pointsAwarded < 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                        {item.pointsAwarded > 0 ? '+' : ''}
+                                        {item.pointsAwarded.toFixed(2)}
+                                      </td>
+                                      <td className="px-3 py-2">{item.rawMatchValue.toFixed(2)}</td>
+                                      <td className="px-3 py-2">{item.weight.toFixed(2)}</td>
+                                      <td className="px-3 py-2">{item.evidence.slice(0, 2).join(' | ') || 'n/a'}</td>
+                                    </tr>
+                                  )
+                                })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Developer diagnostics enabled via <code>?debug_match=1</code>.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               )}

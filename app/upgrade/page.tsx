@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
+import { redirect } from 'next/navigation'
 import {
   createBillingPortalSessionAction,
   startProEmployerCheckoutAction,
@@ -70,6 +71,9 @@ export default async function UpgradePage({
   }
 
   const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle()
+  if (userRow?.role === 'student') {
+    redirect('/student/upgrade')
+  }
   if (userRow?.role !== 'employer') {
     return (
       <main className="min-h-screen bg-slate-50">

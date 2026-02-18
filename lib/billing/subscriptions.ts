@@ -12,7 +12,7 @@ export function isVerifiedEmployerStatus(status: string | null | undefined) {
 export function resolveEmployerPlanId(params: { status: string | null | undefined; priceId: string | null | undefined }): EmployerPlanId {
   const { status, priceId } = params
   if (!isVerifiedEmployerStatus(status)) return 'free'
-  if (!priceId) return 'starter'
+  if (!priceId) return 'free'
 
   const starterPriceId = getOptionalPriceIdForPlan('starter')
   const proPriceId = getOptionalPriceIdForPlan('pro')
@@ -20,7 +20,7 @@ export function resolveEmployerPlanId(params: { status: string | null | undefine
 
   if ((proPriceId && priceId === proPriceId) || (legacyGrowthPriceId && priceId === legacyGrowthPriceId)) return 'pro'
   if (starterPriceId && priceId === starterPriceId) return 'starter'
-  return 'starter'
+  return 'free'
 }
 
 export function resolveEmployerPlan(params: { status: string | null | undefined; priceId: string | null | undefined }): EmployerPlan {

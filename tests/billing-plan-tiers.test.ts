@@ -25,7 +25,7 @@ test('price_id maps to starter/pro with backwards compatibility', () => {
     assert.equal(resolveEmployerPlanId({ status: 'active', priceId: 'price_pro_new' }), 'pro')
     assert.equal(resolveEmployerPlanId({ status: 'active', priceId: 'price_growth_legacy' }), 'pro')
     assert.equal(resolveEmployerPlanId({ status: 'active', priceId: 'price_starter_legacy' }), 'starter')
-    assert.equal(resolveEmployerPlanId({ status: 'trialing', priceId: 'unknown_price' }), 'starter')
+    assert.equal(resolveEmployerPlanId({ status: 'trialing', priceId: 'unknown_price' }), 'free')
     assert.equal(resolveEmployerPlanId({ status: 'canceled', priceId: 'price_pro_new' }), 'free')
   } finally {
     if (previousStarter === undefined) delete process.env.STARTER_PRICE_ID

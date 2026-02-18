@@ -1,5 +1,17 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Runtime Requirements
+
+- Node.js `22.11.0` (see `.nvmrc`)
+- npm `>=10`
+
+Recommended setup:
+
+```bash
+nvm use
+npm ci
+```
+
 ## Getting Started
 
 First, run the development server:

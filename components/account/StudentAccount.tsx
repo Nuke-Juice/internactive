@@ -1012,6 +1012,23 @@ function addCourseworkItem(value: string) {
 
       resumePath = resumePathForStorage
       resumeName = resumeFile.name
+
+      const analysisResponse = await fetch('/api/student/resume/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storagePath: resumePathForStorage,
+          originalFilename: resumeFile.name,
+          mimeType: resumeFile.type || 'application/pdf',
+          fileSize: resumeFile.size,
+        }),
+      })
+      if (!analysisResponse.ok) {
+        const payload = (await analysisResponse.json().catch(() => null)) as { error?: string } | null
+        setSaving(false)
+        setError(payload?.error ?? 'Resume uploaded but analysis could not start. Please try again.')
+        return
+      }
     }
 
     const fullName = `${firstName.trim()} ${lastName.trim()}`.trim()

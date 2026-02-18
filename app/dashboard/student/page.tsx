@@ -1,5 +1,5 @@
 import { permanentRedirect } from 'next/navigation'
 
-export default async function StudentDashboardPage() {
-  permanentRedirect('/')
+export default async function LegacyStudentDashboardPage() {
+  permanentRedirect('/student/dashboard')
 }

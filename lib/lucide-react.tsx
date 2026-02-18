@@ -116,6 +116,26 @@ export function LayoutDashboard(props: IconProps) {
   )
 }
 
+export function BarChart3(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M3 3v18h18" />
+      <path d="M7 16v-4" />
+      <path d="M12 16V8" />
+      <path d="M17 16v-7" />
+    </svg>
+  )
+}
+
 export function Users(props: IconProps) {
   return (
     <svg

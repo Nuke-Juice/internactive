@@ -1,8 +1,26 @@
 import { NextResponse } from 'next/server'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { supabaseServer } from '@/lib/supabase/server'
+import { checkRateLimitForRequest, getClientIp, isSameOriginRequest } from '@/lib/security/requestProtection'
 
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) {
+    return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 })
+  }
+
+  const ip = getClientIp(request)
+  const ipLimit = await checkRateLimitForRequest({
+    key: `analytics_event:ip:${ip}`,
+    limit: 180,
+    windowMs: 60 * 1000,
+  })
+  if (!ipLimit.ok) {
+    return NextResponse.json(
+      { error: 'Too many requests. Try again later.' },
+      { status: 429, headers: { 'Retry-After': String(ipLimit.retryAfterSeconds) } }
+    )
+  }
+
   let body: unknown
   try {
     body = await request.json()

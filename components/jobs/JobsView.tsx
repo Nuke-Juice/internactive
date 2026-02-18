@@ -78,7 +78,7 @@ const SORT_CONFIG: Record<SortMode, { label: string; matchingSignals: string[] }
   },
 }
 
-function normalizeSort(value: string | undefined, _isStudent: boolean): SortMode {
+function normalizeSort(value: string | undefined): SortMode {
   if (value === 'best_match' || value === 'newest') {
     return value
   }
@@ -106,6 +106,20 @@ function parseCityState(value: string | null | undefined) {
     city: cityRaw || null,
     state: state && state.length === 2 ? state : null,
   }
+}
+
+function isStudentProfileSchemaDrift(message: string | null | undefined) {
+  const normalized = (message ?? '').toLowerCase()
+  return normalized.includes('schema cache') || (normalized.includes('column') && normalized.includes('student_profiles'))
+}
+
+function seasonFromMonth(value: string | null | undefined) {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized.startsWith('jun') || normalized.startsWith('jul') || normalized.startsWith('aug')) return 'summer'
+  if (normalized.startsWith('sep') || normalized.startsWith('oct') || normalized.startsWith('nov')) return 'fall'
+  if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
+  if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
+  return ''
 }
 
 function canonicalMajorName(value: unknown) {
@@ -387,8 +401,7 @@ export default async function JobsView({
       .eq('user_id', user.id)
       .maybeSingle()
     const profile =
-      profileResult.error &&
-      profileResult.error.message.toLowerCase().includes('schema cache')
+      profileResult.error && isStudentProfileSchemaDrift(profileResult.error.message)
         ? (
             await supabase
               .from('student_profiles')
@@ -486,7 +499,7 @@ export default async function JobsView({
   }
 
   const isStudent = role === 'student'
-  activeSortMode = normalizeSort(requestedSortRaw, isStudent)
+  activeSortMode = normalizeSort(requestedSortRaw)
 
   const filteredCandidates = internships.filter((listing) => matchesListingFilters(listing, filters))
 
@@ -504,7 +517,7 @@ export default async function JobsView({
         experience_level: listing.target_student_year ?? listing.experience_level,
         target_student_year: listing.target_student_year ?? listing.experience_level,
         desired_coursework_strength: listing.desired_coursework_strength ?? null,
-        category: listing.role_category ?? listing.category ?? null,
+        category: listing.role_category ?? null,
         hours_per_week: listing.hours_per_week,
         location: listing.location,
         work_mode: listing.work_mode,
@@ -539,7 +552,9 @@ export default async function JobsView({
         preferred_terms:
           preferenceSignals.preferredTerms.length > 0
             ? preferenceSignals.preferredTerms
-            : [],
+            : profileAvailabilityStartMonth
+              ? [seasonFromMonth(profileAvailabilityStartMonth)]
+              : [],
         preferred_locations: preferenceSignals.preferredLocations,
         preferred_work_modes: preferenceSignals.preferredWorkModes,
         remote_only: preferenceSignals.remoteOnly,
@@ -593,9 +608,9 @@ export default async function JobsView({
       employerIds.length > 0
         ? await supabase
             .from('employer_profiles')
-            .select('user_id, location, avatar_url')
+            .select('user_id, location, location_lat, location_lng, avatar_url')
             .in('user_id', employerIds)
-        : { data: [] as Array<{ user_id: string; location: string | null; avatar_url: string | null }> }
+        : { data: [] as Array<{ user_id: string; location: string | null; location_lat: number | null; location_lng: number | null; avatar_url: string | null }> }
 
     const employerLocationById = new Map(
       (employerProfiles ?? []).map((row) => {
@@ -606,7 +621,10 @@ export default async function JobsView({
             city: parsed.city,
             state: parsed.state,
             zip: null as string | null,
-            point: null as { lat: number; lng: number } | null,
+            point: toGeoPoint(
+              typeof row.location_lat === 'number' ? row.location_lat : null,
+              typeof row.location_lng === 'number' ? row.location_lng : null
+            ),
           },
         ]
       })
@@ -630,13 +648,17 @@ export default async function JobsView({
           city: listing.location_city ?? null,
           state: listing.location_state ?? null,
           zip: null,
-          point: null,
+          point: toGeoPoint(
+            typeof listing.location_lat === 'number' ? listing.location_lat : null,
+            typeof listing.location_lng === 'number' ? listing.location_lng : null
+          ),
           fallbackCity: employerLocation?.city ?? listing.location_city,
           fallbackState: employerLocation?.state ?? listing.location_state,
           fallbackZip: employerLocation?.zip ?? null,
           fallbackPoint: employerLocation?.point ?? null,
         }
       }),
+      requirePrecisePoints: true,
     })
 
     for (const [internshipId, minutes] of commuteMap.entries()) {
