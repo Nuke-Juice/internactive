@@ -75,6 +75,9 @@ export function validateListingForPublish(
   const majors = parseMajors(input.majors)
   const shortSummary = normalizeText(input.shortSummary)
   const description = normalizeText(input.description)
+  const requiredCourseCategoryIds = (input.requiredCourseCategoryIds ?? [])
+    .map((item) => normalizeText(item))
+    .filter(Boolean)
   const payText = normalizeText(input.payText)
   const hasNumericPay = typeof input.payMinHourly === 'number' || typeof input.payMaxHourly === 'number'
   const hasHoursMin = typeof input.hoursMin === 'number' && Number.isFinite(input.hoursMin)
@@ -98,6 +101,7 @@ export function validateListingForPublish(
   if (majors.length === 0) return { ok: false, code: LISTING_PUBLISH_ERROR.MAJORS_REQUIRED }
   if (!shortSummary) return { ok: false, code: LISTING_PUBLISH_ERROR.SHORT_SUMMARY_REQUIRED }
   if (!description) return { ok: false, code: LISTING_PUBLISH_ERROR.DESCRIPTION_REQUIRED }
+  if (requiredCourseCategoryIds.length === 0) return { ok: false, code: LISTING_PUBLISH_ERROR.COURSE_CATEGORIES_REQUIRED }
   const applyMode = normalizeText(input.applyMode).toLowerCase()
   if ((applyMode === 'ats_link' || applyMode === 'hybrid') && !normalizeText(input.externalApplyUrl)) {
     return { ok: false, code: LISTING_PUBLISH_ERROR.EXTERNAL_APPLY_URL_REQUIRED }

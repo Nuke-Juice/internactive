@@ -1,0 +1,65 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+6 0 obj
+<< /Length 2931 >>
+stream
+1 1 1 rg 0 0 612 792 re f
+0 0 0 rg
+BT /F2 18 Tf 48 752 Td (Internactive App Summary) Tj ET
+BT /F2 12 Tf 48 720 Td (What it is) Tj ET
+BT /F1 10.5 Tf 48 703 Td (Internactive is a browse-first internship marketplace built with Next.js and Supabase.) Tj ET
+BT /F1 10.5 Tf 48 689 Td (Students discover and apply to internships, while employers publish roles and manage applicants.) Tj ET
+BT /F2 12 Tf 48 667 Td (Who it is for) Tj ET
+BT /F1 10.5 Tf 48 650 Td (Primary users: college students seeking internships and employers hiring interns.) Tj ET
+BT /F2 12 Tf 48 628 Td (What it does) Tj ET
+BT /F1 10.2 Tf 48 611 Td (- Public internship feed with filters \(category, pay, remote, experience, hours, location/radius\).) Tj ET
+BT /F1 10.2 Tf 48 598 Td (- Student onboarding captures profile signals \(majors, coursework, preferences\) for better ranking.) Tj ET
+BT /F1 10.2 Tf 48 585 Td (- Match scoring and ranking using canonical skills/coursework plus eligibility constraints.) Tj ET
+BT /F1 10.2 Tf 48 572 Td (- Employer dashboard for posting internships and reviewing applicants with inbox controls.) Tj ET
+BT /F1 10.2 Tf 48 559 Td (- Apply flows support native apply and external ATS links, with analytics event tracking.) Tj ET
+BT /F1 10.2 Tf 48 546 Td (- Admin tools include internships/employers/students views and matching preview/report routes.) Tj ET
+BT /F1 10.2 Tf 48 533 Td (- Stripe billing webhooks update employer verification and student premium subscription status.) Tj ET
+BT /F2 12 Tf 48 512 Td (How it works \(repo-evidenced architecture\)) Tj ET
+BT /F1 10.2 Tf 48 495 Td (- Frontend: Next.js App Router pages in /app plus shared UI/components.) Tj ET
+BT /F1 10.2 Tf 48 482 Td (- App services: server-side route handlers in /app/api for analytics, auth, resume, coursework, billing.) Tj ET
+BT /F1 10.2 Tf 48 469 Td (- Data + auth: Supabase SSR client for user/session queries; service-role client for admin/webhook writes.) Tj ET
+BT /F1 10.2 Tf 48 456 Td (- Matching engine: lib/matching.ts; JobsView fetches internships, builds profile signals, then ranks.) Tj ET
+BT /F1 10.2 Tf 48 443 Td (- Billing flow: Stripe -> /api/stripe/webhook -> Supabase tables \(processed_stripe_events, subscriptions, profiles\).) Tj ET
+BT /F1 10.2 Tf 48 430 Td (- Protected admin flow: middleware role-checks users.role and gates /admin routes.) Tj ET
+BT /F2 12 Tf 48 409 Td (How to run \(minimal\)) Tj ET
+BT /F1 10.2 Tf 48 392 Td (1. Use Node 22.11.0 and npm >=10 \(see .nvmrc and package.json engines\).) Tj ET
+BT /F1 10.2 Tf 48 379 Td (2. Install deps: npm ci) Tj ET
+BT /F1 10.2 Tf 48 366 Td (3. Create env file: copy .env.example to .env.local and fill Supabase/Stripe values.) Tj ET
+BT /F1 10.2 Tf 48 353 Td (4. Start app: npm run dev, then open http://localhost:3000) Tj ET
+BT /F1 10.2 Tf 48 340 Td (5. Optional verification: npm test) Tj ET
+BT /F1 10.2 Tf 48 327 Td (6. Local DB bootstrap/seed workflow: Not found in repo.) Tj ET
+endstream
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000251 00000 n 
+0000000321 00000 n 
+0000000396 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+3379
+%%EOF

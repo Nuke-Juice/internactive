@@ -65,11 +65,36 @@ function parseList(value: string) {
 }
 
 function normalizeShortSummary(value: string) {
-  const cleaned = value
-    .replace(/\s+/g, ' ')
-    .replace(/^[\s•\-–—]+/, '')
-    .trim()
-  return cleaned
+  return value
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line, index) => {
+      const compact = line.replace(/\s+/g, ' ').trim()
+      if (index === 0) {
+        return compact.replace(/^[•\-–—\s]+/, '')
+      }
+      return compact
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function normalizeDateInputValue(value: unknown) {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const directMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (directMatch?.[1]) return directMatch[1]
+  const parsed = new Date(trimmed)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toISOString().slice(0, 10)
+}
+
+function deriveDurationWeeksFromTerm(term: unknown) {
+  if (typeof term !== 'string') return '12'
+  const match = term.match(/(\d{1,2})\s*weeks?/i)
+  if (!match?.[1]) return '12'
+  return match[1]
 }
 
 function sanitizeErrorDetails(value: string | undefined) {
@@ -207,7 +232,7 @@ function getCreateInternshipError(searchParams?: {
     return withField('At least one major is required for publish.', 'majors' as const)
   }
   if (code === LISTING_PUBLISH_ERROR.SHORT_SUMMARY_REQUIRED) {
-    return withField('Add a short summary for listing cards.', 'short_summary' as const)
+    return withField('Add a role overview before publishing.', 'short_summary' as const)
   }
   if (code === LISTING_PUBLISH_ERROR.DESCRIPTION_REQUIRED) {
     return withField('Description is required for publish.', 'description' as const)
@@ -360,7 +385,7 @@ export default async function EmployerDashboardPage({
     ? await supabase
         .from('internships')
         .select(
-          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, external_apply_url, external_apply_type, term, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
+          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, external_apply_url, external_apply_type, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
         )
         .eq('id', editingInternshipId)
         .eq('employer_id', user.id)
@@ -569,6 +594,7 @@ export default async function EmployerDashboardPage({
     const startYear = String(formData.get('start_year') ?? '').trim()
     const endMonth = String(formData.get('end_month') ?? '').trim()
     const endYear = String(formData.get('end_year') ?? '').trim()
+    const startDate = normalizeDateInputValue(String(formData.get('start_date') ?? '').trim())
     const term = deriveTermFromRange(startMonth, startYear, endMonth, endYear) ?? ''
     const hoursMin = Number(String(formData.get('hours_min') ?? '').trim())
     const hoursMax = Number(String(formData.get('hours_max') ?? '').trim())
@@ -581,7 +607,7 @@ export default async function EmployerDashboardPage({
     )
     const requiredSkillIdsRaw = selectedRequiredSkillIds.join(',')
     const requiredCourseCategoryIdsRaw = selectedRequiredCourseCategoryIds.join(',')
-    const applicationDeadline = String(formData.get('application_deadline') ?? '').trim()
+    const applicationDeadline = normalizeDateInputValue(String(formData.get('application_deadline') ?? '').trim())
     const applyMode = normalizeApplyMode(String(formData.get('apply_mode') ?? 'native'))
     const externalApplyUrlInput = String(formData.get('external_apply_url') ?? '').trim()
     const externalApplyUrl = normalizeExternalApplyUrl(externalApplyUrlInput)
@@ -773,6 +799,7 @@ export default async function EmployerDashboardPage({
       external_apply_type: resolvedExternalApplyType,
       location_type: locationType,
       term,
+      start_date: startDate || null,
       hours_min: hoursMin,
       hours_max: hoursMax,
       hours_per_week: hoursMax,
@@ -1428,14 +1455,6 @@ export default async function EmployerDashboardPage({
           </div>
         </div>
 
-        {!createOnly && resolvedSearchParams?.published_id ? (
-          <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            Internship published.
-            <Link href={`/jobs/${encodeURIComponent(resolvedSearchParams.published_id)}`} className="ml-2 font-medium underline">
-              View listing
-            </Link>
-          </div>
-        ) : null}
         {!createOnly && publishedOwnerMismatchMessage ? (
           <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {publishedOwnerMismatchMessage}
@@ -1706,16 +1725,24 @@ export default async function EmployerDashboardPage({
                 payMax: String(editingInternship?.pay_max ?? '28'),
                 hoursMin: String(editingInternship?.hours_min ?? '15'),
                 hoursMax: String(editingInternship?.hours_max ?? '25'),
-                durationWeeks: '12',
-                startDate: '',
-                applicationDeadline: editingInternship?.application_deadline ?? editingInternship?.apply_deadline ?? '',
+                durationWeeks: deriveDurationWeeksFromTerm(editingInternship?.term),
+                startDate: normalizeDateInputValue(editingInternship?.start_date),
+                applicationDeadline:
+                  normalizeDateInputValue(editingInternship?.application_deadline) ||
+                  normalizeDateInputValue(editingInternship?.apply_deadline),
                 shortSummary: editingInternship?.short_summary ?? '',
                 description: editingInternship?.description ?? '',
                 responsibilities: Array.isArray(editingInternship?.responsibilities)
-                  ? editingInternship.responsibilities.map((item) => `- ${item}`).join('\n')
+                  ? editingInternship.responsibilities
+                      .map((item) => String(item).replace(/^[-*•\s]+/, '').trim())
+                      .filter(Boolean)
+                      .join('\n')
                   : '',
                 qualifications: Array.isArray(editingInternship?.qualifications)
-                  ? editingInternship.qualifications.map((item) => `- ${item}`).join('\n')
+                  ? editingInternship.qualifications
+                      .map((item) => String(item).replace(/^[-*•\s]+/, '').trim())
+                      .filter(Boolean)
+                      .join('\n')
                   : '',
                 screeningQuestion: '',
                 resumeRequired: editingInternship?.resume_required !== false,

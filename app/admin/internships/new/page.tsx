@@ -169,6 +169,7 @@ function validatePublishInput(params: {
   description: string
   locationCity: string
   locationState: string
+  requiredCourseCategoryIds: string[]
 }) {
   if (!params.category || !isValidCategory(params.category)) return 'Category is required to publish'
   const term = deriveTermFromRange(params.startMonth, params.startYear, params.endMonth, params.endYear)
@@ -187,6 +188,7 @@ function validatePublishInput(params: {
     majors: params.majors,
     shortSummary: params.shortSummary,
     description: params.description,
+    requiredCourseCategoryIds: params.requiredCourseCategoryIds,
   })
   if (!publishValidation.ok) return publishValidation.code
   if (
@@ -449,6 +451,7 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
           description,
           locationCity,
           locationState,
+          requiredCourseCategoryIds: [...selectedCourseworkCategoryIds, ...recommendedCourseworkCategories],
         })
 
     if (publishError) {

@@ -13,17 +13,21 @@ type Props = {
 }
 
 function splitToResponsibilityLines(value: string) {
-  return value
+  const normalized = value.replace(/\r\n/g, '\n').trim()
+  if (!normalized) return ['']
+  const lines = normalized
     .split('\n')
     .map((item) => item.trim())
-    .flatMap((item) => item.split(/[•;]+/))
-    .map((item) => item.trim())
     .filter(Boolean)
+  if (lines.length <= 1) {
+    return [normalized.replace(/^[-*•\s]+/, '').trim()]
+  }
+  return lines.map((item) => item.replace(/^[-*•\s]+/, '').trim()).filter(Boolean)
 }
 
 function sanitizeSummaryInput(value: string) {
   return value
-    .replace(/\s+/g, ' ')
+    .replace(/\r\n/g, '\n')
     .replace(/^[\s•\-–—]+/, '')
 }
 
@@ -34,83 +38,50 @@ export default function ListingStepDescription(props: Props) {
     <div className="space-y-4">
       <div>
         <label className="inline-flex items-center gap-1 text-sm font-medium text-slate-700">
-          Short summary
+          Role overview
           {props.fieldErrors?.short_summary ? <span className="inline-block h-2 w-2 rounded-full bg-red-500" aria-hidden="true" /> : null}
         </label>
         <textarea
           name="short_summary"
-          rows={2}
-          maxLength={200}
+          rows={4}
+          maxLength={600}
           value={props.shortSummary}
           onChange={(event) => props.onChange({ shortSummary: event.target.value })}
           onBlur={(event) => props.onChange({ shortSummary: sanitizeSummaryInput(event.target.value).trim() })}
           className={`mt-1 w-full rounded-md border bg-white p-2 text-sm ${
             props.fieldErrors?.short_summary ? 'border-red-300' : 'border-slate-300'
           }`}
-          placeholder="One sentence students can scan quickly (e.g., 'Support monthly close and build weekly KPI reports for finance leadership.')"
+          placeholder="Describe the role context and impact (2-4 sentences). This appears first in Role overview."
         />
-        <p className="mt-1 text-xs text-slate-500">{summaryLength}/200. Use one sentence, not bullets.</p>
+        <p className="mt-1 text-xs text-slate-500">{summaryLength}/600. Longer overview is encouraged.</p>
       </div>
 
       <div>
         <label className="text-sm font-medium text-slate-700">Responsibilities</label>
-        <div className="mt-1 space-y-2">
-          {props.responsibilities.map((item, index) => (
-            <input
-              key={`responsibility-${index}`}
-              value={item}
-              onChange={(event) => {
-                const next = [...props.responsibilities]
-                next[index] = event.target.value
-                props.onResponsibilitiesChange(next)
-              }}
-              onPaste={(event) => {
-                const text = event.clipboardData.getData('text')
-                if (!text.includes('\n') && !text.includes(';') && !text.includes('•')) return
-                event.preventDefault()
-                const next = [...props.responsibilities]
-                const lines = splitToResponsibilityLines(text)
-                next[index] = lines[0] ?? ''
-                if (lines.length > 1) {
-                  next.splice(index + 1, 0, ...lines.slice(1))
-                }
-                props.onResponsibilitiesChange(next)
-              }}
-              className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
-              placeholder="Describe one key responsibility"
-            />
-          ))}
-        </div>
-        <div className="mt-2 flex gap-2">
-          <button
-            type="button"
-            onClick={() => props.onResponsibilitiesChange([...(props.responsibilities.length > 0 ? props.responsibilities : ['']), ''])}
-            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700"
-          >
-            + Add responsibility
-          </button>
-          {props.responsibilities.length > 1 ? (
-            <button
-              type="button"
-              onClick={() => props.onResponsibilitiesChange(props.responsibilities.slice(0, -1))}
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700"
-            >
-              Remove last
-            </button>
-          ) : null}
-        </div>
+        <textarea
+          rows={4}
+          value={props.responsibilities.join('\n')}
+          onChange={(event) => props.onResponsibilitiesChange(splitToResponsibilityLines(event.target.value))}
+          onBlur={(event) => props.onResponsibilitiesChange(splitToResponsibilityLines(event.target.value))}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+          placeholder="Free-form responsibilities. Write naturally; bullets are optional."
+        />
+        <p className="mt-1 text-xs text-slate-500">Free fill is allowed. We format this for student display.</p>
       </div>
 
       <div>
-        <label className="text-sm font-medium text-slate-700">Qualifications (one per line)</label>
+        <label className="text-sm font-medium text-slate-700">Qualifications</label>
         <textarea
           name="qualifications"
           rows={5}
           value={props.qualifications}
           onChange={(event) => props.onChange({ qualifications: event.target.value })}
           className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
-          placeholder="Pursuing relevant degree\nStrong written communication"
+          placeholder="Free-form qualifications. One block or multiple lines are both okay."
         />
+        <p className="mt-1 text-xs text-slate-500">
+          Qualifications are shown to students. Matching is driven primarily by required skills + coursework categories.
+        </p>
       </div>
 
       <div>

@@ -25,7 +25,7 @@ type PreviewProps = {
 function splitBullets(value: string) {
   return value
     .split('\n')
-    .map((line) => line.replace(/^[-*]\s*/, '').trim())
+    .map((line) => line.replace(/^[-*•]\s*/, '').trim())
     .filter(Boolean)
 }
 
@@ -50,29 +50,32 @@ export default function ListingPreviewPanel(props: PreviewProps) {
       <div className="mt-2 text-xs text-slate-600">
         {`$${props.payMin || '?'}-$${props.payMax || '?'} / hr · ${props.hoursMin || '?'}-${props.hoursMax || '?'} hrs/week · ${props.durationWeeks || '?'} weeks`}
       </div>
-      <p className="mt-3 text-sm text-slate-700">{props.shortSummary || 'Add a short summary to show students what this role is about.'}</p>
+      <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Role overview</div>
+        <p className="mt-2 whitespace-pre-line text-sm text-slate-700">{props.shortSummary || 'Add a role overview to show students what this role is about.'}</p>
 
-      {responsibilities.length > 0 ? (
-        <div className="mt-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Responsibilities</div>
-          <ul className="mt-1 list-disc space-y-1 pl-4 text-sm text-slate-700">
-            {responsibilities.slice(0, 4).map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+        {responsibilities.length > 0 ? (
+          <div className="mt-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Responsibilities</div>
+            <ul className="mt-1 list-disc space-y-1 pl-4 text-sm text-slate-700">
+              {responsibilities.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
-      {qualifications.length > 0 ? (
-        <div className="mt-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Qualifications</div>
-          <ul className="mt-1 list-disc space-y-1 pl-4 text-sm text-slate-700">
-            {qualifications.slice(0, 4).map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+        {qualifications.length > 0 ? (
+          <div className="mt-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Qualifications</div>
+            <ul className="mt-1 list-disc space-y-1 pl-4 text-sm text-slate-700">
+              {qualifications.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
 
       <div className="mt-3 text-xs text-slate-600">Apply mode: {props.applyMode || 'native'}</div>
       {(props.applyMode === 'ats_link' || props.applyMode === 'hybrid') && props.externalApplyUrl ? (

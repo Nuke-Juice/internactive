@@ -54,15 +54,30 @@ function formatDate(value: string | null | undefined) {
 function parseDashedBullets(value: string | null | undefined) {
   const raw = (value ?? '').trim()
   if (!raw) return []
-  const cleaned = raw.replace(/\r/g, ' ').replace(/\n/g, ' ')
-  const parts = cleaned
-    .split(/\s+-\s+/)
-    .map((part) => part.replace(/^-+\s*/, '').trim())
+  const lines = raw
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
     .filter(Boolean)
-  if (parts.length < 2) return []
-  const plausible = parts.filter((item) => item.length >= 5 && item.length <= 180)
-  if (plausible.length < 2) return []
-  return plausible.slice(0, 10)
+
+  const bullets = lines
+    .filter((line) => /^[-*•]\s+/.test(line))
+    .map((line) => line.replace(/^[-*•]\s+/, '').trim())
+    .filter((line) => !/^(responsibilities|qualifications)\s*:/i.test(line))
+    .filter((line) => line.length >= 3 && line.length <= 220)
+
+  if (bullets.length >= 2) return bullets.slice(0, 10)
+
+  const fallback = raw
+    .replace(/\s+/g, ' ')
+    .split(/\s+(?:-|•)\s+/)
+    .map((part) => part.replace(/^[-*•\s]+/, '').trim())
+    .filter(Boolean)
+    .filter((line) => !/^(responsibilities|qualifications)\s*:/i.test(line))
+    .filter((line) => line.length >= 5 && line.length <= 180)
+
+  if (fallback.length < 2) return []
+  return fallback.slice(0, 10)
 }
 
 function parseScreeningQuestion(value: string | null | undefined) {
@@ -77,8 +92,8 @@ function parseScreeningQuestion(value: string | null | undefined) {
 function scoreLabel(score: number | null, insufficientData: boolean, noSkillSignals: boolean) {
   if (insufficientData) {
     return {
-      title: 'Complete your profile to see your match',
-      badge: noSkillSignals ? 'Add skills to calculate match' : 'Match pending',
+      title: 'Personalized match insights',
+      badge: noSkillSignals ? 'Add skills for scoring' : 'Profile needed',
       tone: 'pending' as const,
     }
   }
@@ -179,9 +194,9 @@ export default async function JobDetailPage({
   }
 
   const listingSelectRich =
-        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
   const listingSelectBase =
-    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, description, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
+    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
 
   const { data: richListing, error: richListingError } = await supabase
     .from('internships')
@@ -526,6 +541,20 @@ export default async function JobDetailPage({
   const scoreUi = scoreLabel(matchBreakdown?.scorePercent ?? null, insufficientMatchData, missingSkillSignals)
   const showMatchDebug = resolvedSearchParams?.debug_match === '1'
   const screeningQuestion = parseScreeningQuestion(listing.description)
+  const structuredResponsibilities = Array.isArray(listing.responsibilities)
+    ? listing.responsibilities.map((item) => String(item).trim()).filter(Boolean)
+    : []
+  const structuredQualifications = Array.isArray(listing.qualifications)
+    ? listing.qualifications.map((item) => String(item).trim()).filter(Boolean)
+    : []
+  const parsedRoleOverviewBullets = parseDashedBullets(listing.description)
+  const roleOverviewSummary = listing.short_summary?.trim() ?? ''
+  const hasRoleOverviewContent =
+    roleOverviewSummary.length > 0 ||
+    structuredResponsibilities.length > 0 ||
+    structuredQualifications.length > 0 ||
+    parsedRoleOverviewBullets.length > 0 ||
+    Boolean(listing.description?.trim())
   const scoreToneClasses =
     scoreUi.tone === 'high'
       ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
@@ -692,17 +721,43 @@ export default async function JobDetailPage({
               </div>
             </section>
 
-            {listing.description ? (
+            {hasRoleOverviewContent ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Role overview</h2>
-                {parseDashedBullets(listing.description).length > 0 ? (
+                {roleOverviewSummary ? <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">{roleOverviewSummary}</p> : null}
+                {structuredResponsibilities.length > 0 ? (
+                  <div className="mt-4">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Responsibilities</h3>
+                    <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-700">
+                      {structuredResponsibilities.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {structuredQualifications.length > 0 ? (
+                  <div className="mt-4">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Qualifications</h3>
+                    <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-700">
+                      {structuredQualifications.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {structuredResponsibilities.length === 0 && structuredQualifications.length === 0 && parsedRoleOverviewBullets.length > 0 ? (
                   <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-6 text-slate-700">
-                    {parseDashedBullets(listing.description).map((item) => (
+                    {parsedRoleOverviewBullets.map((item) => (
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">{listing.description}</p>
+                  structuredResponsibilities.length === 0 &&
+                  structuredQualifications.length === 0 &&
+                  roleOverviewSummary.length === 0 &&
+                  listing.description ? (
+                    <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">{listing.description}</p>
+                  ) : null
                 )}
               </section>
             ) : null}
@@ -951,17 +1006,8 @@ export default async function JobDetailPage({
                 <Star className="h-3.5 w-3.5" />
                 {employerApplicationsTotal >= 5 && employerResponseRate !== null
                   ? `Responds to ${Math.round(employerResponseRate)}% within 7 days`
-                  : 'Not enough data yet'}
+                  : 'Response rate will appear after initial applicant activity'}
               </div>
-
-              {insufficientMatchData ? (
-                <div className="mt-2 text-xs text-slate-600">
-                  Not enough data yet.{' '}
-                  <Link href="/account?complete=1" className="font-medium text-blue-700 hover:underline">
-                    Update profile
-                  </Link>
-                </div>
-              ) : null}
 
               <div className="mt-3">
                 <ApplyModalLauncher

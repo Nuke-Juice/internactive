@@ -36,11 +36,24 @@ export default function RouteFeedbackToasts() {
     const verified = searchParams.get('verified')
     const toast = searchParams.get('toast')
     const toastType = searchParams.get('toast_type')
+    const publishedId = searchParams.get('published_id')
 
     if (verified === '1') {
       showToast({ kind: 'success', message: 'Email verified ✓', key: 'verified-1' })
     }
-    if (!isIgnorableValue(success) && success) {
+    if (!isIgnorableValue(success) && success && !isIgnorableValue(publishedId) && publishedId) {
+      const message = success === '1' ? 'Saved successfully.' : decode(success)
+      const encodedListingId = encodeURIComponent(publishedId)
+      showToast({
+        kind: 'success',
+        message,
+        key: `success:${success}:published:${publishedId}`,
+        actionLabel: 'View listing',
+        onAction: () => {
+          router.push(`/jobs/${encodedListingId}`)
+        },
+      })
+    } else if (!isIgnorableValue(success) && success) {
       const message = success === '1' ? 'Saved successfully.' : decode(success)
       showToast({ kind: 'success', message, key: `success:${success}` })
     }
@@ -56,12 +69,11 @@ export default function RouteFeedbackToasts() {
     }
 
     if (process.env.NODE_ENV !== 'production' && (verified || success || warning || error || toast)) {
-      // eslint-disable-next-line no-console
-      console.debug('[RouteFeedbackToasts] fired', { pathname, verified, success, warning, error, toast, toastType })
+      console.debug('[RouteFeedbackToasts] fired', { pathname, verified, success, warning, error, toast, toastType, publishedId })
     }
 
     const nextParams = new URLSearchParams(searchParams.toString())
-    ;['success', 'error', 'warning', 'verified', 'toast', 'toast_type'].forEach((param) => nextParams.delete(param))
+    ;['success', 'error', 'warning', 'verified', 'toast', 'toast_type', 'published_id'].forEach((param) => nextParams.delete(param))
     const next = nextParams.toString()
     handledRef.current = key
     router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false })

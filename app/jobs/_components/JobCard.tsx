@@ -214,29 +214,20 @@ function cleanDescriptionSummarySource(value: string) {
   if (!normalized) return ''
 
   // Drop generated listing sections so card summary stays concise.
-  const sectionMarkers = [' Responsibilities:', ' Qualifications:', ' Screening question:']
-  let cutoff = normalized.length
-  for (const marker of sectionMarkers) {
-    const index = normalized.indexOf(marker)
-    if (index >= 0) cutoff = Math.min(cutoff, index)
-  }
+  const sectionMatch = normalized.match(/\b(Responsibilities|Qualifications|Screening question):/i)
+  const cutoff = sectionMatch?.index ?? normalized.length
   return normalized.slice(0, cutoff).trim()
 }
 
 function extractFirstResponsibility(value: string | null | undefined) {
   const normalized = (value ?? '').replace(/\s+/g, ' ').trim()
   if (!normalized) return null
-  const marker = 'Responsibilities:'
-  const markerIndex = normalized.indexOf(marker)
-  if (markerIndex < 0) return null
-  const afterMarker = normalized.slice(markerIndex + marker.length).trim()
+  const markerMatch = normalized.match(/\bResponsibilities:\s*/i)
+  if (!markerMatch || markerMatch.index === undefined) return null
+  const afterMarker = normalized.slice(markerMatch.index + markerMatch[0].length).trim()
   if (!afterMarker) return null
-  const cutoffMarkers = [' Qualifications:', ' Screening question:']
-  let cutoff = afterMarker.length
-  for (const cutoffMarker of cutoffMarkers) {
-    const index = afterMarker.indexOf(cutoffMarker)
-    if (index >= 0) cutoff = Math.min(cutoff, index)
-  }
+  const cutoffMatch = afterMarker.match(/\b(Qualifications|Screening question):/i)
+  const cutoff = cutoffMatch?.index ?? afterMarker.length
   const section = afterMarker.slice(0, cutoff).trim()
   if (!section) return null
   const firstBullet = section
@@ -294,25 +285,11 @@ function getHoursText(listing: Listing) {
   return null
 }
 
-function getSkillChips(listing: Listing) {
-  const source = listing.skills ?? listing.required_skills ?? listing.preferred_skills ?? []
-  const unique = Array.from(
-    new Set(source.map((skill) => skill.trim()).filter((skill) => skill.length > 0))
-  )
-  if (unique.length === 0) return { visible: [] as string[], overflow: 0 }
-  return {
-    visible: unique.slice(0, 2),
-    overflow: Math.max(0, unique.length - 2),
-  }
-}
-
 export default function JobCard({
   listing,
   isAuthenticated,
   userRole = null,
   showMatchPrompt = false,
-  showWhyMatch = false,
-  whyMatchReasons = [],
   isSponsored = false,
 }: Props) {
   const locationChips = getLocationChips(listing)
@@ -326,7 +303,6 @@ export default function JobCard({
   const postedDays = listing.created_at ? daysSince(listing.created_at) : null
   const isClosed = typeof deadlineDays === 'number' && deadlineDays < 0
   const isUrgent = typeof deadlineDays === 'number' && deadlineDays >= 0 && deadlineDays <= 7
-  const { visible: skillChips, overflow: skillsOverflow } = getSkillChips(listing)
   const applicationCap = typeof listing.application_cap === 'number' ? listing.application_cap : 60
   const applicationsCount = typeof listing.applications_count === 'number' ? listing.applications_count : 0
   const capReached = applicationsCount >= applicationCap
@@ -334,10 +310,10 @@ export default function JobCard({
   const companyInitial = (listing.company_name ?? 'C').trim().charAt(0).toUpperCase()
 
   return (
-    <article className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5">
+    <article className="group rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md sm:p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex flex-1 items-start gap-3">
-          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+          <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
             {listing.employer_avatar_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={listing.employer_avatar_url} alt={`${listing.company_name ?? 'Company'} logo`} className="h-full w-full object-cover" />
@@ -346,8 +322,8 @@ export default function JobCard({
             )}
           </div>
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold text-slate-900">{listing.title || 'Internship'}</h2>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h2 className="truncate text-base font-semibold text-slate-900">{listing.title || 'Internship'}</h2>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2">
               {listing.employer_id ? (
                 <Link
                   href={`/employers/${encodeURIComponent(listing.employer_id)}`}
@@ -365,9 +341,10 @@ export default function JobCard({
         </div>
         <div className="flex items-center gap-2">
           {isAuthenticated && userRole === 'student' && typeof listing.matchScore === 'number' ? (
-            <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-              {Math.round(listing.matchScore)}% match
-            </span>
+            <div className="inline-flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-full border-2 border-emerald-200 bg-emerald-50 text-emerald-700">
+              <span className="text-sm font-semibold leading-none">{Math.round(listing.matchScore)}%</span>
+              <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide">match</span>
+            </div>
           ) : showMatchPrompt ? (
             <span className="text-[11px] font-medium text-slate-500">Log in to see match score</span>
           ) : null}
@@ -375,7 +352,7 @@ export default function JobCard({
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-2 flex flex-wrap gap-1.5">
         {isSponsored ? <span className={badgeClass(true)}>Sponsored</span> : null}
         {locationChips.map((chip) => (
           <span key={chip.label} className={badgeClass(Boolean(chip.primary))}>
@@ -386,100 +363,48 @@ export default function JobCard({
         {levelLabel ? <span className={badgeClass()}>{levelLabel}</span> : null}
       </div>
 
-      {categoryLabel ? (
-        <div className="mt-3">
-          <span className="inline-flex items-center rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-800">
-            {categoryLabel}
-          </span>
-        </div>
-      ) : null}
-
       {listingSummary ? (
-        <div className="mt-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Summary</p>
-          <p className="mt-1 line-clamp-2 text-sm text-slate-700">{listingSummary}</p>
+        <div className="mt-2">
+          <p className="line-clamp-1 text-sm text-slate-700">{listingSummary}</p>
         </div>
       ) : null}
 
-      <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/70 p-3">
-        <div className="grid gap-1.5 text-xs text-slate-600 sm:grid-cols-2">
-        <p className="font-medium text-slate-700">
-          Applicants: {applicationsCount} / {applicationCap}
-          {nearCap ? (
-            <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-700">
-              Nearly full
-            </span>
-          ) : null}
-          {capReached ? (
-            <span className="ml-2 rounded-full border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-700">
-              Closed
-            </span>
-          ) : null}
-        </p>
-        {hoursText ? <p className="font-medium text-slate-700">{hoursText}</p> : null}
-        {listing.application_deadline && deadlineDays !== null ? (
-          <p className={`text-right sm:text-left ${isClosed ? 'font-semibold text-slate-500' : isUrgent ? 'font-semibold text-amber-700' : 'text-slate-700'}`}>
-            {isClosed ? 'Closed' : `Closes in ${deadlineDays} day${deadlineDays === 1 ? '' : 's'}`}
-            {deadlineShort ? <span className="ml-1 text-[11px] text-slate-500">({deadlineShort})</span> : null}
+      <div className="mt-2 rounded-xl border border-slate-100 bg-slate-50/70 p-2.5">
+        <div className="grid gap-x-3 gap-y-1 text-xs text-slate-600 sm:grid-cols-3">
+          <p className="font-medium text-slate-700">
+            {applicationsCount}/{applicationCap} applicants
+            {nearCap ? (
+              <span className="ml-1.5 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-700">
+                Nearly full
+              </span>
+            ) : null}
+            {capReached ? (
+              <span className="ml-1.5 rounded-full border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-700">
+                Closed
+              </span>
+            ) : null}
           </p>
-        ) : null}
-        {postedDays !== null ? (
-          <p className="text-[11px] text-slate-500">Posted {postedDays === 0 ? 'today' : `${postedDays} day${postedDays === 1 ? '' : 's'} ago`}</p>
-        ) : null}
-        {industryLabel ? (
-          <p className="text-[11px] text-slate-600">
-            <span className="font-medium text-slate-700">Industry:</span> {industryLabel}
+          {hoursText ? <p className="font-medium text-slate-700">{hoursText}</p> : <p className="text-slate-500">Hours TBD</p>}
+          {listing.application_deadline && deadlineDays !== null ? (
+            <p className={`${isClosed ? 'font-semibold text-slate-500' : isUrgent ? 'font-semibold text-amber-700' : 'text-slate-700'}`}>
+              {isClosed ? 'Closed' : `${deadlineDays} day${deadlineDays === 1 ? '' : 's'} left`}
+              {deadlineShort ? <span className="ml-1 text-[11px] text-slate-500">({deadlineShort})</span> : null}
+            </p>
+          ) : (
+            <p className="text-slate-500">No deadline</p>
+          )}
+          <p className="sm:col-span-3 text-[11px] text-slate-500">
+            {postedDays !== null ? `Posted ${postedDays === 0 ? 'today' : `${postedDays} day${postedDays === 1 ? '' : 's'} ago`}` : 'Recently posted'}
+            {categoryLabel ? ` · ${categoryLabel}` : ''}
+            {industryLabel ? ` · ${industryLabel}` : ''}
           </p>
-        ) : null}
-        <p className="text-[11px] text-slate-600">
-          {typeof listing.employer_response_total === 'number' && listing.employer_response_total >= 5 && typeof listing.employer_response_rate === 'number'
-            ? `Employer response rate: ${Math.round(listing.employer_response_rate)}% (views within 7 days)`
-            : 'New employer - response rate not available yet'}
-        </p>
         </div>
       </div>
 
-      {listing.majorsText ? (
-        <p className="mt-2 line-clamp-1 text-sm text-slate-600">
-          <span className="font-medium text-slate-700">Majors:</span> {listing.majorsText}
-        </p>
-      ) : null}
-
-      {skillChips.length > 0 ? (
-        <div className="mt-2">
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Skills</p>
-          <div className="flex flex-wrap gap-1.5">
-          {skillChips.map((skill) => (
-            <span key={skill} className={badgeClass()}>
-              {skill}
-            </span>
-          ))}
-          {skillsOverflow > 0 ? <span className={badgeClass()}>{`+${skillsOverflow}`}</span> : null}
-          </div>
-        </div>
-      ) : null}
-
-      {typeof listing.commuteMinutes === 'number' ? (
-        <p className={`mt-2 text-xs ${typeof listing.maxCommuteMinutes === 'number' && listing.commuteMinutes > listing.maxCommuteMinutes ? 'text-amber-700' : 'text-slate-600'}`}>
-          <span className="font-medium text-slate-700">Commute:</span> ~{listing.commuteMinutes} min
-        </p>
-      ) : null}
-
-      {isAuthenticated && showWhyMatch && whyMatchReasons.length > 0 ? (
-        <details className="mt-3 inline-block rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800">
-          <summary className="cursor-pointer list-none font-medium">Why this matches</summary>
-          <ul className="mt-2 list-disc space-y-0.5 pl-4 text-left text-[11px] text-emerald-900">
-            {whyMatchReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-
-      <div className="mt-4 flex items-center gap-2">
+      <div className="mt-3 flex items-center gap-2">
         <Link
           href={`/jobs/${listing.id}`}
-          className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
           View details
         </Link>
@@ -489,7 +414,7 @@ export default function JobCard({
           isAuthenticated={isAuthenticated}
           userRole={userRole}
           isClosed={isClosed || capReached}
-          className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         />
       </div>
     </article>

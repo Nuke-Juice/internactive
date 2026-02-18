@@ -348,7 +348,9 @@ function parseCsvList(value: string) {
 function parseResponsibilities(value: string) {
   const normalized = value
     .split('\n')
-    .map((line) => line.trim())
+    .map((line) => line.replace(/^[-*•\s]+/, '').trim())
+    .filter((line) => !/^responsibilities\s*:/i.test(line))
+    .filter((line) => !/^qualifications\s*:/i.test(line))
     .filter(Boolean)
   return normalized.length > 0 ? normalized : ['']
 }
@@ -356,8 +358,21 @@ function parseResponsibilities(value: string) {
 function parseBulletLines(value: string) {
   return value
     .split('\n')
-    .map((line) => line.replace(/^[-*]\s*/, '').trim())
+    .map((line) => line.replace(/^[-*•\s]+/, '').trim())
+    .filter((line) => !/^responsibilities\s*:/i.test(line))
+    .filter((line) => !/^qualifications\s*:/i.test(line))
     .filter(Boolean)
+}
+
+function normalizeDateInputValue(value: unknown) {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const directMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (directMatch?.[1]) return directMatch[1]
+  const parsed = new Date(trimmed)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toISOString().slice(0, 10)
 }
 
 function isValidExternalUrl(value: string) {
@@ -391,7 +406,7 @@ function deriveRange(startDate: string, durationWeeks: string) {
     endYear: '',
   }
 
-  const normalizedStart = startDate.trim()
+  const normalizedStart = normalizeDateInputValue(startDate)
   if (!normalizedStart) return fallback
   const start = new Date(`${normalizedStart}T00:00:00.000Z`)
   if (Number.isNaN(start.getTime())) return fallback
@@ -509,6 +524,10 @@ export default function ListingWizard(props: Props) {
   useLayoutEffect(() => {
     if (hydratedStorageKeyRef.current === storageKey) return
     hydratedStorageKeyRef.current = storageKey
+    if (props.internshipId) {
+      window.localStorage.removeItem(storageKey)
+      return
+    }
     const raw = window.localStorage.getItem(storageKey)
     if (!raw) {
       if (!props.internshipId) {
@@ -542,10 +561,18 @@ export default function ListingWizard(props: Props) {
         payMax: typeof parsed.pay_max === 'string' ? parsed.pay_max : prev.payMax,
         hoursMin: typeof parsed.hours_min === 'string' ? parsed.hours_min : prev.hoursMin,
         hoursMax: typeof parsed.hours_max === 'string' ? parsed.hours_max : prev.hoursMax,
-        durationWeeks: typeof parsed.duration_weeks === 'string' ? parsed.duration_weeks : prev.durationWeeks,
-        startDate: typeof parsed.start_date === 'string' ? parsed.start_date : prev.startDate,
+        durationWeeks:
+          typeof parsed.duration_weeks === 'string' && parsed.duration_weeks.trim().length > 0
+            ? parsed.duration_weeks
+            : prev.durationWeeks,
+        startDate:
+          typeof parsed.start_date === 'string'
+            ? normalizeDateInputValue(parsed.start_date) || prev.startDate
+            : prev.startDate,
         applicationDeadline:
-          typeof parsed.application_deadline === 'string' ? parsed.application_deadline : prev.applicationDeadline,
+          typeof parsed.application_deadline === 'string'
+            ? normalizeDateInputValue(parsed.application_deadline) || prev.applicationDeadline
+            : prev.applicationDeadline,
         shortSummary: typeof parsed.short_summary === 'string' ? parsed.short_summary : prev.shortSummary,
         qualifications: typeof parsed.qualifications === 'string' ? parsed.qualifications : prev.qualifications,
         screeningQuestion:
@@ -677,6 +704,12 @@ export default function ListingWizard(props: Props) {
         Object.entries(patch).map(([key, value]) => {
           if (key === 'workMode') return ['workMode', value as WorkMode]
           if (key === 'applyMode') return ['applyMode', value as ApplyMode]
+          if (key === 'startDate') return ['startDate', value.trim()]
+          if (key === 'applicationDeadline') {
+            const normalized = normalizeDateInputValue(value)
+            return ['applicationDeadline', normalized || value.trim()]
+          }
+          if (key === 'durationWeeks') return ['durationWeeks', value.replace(/[^\d]/g, '')]
           return [key, value]
         })
       ) as Partial<typeof prev>),
@@ -781,12 +814,12 @@ export default function ListingWizard(props: Props) {
     const step4Issues: string[] = []
     const step4FieldErrors: Partial<Record<ListingStep4FieldKey, string>> = {}
     if (!state.shortSummary.trim()) {
-      step4Issues.push('Short summary is required.')
-      step4FieldErrors.short_summary = 'Short summary is required.'
+      step4Issues.push('Role overview is required.')
+      step4FieldErrors.short_summary = 'Role overview is required.'
     }
-    if (state.shortSummary.length > 200) {
-      step4Issues.push('Short summary must be 200 characters or fewer.')
-      step4FieldErrors.short_summary = 'Short summary must be 200 characters or fewer.'
+    if (state.shortSummary.length > 600) {
+      step4Issues.push('Role overview must be 600 characters or fewer.')
+      step4FieldErrors.short_summary = 'Role overview must be 600 characters or fewer.'
     }
     const step4Valid = step4Issues.length === 0
 
@@ -811,6 +844,7 @@ export default function ListingWizard(props: Props) {
     state.payMax,
     state.payMin,
     state.shortSummary,
+    state.startDate,
     state.title,
     state.workMode,
     state.applicationDeadline,

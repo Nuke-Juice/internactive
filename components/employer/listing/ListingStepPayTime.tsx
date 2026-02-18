@@ -108,11 +108,12 @@ export default function ListingStepPayTime(props: Props) {
           <label><LabelWithError text="Duration (weeks)" hasError={Boolean(props.fieldErrors?.duration_weeks || props.fieldErrors?.start_date)} /></label>
           <input
             name="duration_weeks"
-            type="number"
-            min={1}
-            max={52}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={props.durationWeeks}
             onChange={(event) => props.onChange({ durationWeeks: event.target.value })}
+            onInput={(event) => props.onChange({ durationWeeks: (event.target as HTMLInputElement).value })}
             className={`mt-1 w-full rounded-md border bg-white p-2 text-sm ${
               props.fieldErrors?.duration_weeks || props.fieldErrors?.start_date ? 'border-red-300' : 'border-slate-300'
             }`}
