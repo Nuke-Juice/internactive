@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BarChart3, Briefcase, FileText, Mail, Users } from 'lucide-react'
+import { BarChart3, Briefcase, FileText, LayoutDashboard, Mail, Users } from 'lucide-react'
 import type { ComponentType } from 'react'
 
 type NavItem = {
@@ -14,6 +14,13 @@ type NavItem = {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  {
+    label: 'Overview',
+    hint: 'Admin home',
+    href: '/admin',
+    icon: LayoutDashboard,
+    match: (pathname) => pathname === '/admin',
+  },
   {
     label: 'Queue',
     hint: 'Moderate listings',
@@ -68,39 +75,25 @@ export default function AdminSectionNav() {
   return (
     <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto max-w-7xl px-6 py-3">
-        <div className="flex flex-col gap-2.5">
-          <div className="flex items-center gap-2.5">
-            <Link
-              href="/admin"
-              className={`inline-flex h-10 items-center rounded-lg border px-3 text-sm font-semibold ${
-                pathname === '/admin'
-                  ? 'border-blue-300 bg-blue-50 text-blue-800'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              Overview
-            </Link>
-            <div className="md:hidden">
-              <label htmlFor="admin-route" className="sr-only">
-                Jump to admin section
-              </label>
-              <select
-                id="admin-route"
-                value={activeHref}
-                onChange={(event) => router.push(event.target.value)}
-                className="h-10 rounded-lg border border-slate-300 px-3 text-sm text-slate-700"
-              >
-                {NAV_ITEMS.map((item) => (
-                  <option key={item.href} value={item.href}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+        <div className="md:hidden">
+          <label htmlFor="admin-route" className="sr-only">
+            Jump to admin section
+          </label>
+          <select
+            id="admin-route"
+            value={activeHref}
+            onChange={(event) => router.push(event.target.value)}
+            className="h-10 rounded-lg border border-slate-300 px-3 text-sm text-slate-700"
+          >
+            {NAV_ITEMS.map((item) => (
+              <option key={item.href} value={item.href}>
+                {item.label}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="mt-2 hidden gap-2 overflow-x-auto pb-0.5 md:flex">
+        <div className="hidden gap-2 overflow-x-auto pb-0.5 md:flex">
           {NAV_ITEMS.map((item) => {
             const active = item.match(pathname)
             const Icon = item.icon

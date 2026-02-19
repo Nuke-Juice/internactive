@@ -4,7 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { type FormEvent, useEffect, useState } from 'react'
-import { Bell, FileText, LayoutDashboard, LogIn, Mail, Menu, ShieldCheck, User, X } from 'lucide-react'
+import { Bell, Briefcase, FileText, LayoutDashboard, LogIn, Mail, Menu, MessageSquare, ShieldCheck, User, X } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { isAdminRole, type UserRole } from '@/lib/auth/roles'
 import { useToast } from '@/components/feedback/ToastProvider'
@@ -411,12 +411,6 @@ export default function SiteHeader({
                   Dashboard
                 </Link>
               ) : null}
-              {isAuthenticated && role === 'employer' ? (
-                <Link href="/dashboard/employer/messages" className={navClasses(employerMessagesActive)}>
-                  <Mail className="h-4 w-4" />
-                  Messages
-                </Link>
-              ) : null}
               {isAuthenticated && role === 'student' ? (
                 <Link href="/student/dashboard" className={navClasses(studentDashboardActive)}>
                   <LayoutDashboard className="h-4 w-4" />
@@ -450,9 +444,19 @@ export default function SiteHeader({
                     <FileText className="h-5 w-5" />
                   </Link>
                 ) : null}
+                {isAuthenticated && role === 'employer' ? (
+                  <Link
+                    href="/dashboard/employer/messages"
+                    className={iconNavClasses(employerMessagesActive)}
+                    aria-label="Messages"
+                    title="Messages"
+                  >
+                    <MessageSquare className="h-5 w-5" />
+                  </Link>
+                ) : null}
                 <div className="relative">
-                  <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
-                    <Mail className="h-5 w-5" />
+                  <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Applicant inbox" title="Applicant inbox">
+                    {role === 'employer' ? <Briefcase className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
                   </Link>
                   {showInboxNotificationDot ? (
                     <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
@@ -513,9 +517,19 @@ export default function SiteHeader({
                   <FileText className="h-5 w-5" />
                 </Link>
               ) : null}
+              {isAuthenticated && role === 'employer' ? (
+                <Link
+                  href="/dashboard/employer/messages"
+                  className={iconNavClasses(employerMessagesActive)}
+                  aria-label="Messages"
+                  title="Messages"
+                >
+                  <MessageSquare className="h-5 w-5" />
+                </Link>
+              ) : null}
               <div className="relative">
-                <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
-                  <Mail className="h-5 w-5" />
+                <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Applicant inbox" title="Applicant inbox">
+                  {role === 'employer' ? <Briefcase className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
                 </Link>
                 {showInboxNotificationDot ? (
                   <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
@@ -575,10 +589,6 @@ export default function SiteHeader({
                     <Link href="/dashboard/employer" className={navClasses(employerDashboardActive)}>
                       <LayoutDashboard className="h-4 w-4" />
                       Dashboard
-                    </Link>
-                    <Link href="/dashboard/employer/messages" className={navClasses(employerMessagesActive)}>
-                      <Mail className="h-4 w-4" />
-                      Messages
                     </Link>
                     <Link href="/upgrade" className={navClasses(employerUpgradeActive)}>
                       <ShieldCheck className="h-4 w-4 text-amber-500" />

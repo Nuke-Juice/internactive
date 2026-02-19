@@ -949,28 +949,31 @@ export default async function JobsView({
           </div>
         </div>
 
-        <div className="mt-6 space-y-4">
-          <FiltersPanel
-            categories={categoryTiles}
-            state={{
-              sort: activeSortMode,
-              searchQuery,
-              category: activeCategory,
-              payMin,
-              remoteOnly,
-              experience: selectedExperience,
-              hoursMin,
-              hoursMax,
-              locationCity,
-              locationState,
-              radius,
-            }}
-            noMatchesHint={noMatchesHint}
-            basePath={basePath}
-            anchorId={anchorId}
-          />
+        <div className="mt-6 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+          <aside className="lg:sticky lg:top-24 lg:self-start">
+            <FiltersPanel
+              categories={categoryTiles}
+              state={{
+                sort: activeSortMode,
+                searchQuery,
+                category: activeCategory,
+                payMin,
+                remoteOnly,
+                experience: selectedExperience,
+                hoursMin,
+                hoursMax,
+                locationCity,
+                locationState,
+                radius,
+              }}
+              noMatchesHint={noMatchesHint}
+              basePath={basePath}
+              anchorId={anchorId}
+              compact
+            />
+          </aside>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             {sponsoredInternships.length > 0 ? (
               <section className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-amber-900">Sponsored</h3>
