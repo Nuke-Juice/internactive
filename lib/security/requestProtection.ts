@@ -8,6 +8,8 @@ type RateBucket = {
 
 const rateBuckets = new Map<string, RateBucket>()
 
+type RateLimitResult = { ok: true; retryAfterSeconds: 0 } | { ok: false; retryAfterSeconds: number }
+
 function firstHeaderValue(value: string | null) {
   return (value ?? '')
     .split(',')
@@ -119,7 +121,7 @@ export function checkRateLimit(params: {
   limit: number
   windowMs: number
   nowMs?: number
-}) {
+}): RateLimitResult {
   const nowMs = params.nowMs ?? Date.now()
   const existing = rateBuckets.get(params.key)
 
@@ -140,8 +142,6 @@ export function checkRateLimit(params: {
   rateBuckets.set(params.key, existing)
   return { ok: true as const, retryAfterSeconds: 0 }
 }
-
-type RateLimitResult = { ok: true; retryAfterSeconds: 0 } | { ok: false; retryAfterSeconds: number }
 
 async function checkRateLimitInDatabase(params: {
   key: string

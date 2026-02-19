@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { SlidersHorizontal, X } from 'lucide-react'
+import { Cog, X } from '@/lib/lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { normalizeStateCode, US_CITY_OPTIONS, US_STATE_OPTIONS } from '@/lib/locations/usLocationCatalog'
@@ -281,7 +281,7 @@ export default function FiltersPanel({
             onClick={() => setIsOpen(true)}
             className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
           >
-            <SlidersHorizontal className="h-4 w-4" />
+            <Cog className="h-4 w-4" />
             Filters
             {activeFilterCount > 0 ? (
               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">

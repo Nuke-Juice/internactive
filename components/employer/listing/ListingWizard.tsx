@@ -704,16 +704,17 @@ export default function ListingWizard(props: Props) {
       ...prev,
       ...(Object.fromEntries(
         Object.entries(patch).map(([key, value]) => {
-          if (key === 'workMode') return ['workMode', value as WorkMode]
-          if (key === 'applyMode') return ['applyMode', value as ApplyMode]
-          if (key === 'atsStageMode') return ['atsStageMode', value as AtsStageMode]
-          if (key === 'startDate') return ['startDate', value.trim()]
+          const normalizedValue = value ?? ''
+          if (key === 'workMode') return ['workMode', normalizedValue as WorkMode]
+          if (key === 'applyMode') return ['applyMode', normalizedValue as ApplyMode]
+          if (key === 'atsStageMode') return ['atsStageMode', normalizedValue as AtsStageMode]
+          if (key === 'startDate') return ['startDate', normalizedValue.trim()]
           if (key === 'applicationDeadline') {
-            const normalized = normalizeDateInputValue(value)
-            return ['applicationDeadline', normalized || value.trim()]
+            const normalized = normalizeDateInputValue(normalizedValue)
+            return ['applicationDeadline', normalized || normalizedValue.trim()]
           }
-          if (key === 'durationWeeks') return ['durationWeeks', value.replace(/[^\d]/g, '')]
-          return [key, value]
+          if (key === 'durationWeeks') return ['durationWeeks', normalizedValue.replace(/[^\d]/g, '')]
+          return [key, normalizedValue]
         })
       ) as Partial<typeof prev>),
     }))
