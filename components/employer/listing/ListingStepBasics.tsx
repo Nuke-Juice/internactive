@@ -28,6 +28,17 @@ function LabelWithError(props: { text: string; hasError: boolean }) {
   )
 }
 
+function hostnameFromUrl(value: string) {
+  const input = value.trim()
+  if (!input) return ''
+  try {
+    const parsed = new URL(input)
+    return parsed.hostname
+  } catch {
+    return ''
+  }
+}
+
 export default function ListingStepBasics(props: Props) {
   const titleLength = props.title.trim().length
   const [cityMenuOpen, setCityMenuOpen] = useState(false)
@@ -56,6 +67,11 @@ export default function ListingStepBasics(props: Props) {
     setCityMenuOpen(false)
     setCityActiveIndex(0)
   }
+
+  const applicationModeSelection: 'native' | 'curated' | 'immediate' =
+    props.applyMode === 'native' ? 'native' : props.atsStageMode === 'curated' ? 'curated' : 'immediate'
+  const externalApplyBehavior = props.externalApplyType === 'redirect' ? 'redirect' : 'new_tab'
+  const derivedAtsLabel = hostnameFromUrl(props.externalApplyUrl)
 
   return (
     <div className="space-y-4">
@@ -213,66 +229,96 @@ export default function ListingStepBasics(props: Props) {
         </div>
       ) : null}
 
-      <div>
-        <label className="text-sm font-medium text-slate-700">Apply method</label>
-        <select
-          name="apply_mode"
-          value={props.applyMode}
-          onChange={(event) => props.onChange({ applyMode: event.target.value })}
-          className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
-        >
-          <option value="native">Native (apply on Internactive)</option>
-          <option value="ats_link">ATS Link (apply on employer ATS)</option>
-          <option value="hybrid">Hybrid (Quick Apply + ATS completion)</option>
-        </select>
-      </div>
-
-      {props.applyMode === 'ats_link' || props.applyMode === 'hybrid' ? (
-        <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-          <div>
-            <label className="text-sm font-medium text-slate-700">ATS stage mode</label>
-            <select
-              name="ats_stage_mode"
-              value={props.atsStageMode}
-              onChange={(event) => props.onChange({ atsStageMode: event.target.value })}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
-            >
-              <option value="curated">Curated invite (recommended)</option>
-              <option value="immediate">Immediate ATS requirement</option>
-            </select>
-          </div>
-          <div>
-            <label><LabelWithError text="External apply URL" hasError={Boolean(props.fieldErrors?.external_apply_url)} /></label>
-            <input
-              name="external_apply_url"
-              type="url"
-              value={props.externalApplyUrl}
-              onChange={(event) => props.onChange({ externalApplyUrl: event.target.value })}
-              className={`mt-1 w-full rounded-md border bg-white p-2 text-sm ${
-                props.fieldErrors?.external_apply_url ? 'border-red-300' : 'border-slate-300'
-              }`}
-              placeholder="https://jobs.company.com/..."
-            />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">ATS type (optional)</label>
-            <select
-              name="external_apply_type"
-              value={props.externalApplyType}
-              onChange={(event) => props.onChange({ externalApplyType: event.target.value })}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
-            >
-              <option value="">Auto-detect</option>
-              <option value="workday">Workday</option>
-              <option value="greenhouse">Greenhouse</option>
-              <option value="lever">Lever</option>
-              <option value="icims">iCIMS</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-          <p className="text-xs text-slate-600">Students Quick Apply first, then complete official ATS step.</p>
+      <div id="application-settings" className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Application settings</h3>
+          <p className="mt-1 text-xs text-slate-600">Set how candidates apply and where ATS invites should send them.</p>
         </div>
-      ) : null}
+
+        <fieldset>
+          <legend className="text-sm font-medium text-slate-700">Application mode</legend>
+          <div className="mt-2 space-y-2">
+            <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+              <input
+                type="radio"
+                name="application_mode_selection"
+                value="native"
+                checked={applicationModeSelection === 'native'}
+                onChange={() => props.onChange({ applyMode: 'native', atsStageMode: 'curated' })}
+              />
+              <span>Internactive Quick Apply only</span>
+            </label>
+            <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+              <input
+                type="radio"
+                name="application_mode_selection"
+                value="curated"
+                checked={applicationModeSelection === 'curated'}
+                onChange={() => props.onChange({ applyMode: 'hybrid', atsStageMode: 'curated' })}
+              />
+              <span>Curated ATS (invite required)</span>
+            </label>
+            <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+              <input
+                type="radio"
+                name="application_mode_selection"
+                value="immediate"
+                checked={applicationModeSelection === 'immediate'}
+                onChange={() => props.onChange({ applyMode: 'ats_link', atsStageMode: 'immediate' })}
+              />
+              <span>Immediate external redirect</span>
+            </label>
+          </div>
+          <input type="hidden" name="apply_mode" value={props.applyMode} />
+          <input type="hidden" name="ats_stage_mode" value={props.atsStageMode} />
+        </fieldset>
+
+        {(props.applyMode === 'ats_link' || props.applyMode === 'hybrid') ? (
+          <div className="space-y-3">
+            <div>
+              <label><LabelWithError text="Official application URL" hasError={Boolean(props.fieldErrors?.external_apply_url)} /></label>
+              <input
+                name="external_apply_url"
+                type="url"
+                value={props.externalApplyUrl}
+                onChange={(event) => props.onChange({ externalApplyUrl: event.target.value })}
+                className={`mt-1 w-full rounded-md border bg-white p-2 text-sm ${
+                  props.fieldErrors?.external_apply_url ? 'border-red-300' : 'border-slate-300'
+                }`}
+                placeholder="https://jobs.company.com/..."
+                maxLength={2048}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">ATS label (optional)</label>
+              <input
+                value={derivedAtsLabel}
+                readOnly
+                className="mt-1 w-full rounded-md border border-slate-300 bg-slate-100 p-2 text-sm text-slate-600"
+                placeholder="Derived from URL hostname"
+              />
+              <p className="mt-1 text-xs text-slate-500">Label is derived automatically from your URL hostname.</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">Open behavior</label>
+              <select
+                name="external_apply_type"
+                value={externalApplyBehavior}
+                onChange={(event) => props.onChange({ externalApplyType: event.target.value })}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+              >
+                <option value="new_tab">Open in new tab</option>
+                <option value="redirect">Open in same tab (redirect)</option>
+              </select>
+            </div>
+            <p className="text-xs text-slate-600">
+              {applicationModeSelection === 'curated'
+                ? 'Curated: Students Quick Apply first. You invite top candidates to complete the official application.'
+                : 'Immediate: Students are sent directly to your official application.'}
+            </p>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }

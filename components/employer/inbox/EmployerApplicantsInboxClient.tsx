@@ -20,6 +20,20 @@ type ApplicantRow = {
   externalApplyCompletedAt: string | null
 }
 
+type InternshipOption = {
+  internshipId: string
+  title: string
+}
+
+type SelectedInternshipConfig = {
+  internshipId: string
+  title: string
+  applyMode: string | null
+  atsStageMode: string | null
+  externalApplyUrl: string | null
+  externalApplyType: string | null
+}
+
 type TabKey = 'new' | 'invited' | 'completed' | 'finalists'
 
 function statusBadge(status: InviteStatus) {
@@ -56,12 +70,60 @@ async function readErrorMessage(response: Response) {
   return 'Request failed.'
 }
 
+function isCuratedMode(config: SelectedInternshipConfig | null) {
+  if (!config) return false
+  const applyMode = String(config.applyMode ?? '').trim().toLowerCase()
+  const atsStageMode = String(config.atsStageMode ?? '').trim().toLowerCase()
+  return applyMode === 'hybrid' && (atsStageMode === 'curated' || !atsStageMode)
+}
+
+function normalizeDestinationUrl(value: string | null | undefined) {
+  const input = String(value ?? '').trim()
+  if (!input) return null
+  try {
+    const parsed = new URL(input)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+function destinationLabel(value: string | null | undefined) {
+  const normalized = normalizeDestinationUrl(value)
+  if (!normalized) return null
+  try {
+    const parsed = new URL(normalized)
+    const path = parsed.pathname === '/' ? '' : parsed.pathname
+    const shortPath = path.length > 24 ? `${path.slice(0, 24)}...` : path
+    return `${parsed.hostname}${shortPath}`
+  } catch {
+    return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized
+  }
+}
+
+async function postAnalyticsEvent(eventName: string, properties: Record<string, unknown>) {
+  try {
+    await fetch('/api/analytics/event', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ event_name: eventName, properties }),
+    })
+  } catch {
+    // Analytics should not block user actions.
+  }
+}
+
 export default function EmployerApplicantsInboxClient({
   rows,
   defaultInternshipId,
+  internshipOptions,
+  selectedInternshipConfig,
 }: {
   rows: ApplicantRow[]
   defaultInternshipId?: string
+  internshipOptions: InternshipOption[]
+  selectedInternshipConfig: SelectedInternshipConfig | null
 }) {
   const router = useRouter()
   const { showToast } = useToast()
@@ -77,6 +139,22 @@ export default function EmployerApplicantsInboxClient({
   const [messageApplicationId, setMessageApplicationId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const selectedInternshipIsCurated = isCuratedMode(selectedInternshipConfig)
+  const selectedInternshipApplyMode = String(selectedInternshipConfig?.applyMode ?? '').trim().toLowerCase()
+  const selectedInternshipDestination = normalizeDestinationUrl(selectedInternshipConfig?.externalApplyUrl ?? null)
+  const selectedInternshipDestinationLabel = destinationLabel(selectedInternshipDestination)
+  const selectedInternshipHasAtsConfig =
+    selectedInternshipApplyMode !== 'native' && Boolean(selectedInternshipDestination)
+  const canInviteForSelectedListing =
+    Boolean(defaultInternshipId) && selectedInternshipIsCurated && Boolean(selectedInternshipDestination)
+  const inviteDisabledReason = !defaultInternshipId
+    ? 'Select a listing to configure ATS before sending invites.'
+    : !selectedInternshipIsCurated
+      ? 'This listing is not in curated ATS invite mode.'
+      : !selectedInternshipDestination
+        ? 'Set up ATS to invite candidates.'
+        : null
 
   const tabbedRows = useMemo(() => rows.filter((row) => tabForStatus(row.atsInviteStatus) === activeTab), [rows, activeTab])
 
@@ -111,13 +189,17 @@ export default function EmployerApplicantsInboxClient({
   }
 
   function openInviteModal(applicationIds: string[]) {
+    if (!canInviteForSelectedListing) {
+      showToast({ kind: 'warning', message: inviteDisabledReason || 'ATS not configured. Set up ATS to invite candidates.' })
+      return
+    }
     setInviteTargetIds(applicationIds)
     setInviteMessage('')
     setInviteModalOpen(true)
   }
 
   async function submitInvite() {
-    if (inviteTargetIds.length === 0 || busy) return
+    if (inviteTargetIds.length === 0 || busy || !canInviteForSelectedListing) return
     setBusy(true)
     setError(null)
     try {
@@ -264,6 +346,80 @@ export default function EmployerApplicantsInboxClient({
         Invite candidates to complete your official application (ATS). This reduces noise and sends only top candidates to your ATS.
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
+        <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Listing</label>
+        <select
+          value={defaultInternshipId ?? ''}
+          onChange={(event) => {
+            const internshipId = event.target.value
+            const params = new URLSearchParams(window.location.search)
+            if (internshipId) {
+              params.set('internship_id', internshipId)
+            } else {
+              params.delete('internship_id')
+            }
+            const query = params.toString()
+            router.push(`/dashboard/employer/applicants${query ? `?${query}` : ''}`)
+          }}
+          className="min-w-[260px] rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700"
+        >
+          <option value="">All listings</option>
+          {internshipOptions.map((option) => (
+            <option key={option.internshipId} value={option.internshipId}>
+              {option.title}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {defaultInternshipId ? (
+        selectedInternshipHasAtsConfig ? (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+            <div className="font-medium">ATS configured for this listing: {selectedInternshipDestinationLabel || 'Configured destination'}</div>
+            <div className="mt-1 text-xs text-emerald-800">Official application: {selectedInternshipDestinationLabel || selectedInternshipDestination}</div>
+            {!selectedInternshipIsCurated ? (
+              <div className="mt-1 text-xs text-emerald-800">Invites are available only when the listing is set to curated ATS mode.</div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                void postAnalyticsEvent('ats_setup_clicked', {
+                  internship_id: defaultInternshipId,
+                  source: 'employer_applicants_banner',
+                })
+                router.push(`/dashboard/employer/new?edit=${encodeURIComponent(defaultInternshipId)}#application-settings`)
+              }}
+              className="mt-2 inline-flex rounded-md border border-emerald-300 bg-white px-2.5 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+            >
+              Edit ATS
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="font-medium">ATS not configured for this listing</div>
+            <div className="mt-1 text-xs text-amber-800">To invite candidates, add your official application URL.</div>
+            <button
+              type="button"
+              onClick={() => {
+                void postAnalyticsEvent('ats_setup_clicked', {
+                  internship_id: defaultInternshipId,
+                  source: 'employer_applicants_banner',
+                })
+                router.push(`/dashboard/employer/new?edit=${encodeURIComponent(defaultInternshipId)}#application-settings`)
+              }}
+              className="mt-2 inline-flex rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            >
+              Set up ATS
+            </button>
+          </div>
+        )
+      ) : (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="font-medium">Select a listing to configure ATS</div>
+          <div className="mt-1 text-xs text-amber-800">Choose a listing above before sending ATS invites.</div>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
         <div className="text-xs text-slate-600">
           Export uses <span className="font-medium text-slate-900">{exportScope === 'all' ? 'all applicants' : `current tab (${activeTab})`}</span>.
@@ -354,12 +510,19 @@ export default function EmployerApplicantsInboxClient({
           <button
             type="button"
             disabled={selectedRows.length === 0}
+            aria-disabled={!canInviteForSelectedListing}
             onClick={() => openInviteModal(selectedRows.map((row) => row.applicationId))}
-            className="rounded-md border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${
+              selectedRows.length === 0 || !canInviteForSelectedListing
+                ? 'cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500'
+                : 'border-blue-300 bg-blue-50 text-blue-800'
+            }`}
+            title={!canInviteForSelectedListing ? (inviteDisabledReason ?? 'Set up ATS to invite candidates.') : undefined}
           >
             Invite selected to ATS
           </button>
           <span className="text-xs text-slate-500">{selectedRows.length} selected</span>
+          {!canInviteForSelectedListing ? <span className="text-xs text-amber-700">{inviteDisabledReason}</span> : null}
         </div>
       </div>
 
@@ -409,8 +572,14 @@ export default function EmployerApplicantsInboxClient({
                       {row.atsInviteStatus === 'not_invited' ? (
                         <button
                           type="button"
+                          aria-disabled={!canInviteForSelectedListing}
                           onClick={() => openInviteModal([row.applicationId])}
-                          className="rounded-md border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-800"
+                          className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${
+                            !canInviteForSelectedListing
+                              ? 'cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500'
+                              : 'border-blue-300 bg-blue-50 text-blue-800'
+                          }`}
+                          title={!canInviteForSelectedListing ? (inviteDisabledReason ?? 'Set up ATS to invite candidates.') : undefined}
                         >
                           Invite to ATS
                         </button>
@@ -451,6 +620,15 @@ export default function EmployerApplicantsInboxClient({
           <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
             <h3 className="text-base font-semibold text-slate-900">Invite to ATS</h3>
             <p className="mt-1 text-sm text-slate-600">Send ATS invite to {inviteTargetIds.length} candidate(s).</p>
+            {selectedInternshipDestination ? (
+              <p className="mt-2 text-xs text-slate-600">
+                Invites will direct candidates to: <span className="font-medium text-slate-900">{selectedInternshipDestinationLabel || selectedInternshipDestination}</span>
+              </p>
+            ) : (
+              <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+                ATS not configured for this listing.
+              </p>
+            )}
             <textarea
               value={inviteMessage}
               onChange={(event) => setInviteMessage(event.target.value)}
@@ -464,7 +642,7 @@ export default function EmployerApplicantsInboxClient({
               </button>
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || !selectedInternshipDestination}
                 onClick={() => {
                   void submitInvite()
                 }}

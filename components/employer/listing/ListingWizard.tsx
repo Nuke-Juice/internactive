@@ -379,6 +379,7 @@ function normalizeDateInputValue(value: unknown) {
 function isValidExternalUrl(value: string) {
   const input = value.trim()
   if (!input) return false
+  if (input.length > 2048) return false
   const lowered = input.toLowerCase()
   if (lowered.startsWith('//')) return false
   if (lowered.startsWith('javascript:') || lowered.startsWith('data:') || lowered.startsWith('vbscript:')) return false
@@ -393,7 +394,7 @@ function isValidExternalUrl(value: string) {
   }
   try {
     const parsed = new URL(input)
-    return parsed.protocol === 'https:'
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
   } catch {
     return false
   }
@@ -557,7 +558,12 @@ export default function ListingWizard(props: Props) {
         applyMode: typeof parsed.apply_mode === 'string' ? (parsed.apply_mode as ApplyMode) : prev.applyMode,
         atsStageMode: typeof parsed.ats_stage_mode === 'string' ? (parsed.ats_stage_mode as AtsStageMode) : prev.atsStageMode,
         externalApplyUrl: typeof parsed.external_apply_url === 'string' ? parsed.external_apply_url : prev.externalApplyUrl,
-        externalApplyType: typeof parsed.external_apply_type === 'string' ? parsed.external_apply_type : prev.externalApplyType,
+        externalApplyType:
+          typeof parsed.external_apply_type === 'string'
+            ? parsed.external_apply_type === 'redirect' || parsed.external_apply_type === 'new_tab'
+              ? parsed.external_apply_type
+              : prev.externalApplyType
+            : prev.externalApplyType,
         payType: typeof parsed.pay_type === 'string' ? 'hourly' : prev.payType,
         payMin: typeof parsed.pay_min === 'string' ? parsed.pay_min : prev.payMin,
         payMax: typeof parsed.pay_max === 'string' ? parsed.pay_max : prev.payMax,
@@ -759,8 +765,8 @@ export default function ListingWizard(props: Props) {
       if (!state.locationState.trim()) step1FieldErrors.location_state = 'State is required for hybrid/in-person roles.'
     }
     if ((state.applyMode === 'ats_link' || state.applyMode === 'hybrid') && !isValidExternalUrl(state.externalApplyUrl)) {
-      stepIssues.push('ATS Link/Hybrid requires a valid https URL.')
-      step1FieldErrors.external_apply_url = 'A valid https URL is required for ATS Link/Hybrid.'
+      stepIssues.push('ATS setup requires a valid http(s) URL.')
+      step1FieldErrors.external_apply_url = 'A valid http(s) URL is required for ATS setup.'
     }
     const step1Valid = stepIssues.length === 0
 

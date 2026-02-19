@@ -36,7 +36,7 @@ import { sanitizeSkillLabels } from '@/lib/skills/sanitizeSkillLabels'
 import BackWithFallbackButton from '@/components/navigation/BackWithFallbackButton'
 import { INTERNSHIP_CATEGORIES } from '@/lib/internships/categories'
 import { TARGET_STUDENT_YEAR_LABELS, TARGET_STUDENT_YEAR_OPTIONS } from '@/lib/internships/years'
-import { inferExternalApplyType, normalizeApplyMode, normalizeAtsStageMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import { normalizeApplyMode, normalizeAtsStageMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import ListingDraftCleanup from '@/components/employer/listing/ListingDraftCleanup'
 import ListingWizard from '@/components/employer/listing/ListingWizard'
@@ -253,7 +253,7 @@ function getCreateInternshipError(searchParams?: {
     return withField('Remote eligibility state is required for remote/hybrid listings.', 'remote_eligibility' as const)
   }
   if (code === LISTING_PUBLISH_ERROR.EXTERNAL_APPLY_URL_REQUIRED) {
-    return withField('A valid https ATS application URL is required for ATS-link or hybrid apply mode.', 'external_apply_url')
+    return withField('A valid http(s) ATS application URL is required for curated ATS or immediate redirect mode.', 'external_apply_url')
   }
   if (code === PLAN_LIMIT_REACHED) {
     return withField('Free plan allows 1 active internship. Deactivate an active listing or upgrade.', null)
@@ -615,7 +615,7 @@ export default async function EmployerDashboardPage({
     const externalApplyUrlInput = String(formData.get('external_apply_url') ?? '').trim()
     const externalApplyUrl = normalizeExternalApplyUrl(externalApplyUrlInput)
     const externalApplyTypeInput = String(formData.get('external_apply_type') ?? '').trim().toLowerCase()
-    const externalApplyType = externalApplyTypeInput || (externalApplyUrl ? inferExternalApplyType(externalApplyUrl) : null)
+    const externalApplyType = externalApplyTypeInput === 'redirect' || externalApplyTypeInput === 'new_tab' ? externalApplyTypeInput : 'new_tab'
     const requiresExternalApply = applyMode === 'ats_link' || applyMode === 'hybrid'
     const resolvedAtsStageMode = requiresExternalApply ? atsStageMode : null
     const resolvedExternalApplyUrl = requiresExternalApply ? externalApplyUrl : null
@@ -623,7 +623,7 @@ export default async function EmployerDashboardPage({
     if (requiresExternalApply && !externalApplyUrl) {
       redirect(
         buildCreateErrorRedirect({
-          message: 'Valid https ATS application URL is required for ATS or hybrid apply mode',
+          message: 'Valid http(s) ATS application URL is required for curated ATS or immediate redirect mode.',
           reason: 'external_apply_url_required',
           fields: ['external_apply_url'],
         })
@@ -1066,6 +1066,17 @@ export default async function EmployerDashboardPage({
       userId: currentUser.id,
       properties: { internship_id: persistedInternshipId, mode: createMode },
     })
+    if (requiresExternalApply && resolvedExternalApplyUrl) {
+      await trackAnalyticsEvent({
+        eventName: 'ats_setup_saved',
+        userId: currentUser.id,
+        properties: {
+          internship_id: persistedInternshipId,
+          apply_mode: applyMode,
+          ats_stage_mode: resolvedAtsStageMode,
+        },
+      })
+    }
 
     revalidatePath('/dashboard/employer')
     revalidatePath('/dashboard/employer/new')
@@ -1747,7 +1758,10 @@ export default async function EmployerDashboardPage({
                   (editingInternship?.ats_stage_mode as 'curated' | 'immediate' | null) ??
                   (verificationSummary.isBetaEmployer ? 'curated' : 'immediate'),
                 externalApplyUrl: editingInternship?.external_apply_url ?? '',
-                externalApplyType: editingInternship?.external_apply_type ?? '',
+                externalApplyType:
+                  editingInternship?.external_apply_type === 'redirect' || editingInternship?.external_apply_type === 'new_tab'
+                    ? editingInternship.external_apply_type
+                    : 'new_tab',
                 payType: 'hourly',
                 payMin: String(editingInternship?.pay_min ?? '20'),
                 payMax: String(editingInternship?.pay_max ?? '28'),

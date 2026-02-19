@@ -1,4 +1,5 @@
 const ATS_HOST_HINTS = ['greenhouse', 'workday', 'lever', 'icims', 'smartrecruiters', 'ashby', 'bamboohr']
+const MAX_EXTERNAL_APPLY_URL_LENGTH = 2048
 
 export function inferExternalApplyType(value: string) {
   const url = value.trim().toLowerCase()
@@ -12,6 +13,7 @@ export function inferExternalApplyType(value: string) {
 export function normalizeExternalApplyUrl(value: string | null | undefined) {
   const input = (value ?? '').trim()
   if (!input) return null
+  if (input.length > MAX_EXTERNAL_APPLY_URL_LENGTH) return null
   if (input.startsWith('//')) return null
   if (input.toLowerCase().startsWith('javascript:')) return null
   if (input.toLowerCase().startsWith('data:')) return null
@@ -24,13 +26,22 @@ export function normalizeExternalApplyUrl(value: string | null | undefined) {
     return null
   }
 
-  if (parsed.protocol !== 'https:') return null
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
   if (!parsed.hostname || parsed.hostname === 'localhost') return null
 
   const normalizedPath = parsed.pathname.toLowerCase()
   if (normalizedPath.startsWith('/admin') || normalizedPath.startsWith('/dashboard')) return null
 
   return parsed.toString()
+}
+
+export function isCuratedAtsFlow(input: {
+  applyMode: string | null | undefined
+  atsStageMode: string | null | undefined
+}) {
+  const applyMode = normalizeApplyMode(input.applyMode)
+  const atsStageMode = normalizeAtsStageMode(input.atsStageMode)
+  return applyMode === 'hybrid' && atsStageMode === 'curated'
 }
 
 export function normalizeApplyMode(value: string | null | undefined): 'native' | 'ats_link' | 'hybrid' {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
+import { isCuratedAtsFlow, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
 import { supabaseServer } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { dispatchInAppNotifications } from '@/lib/notifications/dispatcher'
@@ -21,6 +22,9 @@ type ApplicationRow = {
     employer_id?: string | null
     title?: string | null
     company_name?: string | null
+    apply_mode?: string | null
+    ats_stage_mode?: string | null
+    external_apply_url?: string | null
   } | null
 }
 
@@ -85,7 +89,7 @@ export async function POST(request: Request) {
   const admin = supabaseAdmin()
   const { data: rows, error: rowsError } = await admin
     .from('applications')
-    .select('id, student_id, internship_id, ats_invite_status, internship:internships!inner(employer_id, title, company_name)')
+    .select('id, student_id, internship_id, ats_invite_status, internship:internships!inner(employer_id, title, company_name, apply_mode, ats_stage_mode, external_apply_url)')
     .in('id', applicationIds)
 
   if (rowsError) {
@@ -106,6 +110,22 @@ export async function POST(request: Request) {
 
   const nowIso = new Date().toISOString()
   if (action === 'invite') {
+    const invalidFlow = applications.find((row) => {
+      const internship = row.internship
+      return !isCuratedAtsFlow({
+        applyMode: internship?.apply_mode,
+        atsStageMode: internship?.ats_stage_mode,
+      })
+    })
+    if (invalidFlow) {
+      return NextResponse.json({ error: 'ATS invites are only available for listings using curated ATS mode.' }, { status: 400 })
+    }
+
+    const missingExternalUrl = applications.find((row) => !normalizeExternalApplyUrl(row.internship?.external_apply_url ?? null))
+    if (missingExternalUrl) {
+      return NextResponse.json({ error: 'ATS not configured for this listing.' }, { status: 400 })
+    }
+
     const inviteable = applications.filter((row) => (row.ats_invite_status ?? 'not_invited') === 'not_invited')
     const inviteIds = inviteable.map((row) => row.id)
 

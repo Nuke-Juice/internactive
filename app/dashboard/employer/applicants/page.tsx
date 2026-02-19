@@ -19,6 +19,10 @@ type ApplicationRow = {
 type InternshipRow = {
   id: string
   title: string | null
+  apply_mode: string | null
+  ats_stage_mode: string | null
+  external_apply_url: string | null
+  external_apply_type: string | null
 }
 
 function normalizeInviteStatus(value: string | null | undefined) {
@@ -58,14 +62,14 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
 
   const { data: internshipsData } = await supabase
     .from('internships')
-    .select('id, title')
+    .select('id, title, apply_mode, ats_stage_mode, external_apply_url, external_apply_type')
     .eq('employer_id', user.id)
     .order('created_at', { ascending: false })
 
   const internships = (internshipsData ?? []) as InternshipRow[]
   const internshipIds = internships.map((row) => row.id)
-  const scopedInternshipIds =
-    selectedInternshipId && internshipIds.includes(selectedInternshipId) ? [selectedInternshipId] : internshipIds
+  const activeInternshipId = selectedInternshipId && internshipIds.includes(selectedInternshipId) ? selectedInternshipId : ''
+  const scopedInternshipIds = activeInternshipId ? [activeInternshipId] : internshipIds
 
   const { data: applicationsData } =
     scopedInternshipIds.length > 0
@@ -139,6 +143,19 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
   )
 
   const internshipTitleById = new Map(internships.map((row) => [row.id, row.title?.trim() || 'Internship']))
+  const internshipConfigById = new Map(
+    internships.map((row) => [
+      row.id,
+      {
+        internshipId: row.id,
+        title: row.title?.trim() || 'Internship',
+        applyMode: row.apply_mode,
+        atsStageMode: row.ats_stage_mode,
+        externalApplyUrl: row.external_apply_url,
+        externalApplyType: row.external_apply_type,
+      },
+    ])
+  )
 
   const rows = applications.map((application) => {
     const profile = profileByStudent.get(application.student_id)
@@ -176,7 +193,19 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
           <p className="mt-1 text-sm text-slate-600">Review quick applies and invite top candidates into your ATS workflow.</p>
         </div>
 
-        <EmployerApplicantsInboxClient rows={rows} defaultInternshipId={selectedInternshipId || undefined} />
+        <EmployerApplicantsInboxClient
+          rows={rows}
+          defaultInternshipId={activeInternshipId || undefined}
+          internshipOptions={internships.map((row) => ({
+            internshipId: row.id,
+            title: row.title?.trim() || 'Internship',
+          }))}
+          selectedInternshipConfig={
+            activeInternshipId && internshipConfigById.has(activeInternshipId)
+              ? internshipConfigById.get(activeInternshipId) ?? null
+              : null
+          }
+        />
       </section>
     </main>
   )
