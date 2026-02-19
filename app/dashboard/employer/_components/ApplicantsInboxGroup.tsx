@@ -1,7 +1,7 @@
 'use client'
 
 import { Star } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 type Applicant = {
   id: string
@@ -34,6 +34,20 @@ type Props = {
   showMatchScore: boolean
   showReasons: boolean
   showReadiness: boolean
+}
+
+function readBookmarks(storageKey: string) {
+  if (typeof window === 'undefined') return new Set<string>()
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) return new Set<string>()
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return new Set<string>()
+    const ids = parsed.filter((value): value is string => typeof value === 'string')
+    return new Set(ids)
+  } catch {
+    return new Set<string>()
+  }
 }
 
 function formatDate(value: string | null) {
@@ -81,38 +95,17 @@ export default function ApplicantsInboxGroup({
     () => `employer_bookmarks:${employerUserId}:${internshipId}`,
     [employerUserId, internshipId]
   )
-  const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set())
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(bookmarkStorageKey)
-      if (!raw) {
-        setBookmarkedIds(new Set())
-        return
-      }
-      const parsed = JSON.parse(raw) as unknown
-      if (!Array.isArray(parsed)) {
-        setBookmarkedIds(new Set())
-        return
-      }
-      const ids = parsed.filter((value): value is string => typeof value === 'string')
-      setBookmarkedIds(new Set(ids))
-    } catch {
-      setBookmarkedIds(new Set())
-    }
-  }, [bookmarkStorageKey])
+  const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(() => readBookmarks(bookmarkStorageKey))
 
   function toggleBookmark(applicationId: string) {
-    setBookmarkedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(applicationId)) {
-        next.delete(applicationId)
-      } else {
-        next.add(applicationId)
-      }
-      window.localStorage.setItem(bookmarkStorageKey, JSON.stringify(Array.from(next)))
-      return next
-    })
+    const next = new Set(bookmarkedIds)
+    if (next.has(applicationId)) {
+      next.delete(applicationId)
+    } else {
+      next.add(applicationId)
+    }
+    window.localStorage.setItem(bookmarkStorageKey, JSON.stringify(Array.from(next)))
+    setBookmarkedIds(next)
   }
 
   return (

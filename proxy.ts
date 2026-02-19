@@ -15,7 +15,7 @@ function redirectTo(pathname: string, request: NextRequest) {
   return NextResponse.redirect(url)
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const requestedPath = request.nextUrl.pathname
   const response = NextResponse.next()
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL

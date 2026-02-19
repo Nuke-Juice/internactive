@@ -153,21 +153,17 @@ export default async function NotificationsPage() {
     .order('created_at', { ascending: false })
     .limit(40)
 
-  const storedItems = ((storedNotifications ?? []) as StoredNotificationRow[]).map((row) => ({
-    id: row.id,
-    title: row.title,
-    description: row.body,
-    timestamp: row.created_at,
-    href: row.href || '/notifications',
-    tone:
-      row.type === 'ats_invite_sent'
-        ? 'success'
-        : row.type === 'ats_completed_self_reported'
-          ? 'default'
-          : row.type === 'message_received'
-            ? 'default'
-            : 'default',
-  }))
+  const storedItems: NotificationItem[] = ((storedNotifications ?? []) as StoredNotificationRow[]).map((row) => {
+    const tone: NotificationItem['tone'] = row.type === 'ats_invite_sent' ? 'success' : 'default'
+    return {
+      id: row.id,
+      title: row.title,
+      description: row.body,
+      timestamp: row.created_at,
+      href: row.href || '/notifications',
+      tone,
+    }
+  })
 
   if (storedItems.length > 0) {
     items = storedItems
