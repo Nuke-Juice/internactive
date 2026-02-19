@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
+import { SlidersHorizontal, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { normalizeStateCode, US_CITY_OPTIONS, US_STATE_OPTIONS } from '@/lib/locations/usLocationCatalog'
 
 type FilterState = {
@@ -82,6 +83,7 @@ export default function FiltersPanel({
   const [cityOpen, setCityOpen] = useState(false)
   const [stateOpen, setStateOpen] = useState(false)
   const [autoFilledState, setAutoFilledState] = useState<string | null>(null)
+  const [isOpen, setIsOpen] = useState(false)
 
   const normalizedStateInput = normalizeStateCode(stateInput)
 
@@ -150,6 +152,41 @@ export default function FiltersPanel({
   function applyFilters(overrides: Partial<FilterState>) {
     router.replace(href(overrides))
   }
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (state.searchQuery) count += 1
+    if (state.category) count += 1
+    if (state.payMin) count += 1
+    if (state.remoteOnly) count += 1
+    if (state.experience) count += 1
+    if (state.hoursMin) count += 1
+    if (state.hoursMax) count += 1
+    if (state.locationCity) count += 1
+    if (state.locationState) count += 1
+    if (state.radius) count += 1
+    return count
+  }, [
+    state.searchQuery,
+    state.category,
+    state.payMin,
+    state.remoteOnly,
+    state.experience,
+    state.hoursMin,
+    state.hoursMax,
+    state.locationCity,
+    state.locationState,
+    state.radius,
+  ])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previous
+    }
+  }, [isOpen])
 
   function chipClass(active: boolean) {
     return `inline-flex h-10 w-full items-center justify-center rounded-md border px-2.5 text-sm font-medium transition-colors ${
@@ -236,322 +273,364 @@ export default function FiltersPanel({
   }, [hoursMinValue, hoursMaxValue])
 
   return (
-    <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-900">Filters</h2>
-        <button
-          type="button"
-          onClick={() =>
-            applyFilters({
-              sort: state.sort,
-              searchQuery: '',
-              category: '',
-              payMin: '',
-              remoteOnly: false,
-              experience: '',
-              hoursMin: '',
-              hoursMax: '',
-              locationCity: '',
-              locationState: '',
-              radius: '',
-            })
-          }
-          className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-        >
-          Clear
-        </button>
+    <>
+      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setIsOpen(true)}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Filters
+            {activeFilterCount > 0 ? (
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                {activeFilterCount}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              applyFilters({
+                sort: state.sort,
+                searchQuery: '',
+                category: '',
+                payMin: '',
+                remoteOnly: false,
+                experience: '',
+                hoursMin: '',
+                hoursMax: '',
+                locationCity: '',
+                locationState: '',
+                radius: '',
+              })
+            }
+            className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          >
+            Clear all
+          </button>
+        </div>
+        {noMatchesHint ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <p className="font-semibold">No matches with current filters</p>
+            <p className="mt-1">Try clearing: {noMatchesHint.labels.join(', ')}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Link
+                href={noMatchesHint.clearSuggestedHref}
+                prefetch={false}
+                className="font-medium text-amber-900 underline underline-offset-2"
+              >
+                Clear suggested filter(s)
+              </Link>
+              <Link href={noMatchesHint.resetAllHref} prefetch={false} className="text-amber-800/90 hover:underline">
+                Reset all filters
+              </Link>
+            </div>
+          </div>
+        ) : null}
       </div>
-      {noMatchesHint ? (
-        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-          <p className="font-semibold">No matches with current filters</p>
-          <p className="mt-1">Try clearing: {noMatchesHint.labels.join(', ')}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Link
-              href={noMatchesHint.clearSuggestedHref}
-              prefetch={false}
-              className="font-medium text-amber-900 underline underline-offset-2"
-            >
-              Clear suggested filter(s)
-            </Link>
-            <Link href={noMatchesHint.resetAllHref} prefetch={false} className="text-amber-800/90 hover:underline">
-              Reset all filters
-            </Link>
+      {isOpen ? (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 p-4 md:p-8">
+          <div className="mx-auto h-full w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-900">Filters</h2>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="inline-flex items-center rounded-md border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-50"
+                aria-label="Close filters"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">Adjust filters, then close this window to continue browsing.</p>
+
+            <div className="mt-4 space-y-4">
+              <section>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Category</h3>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {categories.map((category) => {
+                    const active = state.category === category
+                    return (
+                      <button
+                        key={category}
+                        type="button"
+                        onClick={() => applyFilters({ category: active ? '' : category })}
+                        className={categoryChipClass(active, category)}
+                      >
+                        <span className="whitespace-normal break-words [overflow-wrap:anywhere]">{renderCategoryLabel(category)}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Year in school</h3>
+                <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                  {[
+                    { label: 'Any', value: '' },
+                    { label: 'Freshman', value: 'freshman' },
+                    { label: 'Sophomore', value: 'sophomore' },
+                    { label: 'Junior', value: 'junior' },
+                    { label: 'Senior', value: 'senior' },
+                  ].map((option) => {
+                    const active = state.experience === option.value
+                    return (
+                      <button
+                        key={option.label}
+                        type="button"
+                        onClick={() => applyFilters({ experience: option.value })}
+                        className={chipClass(active)}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => applyFilters({ remoteOnly: !state.remoteOnly })}
+                    className={chipClass(state.remoteOnly)}
+                  >
+                    Remote only
+                  </button>
+                </div>
+              </section>
+
+              <form
+                className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-3"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const form = new FormData(event.currentTarget)
+                  applyFilters({
+                    payMin: String(form.get('paymin') ?? '').trim(),
+                    hoursMin: String(form.get('hmin') ?? '').trim(),
+                    hoursMax: String(form.get('hmax') ?? '').trim(),
+                    locationCity: String(form.get('city') ?? '').trim(),
+                    locationState: normalizeStateCode(String(form.get('state') ?? '').trim()),
+                    radius: String(form.get('radius') ?? '').trim(),
+                  })
+                  setIsOpen(false)
+                }}
+              >
+                {state.sort ? <input type="hidden" name="sort" value={state.sort} /> : null}
+                {state.searchQuery ? <input type="hidden" name="q" value={state.searchQuery} /> : null}
+                {state.category ? <input type="hidden" name="category" value={state.category} /> : null}
+                {state.remoteOnly ? <input type="hidden" name="remote" value="1" /> : null}
+                {state.experience ? <input type="hidden" name="exp" value={state.experience} /> : null}
+
+                <div>
+                  <label htmlFor="paymin" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Minimum pay ($/hour)
+                  </label>
+                  <input
+                    id="paymin"
+                    name="paymin"
+                    type="number"
+                    min={0}
+                    step={1}
+                    defaultValue={state.payMin}
+                    placeholder="20"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hours per week</label>
+                  <div className="mt-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-3 shadow-inner">
+                    <div className="relative h-6 rounded-full" style={sliderFillStyle}>
+                      <input
+                        type="range"
+                        min={SLIDER_MIN}
+                        max={SLIDER_MAX}
+                        step={1}
+                        value={hoursMinValue}
+                        onChange={(event) => setMinFromSlider(Number(event.target.value))}
+                        className="pointer-events-none absolute inset-0 z-20 h-6 w-full appearance-none bg-transparent [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-blue-600 [&::-moz-range-thumb]:shadow-[0_2px_8px_rgba(37,99,235,0.45)] [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(37,99,235,0.45)]"
+                      />
+                      <input
+                        type="range"
+                        min={SLIDER_MIN}
+                        max={SLIDER_MAX}
+                        step={1}
+                        value={hoursMaxValue}
+                        onChange={(event) => setMaxFromSlider(Number(event.target.value))}
+                        className="pointer-events-none absolute inset-0 z-30 h-6 w-full appearance-none bg-transparent [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-blue-700 [&::-moz-range-thumb]:shadow-[0_2px_10px_rgba(29,78,216,0.5)] [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-blue-700 [&::-webkit-slider-thumb]:shadow-[0_2px_10px_rgba(29,78,216,0.5)]"
+                      />
+                    </div>
+                    <div className="mt-2 flex items-center justify-between text-[11px] font-medium text-slate-600">
+                      <span>{hoursMinValue}h</span>
+                      <span>{hoursMaxValue}h</span>
+                    </div>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">Drag both dots to set min/max hours.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label htmlFor="hmin" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Hours min
+                    </label>
+                    <input
+                      id="hmin"
+                      name="hmin"
+                      type="number"
+                      min={SLIDER_MIN}
+                      max={SLIDER_MAX}
+                      step={1}
+                      value={hoursMinInput}
+                      onChange={(event) => setMinFromInput(event.target.value)}
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="hmax" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Hours max
+                    </label>
+                    <input
+                      id="hmax"
+                      name="hmax"
+                      type="number"
+                      min={SLIDER_MIN}
+                      max={SLIDER_MAX}
+                      step={1}
+                      value={hoursMaxInput}
+                      onChange={(event) => setMaxFromInput(event.target.value)}
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Location</label>
+                  <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="relative">
+                      <input
+                        id="city"
+                        name="city"
+                        type="text"
+                        value={cityInput}
+                        onFocus={() => setCityOpen(normalizeCityKey(cityInput).length >= 2)}
+                        onBlur={() => {
+                          setTimeout(() => setCityOpen(false), 120)
+                        }}
+                        onChange={(event) => {
+                          onCityChange(event.target.value)
+                          setCityOpen(normalizeCityKey(event.target.value).length >= 2)
+                        }}
+                        placeholder="City"
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+                      />
+                      {cityOpen ? (
+                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                          {filteredCitySuggestions.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-slate-600">No city matches.</div>
+                          ) : (
+                            filteredCitySuggestions.map((option) => (
+                              <button
+                                key={option}
+                                type="button"
+                                onMouseDown={() => {
+                                  const parsed = parseCityStateInput(option)
+                                  if (!parsed) return
+                                  setCityInput(parsed.city)
+                                  setStateInput(parsed.state)
+                                  setAutoFilledState(parsed.state)
+                                  setCityOpen(false)
+                                }}
+                                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                              >
+                                {option}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        id="state-input"
+                        type="text"
+                        value={stateInput}
+                        onFocus={() => setStateOpen(stateInput.trim().length >= 1)}
+                        onBlur={() => {
+                          setTimeout(() => setStateOpen(false), 120)
+                        }}
+                        onChange={(event) => {
+                          onStateChange(event.target.value)
+                          setStateOpen(event.target.value.trim().length >= 1)
+                        }}
+                        placeholder="State"
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm uppercase text-slate-900 placeholder:text-slate-400"
+                      />
+                      <input type="hidden" name="state" value={normalizedStateInput} />
+                      {stateOpen ? (
+                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                          {filteredStateSuggestions.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-slate-600">No state matches.</div>
+                          ) : (
+                            filteredStateSuggestions.map((option) => (
+                              <button
+                                key={option.code}
+                                type="button"
+                                onMouseDown={() => {
+                                  setStateInput(option.code)
+                                  setAutoFilledState(null)
+                                  setStateOpen(false)
+                                }}
+                                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                              >
+                                {option.code} - {option.name}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
+                      {autoFilledState ? <p className="mt-1 text-[11px] text-slate-500">Auto-filled {autoFilledState}</p> : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="radius" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Radius
+                  </label>
+                  <select
+                    id="radius"
+                    name="radius"
+                    defaultValue={state.radius}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                  >
+                    <option value="">Any distance</option>
+                    <option value="10">10 miles</option>
+                    <option value="25">25 miles</option>
+                    <option value="50">50 miles</option>
+                    <option value="100">100 miles</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsOpen(false)}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Done
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Apply filters
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       ) : null}
-
-      <div className="mt-4 space-y-4">
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Category</h3>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {categories.map((category) => {
-              const active = state.category === category
-              return (
-                <button
-                  key={category}
-                  type="button"
-                  onClick={() => applyFilters({ category: active ? '' : category })}
-                  className={categoryChipClass(active, category)}
-                >
-                  <span className="whitespace-normal break-words [overflow-wrap:anywhere]">{renderCategoryLabel(category)}</span>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
-        <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Year in school</h3>
-          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-            {[
-              { label: 'Any', value: '' },
-              { label: 'Freshman', value: 'freshman' },
-              { label: 'Sophomore', value: 'sophomore' },
-              { label: 'Junior', value: 'junior' },
-              { label: 'Senior', value: 'senior' },
-            ].map((option) => {
-              const active = state.experience === option.value
-              return (
-                <button
-                  key={option.label}
-                  type="button"
-                  onClick={() => applyFilters({ experience: option.value })}
-                  className={chipClass(active)}
-                >
-                  {option.label}
-                </button>
-              )
-            })}
-            <button
-              type="button"
-              onClick={() => applyFilters({ remoteOnly: !state.remoteOnly })}
-              className={chipClass(state.remoteOnly)}
-            >
-              Remote only
-            </button>
-          </div>
-        </section>
-
-        <form
-          className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            const form = new FormData(event.currentTarget)
-            applyFilters({
-              payMin: String(form.get('paymin') ?? '').trim(),
-              hoursMin: String(form.get('hmin') ?? '').trim(),
-              hoursMax: String(form.get('hmax') ?? '').trim(),
-              locationCity: String(form.get('city') ?? '').trim(),
-              locationState: normalizeStateCode(String(form.get('state') ?? '').trim()),
-              radius: String(form.get('radius') ?? '').trim(),
-            })
-          }}
-        >
-          {state.sort ? <input type="hidden" name="sort" value={state.sort} /> : null}
-          {state.searchQuery ? <input type="hidden" name="q" value={state.searchQuery} /> : null}
-          {state.category ? <input type="hidden" name="category" value={state.category} /> : null}
-          {state.remoteOnly ? <input type="hidden" name="remote" value="1" /> : null}
-          {state.experience ? <input type="hidden" name="exp" value={state.experience} /> : null}
-
-          <div>
-            <label htmlFor="paymin" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Minimum pay ($/hour)
-            </label>
-            <input
-              id="paymin"
-              name="paymin"
-              type="number"
-              min={0}
-              step={1}
-              defaultValue={state.payMin}
-              placeholder="20"
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hours per week</label>
-            <div className="mt-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-3 shadow-inner">
-              <div className="relative h-6 rounded-full" style={sliderFillStyle}>
-                <input
-                  type="range"
-                  min={SLIDER_MIN}
-                  max={SLIDER_MAX}
-                  step={1}
-                  value={hoursMinValue}
-                  onChange={(event) => setMinFromSlider(Number(event.target.value))}
-                  className="pointer-events-none absolute inset-0 z-20 h-6 w-full appearance-none bg-transparent [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-blue-600 [&::-moz-range-thumb]:shadow-[0_2px_8px_rgba(37,99,235,0.45)] [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(37,99,235,0.45)]"
-                />
-                <input
-                  type="range"
-                  min={SLIDER_MIN}
-                  max={SLIDER_MAX}
-                  step={1}
-                  value={hoursMaxValue}
-                  onChange={(event) => setMaxFromSlider(Number(event.target.value))}
-                  className="pointer-events-none absolute inset-0 z-30 h-6 w-full appearance-none bg-transparent [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-blue-700 [&::-moz-range-thumb]:shadow-[0_2px_10px_rgba(29,78,216,0.5)] [&::-moz-range-track]:bg-transparent [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-blue-700 [&::-webkit-slider-thumb]:shadow-[0_2px_10px_rgba(29,78,216,0.5)]"
-                />
-              </div>
-              <div className="mt-2 flex items-center justify-between text-[11px] font-medium text-slate-600">
-                <span>{hoursMinValue}h</span>
-                <span>{hoursMaxValue}h</span>
-              </div>
-            </div>
-            <p className="mt-1 text-xs text-slate-500">Drag both dots to set min/max hours.</p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label htmlFor="hmin" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Hours min
-              </label>
-              <input
-                id="hmin"
-                name="hmin"
-                type="number"
-                min={SLIDER_MIN}
-                max={SLIDER_MAX}
-                step={1}
-                value={hoursMinInput}
-                onChange={(event) => setMinFromInput(event.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              />
-            </div>
-            <div>
-              <label htmlFor="hmax" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Hours max
-              </label>
-              <input
-                id="hmax"
-                name="hmax"
-                type="number"
-                min={SLIDER_MIN}
-                max={SLIDER_MAX}
-                step={1}
-                value={hoursMaxInput}
-                onChange={(event) => setMaxFromInput(event.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Location</label>
-            <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <div className="relative">
-                <input
-                  id="city"
-                  name="city"
-                  type="text"
-                  value={cityInput}
-                  onFocus={() => setCityOpen(normalizeCityKey(cityInput).length >= 2)}
-                  onBlur={() => {
-                    setTimeout(() => setCityOpen(false), 120)
-                  }}
-                  onChange={(event) => {
-                    onCityChange(event.target.value)
-                    setCityOpen(normalizeCityKey(event.target.value).length >= 2)
-                  }}
-                  placeholder="City"
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
-                />
-                {cityOpen ? (
-                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
-                    {filteredCitySuggestions.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-slate-600">No city matches.</div>
-                    ) : (
-                      filteredCitySuggestions.map((option) => (
-                        <button
-                          key={option}
-                          type="button"
-                          onMouseDown={() => {
-                            const parsed = parseCityStateInput(option)
-                            if (!parsed) return
-                            setCityInput(parsed.city)
-                            setStateInput(parsed.state)
-                            setAutoFilledState(parsed.state)
-                            setCityOpen(false)
-                          }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                        >
-                          {option}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="relative">
-                <input
-                  id="state-input"
-                  type="text"
-                  value={stateInput}
-                  onFocus={() => setStateOpen(stateInput.trim().length >= 1)}
-                  onBlur={() => {
-                    setTimeout(() => setStateOpen(false), 120)
-                  }}
-                  onChange={(event) => {
-                    onStateChange(event.target.value)
-                    setStateOpen(event.target.value.trim().length >= 1)
-                  }}
-                  placeholder="State"
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm uppercase text-slate-900 placeholder:text-slate-400"
-                />
-                <input type="hidden" name="state" value={normalizedStateInput} />
-                {stateOpen ? (
-                  <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
-                    {filteredStateSuggestions.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-slate-600">No state matches.</div>
-                    ) : (
-                      filteredStateSuggestions.map((option) => (
-                        <button
-                          key={option.code}
-                          type="button"
-                          onMouseDown={() => {
-                            setStateInput(option.code)
-                            setAutoFilledState(null)
-                            setStateOpen(false)
-                          }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                        >
-                          {option.code} - {option.name}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                ) : null}
-                {autoFilledState ? <p className="mt-1 text-[11px] text-slate-500">Auto-filled {autoFilledState}</p> : null}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="radius" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Radius
-            </label>
-            <select
-              id="radius"
-              name="radius"
-              defaultValue={state.radius}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-            >
-              <option value="">Any distance</option>
-              <option value="10">10 miles</option>
-              <option value="25">25 miles</option>
-              <option value="50">50 miles</option>
-              <option value="100">100 miles</option>
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            Apply filters
-          </button>
-        </form>
-      </div>
-    </aside>
+    </>
   )
 }

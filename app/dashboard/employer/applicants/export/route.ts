@@ -303,7 +303,7 @@ export async function GET(request: Request) {
   ]
 
   const csv = `\uFEFF${csvLines.join('\n')}`
-  const singleInternship = internshipId && internshipById.get(internshipId)
+  const singleInternship = internshipId ? internshipById.get(internshipId) : undefined
   const slugOrId = singleInternship?.title ? toSlug(singleInternship.title) : internshipId || 'multiple'
   const dateLabel = new Date().toISOString().slice(0, 10)
   const fileName = `internactive_applicants_${slugOrId}_${dateLabel}.csv`

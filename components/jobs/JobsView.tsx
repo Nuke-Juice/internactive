@@ -949,7 +949,7 @@ export default async function JobsView({
           </div>
         </div>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[290px_1fr]">
+        <div className="mt-6 space-y-4">
           <FiltersPanel
             categories={categoryTiles}
             state={{
