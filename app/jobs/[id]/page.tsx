@@ -44,6 +44,13 @@ function seasonFromMonth(value: string | null | undefined) {
   return ''
 }
 
+function fallbackPreferredLocation(city: string | null | undefined, state: string | null | undefined) {
+  const normalizedCity = (city ?? '').trim()
+  const normalizedState = (state ?? '').trim().toUpperCase()
+  if (!normalizedCity || !normalizedState) return ''
+  return `${normalizedCity}, ${normalizedState}`
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return null
   const date = new Date(value)
@@ -194,9 +201,9 @@ export default async function JobDetailPage({
   }
 
   const listingSelectRich =
-        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, ats_stage_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
   const listingSelectBase =
-    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
+    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, ats_stage_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
 
   const { data: richListing, error: richListingError } = await supabase
     .from('internships')
@@ -310,6 +317,13 @@ export default async function JobDetailPage({
           .filter(Boolean)
       : []
     const preferenceSignals = parseStudentPreferenceSignals(profile?.interests ?? null)
+    const profilePreferredLocation = fallbackPreferredLocation(profile?.preferred_city, profile?.preferred_state)
+    const preferredLocations =
+      preferenceSignals.preferredLocations.length > 0
+        ? preferenceSignals.preferredLocations
+        : profilePreferredLocation
+          ? [profilePreferredLocation]
+          : []
     const combinedProfileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels]))
     const minimumCompleteness = getMinimumProfileCompleteness(profile)
     missingMatchFields = minimumCompleteness.missing
@@ -390,7 +404,7 @@ export default async function JobDetailPage({
             : profile?.availability_start_month
               ? [seasonFromMonth(profile.availability_start_month)]
               : [],
-        preferred_locations: preferenceSignals.preferredLocations,
+        preferred_locations: preferredLocations,
         preferred_work_modes: preferenceSignals.preferredWorkModes,
         remote_only: preferenceSignals.remoteOnly,
       },
@@ -1029,7 +1043,9 @@ export default async function JobDetailPage({
               {listing.apply_mode === 'ats_link' || listing.apply_mode === 'hybrid' ? (
                 <p className="mt-2 inline-flex items-start gap-1 text-xs text-slate-700">
                   <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-700" />
-                  You will quick apply here first, then complete the employer ATS application.
+                  {(String((listing as { ats_stage_mode?: string | null }).ats_stage_mode ?? 'curated') === 'immediate')
+                    ? 'You will quick apply here first, then complete the employer ATS application.'
+                    : 'Quick apply first. If selected, you’ll receive an ATS invite to complete the employer’s official application.'}
                 </p>
               ) : null}
             </div>

@@ -14,12 +14,15 @@ export type EmployerClaimTokenRow = {
   created_at: string
   expires_at: string
   used_at: string | null
+  contact_email?: string | null
 }
 
 export type EmployerClaimStatus = {
   pendingCount: number
   lastSentAt: string | null
   lastClaimedAt: string | null
+  lastSentTo: string | null
+  latestPendingExpiresAt: string | null
 }
 
 export function buildEmployerClaimStatus(tokens: EmployerClaimTokenRow[], now = new Date()) {
@@ -27,6 +30,8 @@ export function buildEmployerClaimStatus(tokens: EmployerClaimTokenRow[], now = 
   let pendingCount = 0
   let lastSentAt: string | null = null
   let lastClaimedAt: string | null = null
+  let lastSentTo: string | null = null
+  let latestPendingExpiresAt: string | null = null
 
   for (const token of tokens) {
     const createdAtMs = new Date(token.created_at).getTime()
@@ -35,6 +40,7 @@ export function buildEmployerClaimStatus(tokens: EmployerClaimTokenRow[], now = 
 
     if (!lastSentAt || createdAtMs > new Date(lastSentAt).getTime()) {
       lastSentAt = token.created_at
+      lastSentTo = token.contact_email?.trim().toLowerCase() || null
     }
 
     if (token.used_at && (!lastClaimedAt || usedAtMs > new Date(lastClaimedAt).getTime())) {
@@ -43,6 +49,9 @@ export function buildEmployerClaimStatus(tokens: EmployerClaimTokenRow[], now = 
 
     if (!token.used_at && Number.isFinite(expiresAtMs) && expiresAtMs > nowMs) {
       pendingCount += 1
+      if (!latestPendingExpiresAt || expiresAtMs > new Date(latestPendingExpiresAt).getTime()) {
+        latestPendingExpiresAt = token.expires_at
+      }
     }
   }
 
@@ -50,7 +59,17 @@ export function buildEmployerClaimStatus(tokens: EmployerClaimTokenRow[], now = 
     pendingCount,
     lastSentAt,
     lastClaimedAt,
+    lastSentTo,
+    latestPendingExpiresAt,
   }
+}
+
+function isDeliverableClaimEmail(email: string) {
+  const normalized = email.trim().toLowerCase()
+  if (!normalized) return false
+  if (normalized.endsWith('@example.invalid')) return false
+  if (normalized.endsWith('.invalid')) return false
+  return true
 }
 
 export async function sendEmployerClaimLink(params: {
@@ -77,6 +96,12 @@ export async function sendEmployerClaimLink(params: {
   const recipient = contactEmail.trim().toLowerCase()
   if (!recipient) {
     return { ok: false as const, error: 'Employer contact_email is required before sending claim link' }
+  }
+  if (!isDeliverableClaimEmail(recipient)) {
+    return {
+      ok: false as const,
+      error: 'Employer contact_email is a placeholder. Set a real recipient email before sending claim links.',
+    }
   }
 
   let appUrl = ''

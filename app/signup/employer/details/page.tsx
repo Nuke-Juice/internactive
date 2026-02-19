@@ -24,6 +24,9 @@ type EmployerProfileRow = {
   contact_email: string | null
   industry: string | null
   founded_date: string | null
+  company_size: string | null
+  internship_types: string | null
+  typical_internship_duration: string | null
   location: string | null
   location_city: string | null
   location_state: string | null
@@ -87,6 +90,12 @@ function toFoundedDateValue(year: string) {
   return `${trimmed}-01-01`
 }
 
+function isValidEmail(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
+}
+
 function readEmployerDraft() {
   if (typeof window === 'undefined') return null
   try {
@@ -126,11 +135,14 @@ export default function EmployerSignupDetailsPage() {
     if (stepIndex === 0) {
       return Boolean(firstName.trim() && lastName.trim() && companyName.trim())
     }
+    if (stepIndex === 1) {
+      return Boolean(companySize.trim() && internshipTypes.trim() && typicalDuration.trim() && isValidEmail(contactEmail))
+    }
     if (stepIndex === 2) {
       return Boolean(address.trim() && locationCity.trim() && resolveStateCode(locationStateInput))
     }
     return true
-  }, [stepIndex, firstName, lastName, companyName, address, locationCity, locationStateInput])
+  }, [stepIndex, firstName, lastName, companyName, companySize, internshipTypes, typicalDuration, contactEmail, address, locationCity, locationStateInput])
 
   useEffect(() => {
     const supabase = supabaseBrowser()
@@ -190,7 +202,7 @@ export default function EmployerSignupDetailsPage() {
         supabase
           .from('employer_profiles')
           .select(
-            'company_name, website, contact_email, industry, founded_date, location, location_city, location_state, location_address_line1, overview, avatar_url'
+            'company_name, website, contact_email, industry, founded_date, company_size, internship_types, typical_internship_duration, location, location_city, location_state, location_address_line1, overview, avatar_url'
           )
           .eq('user_id', user.id)
           .maybeSingle<EmployerProfileRow>(),
@@ -204,6 +216,9 @@ export default function EmployerSignupDetailsPage() {
         setContactEmail(profile.contact_email ?? user.email ?? '')
         setIndustry(profile.industry ?? '')
         setFoundedYear(extractYear(profile.founded_date))
+        setCompanySize(profile.company_size ?? '')
+        setInternshipTypes(profile.internship_types ?? '')
+        setTypicalDuration(profile.typical_internship_duration ?? '')
         setLocationCity(profile.location_city ?? parsedLocation.city)
         setLocationStateInput(profile.location_state ?? parsedLocation.state)
         setAddress(profile.location_address_line1 ?? '')
@@ -286,6 +301,13 @@ export default function EmployerSignupDetailsPage() {
       if (!companyName.trim()) return 'Company name is required.'
     }
 
+    if (index === 1) {
+      if (!companySize.trim()) return 'Company size is required.'
+      if (!internshipTypes.trim()) return 'Internship types are required.'
+      if (!typicalDuration.trim()) return 'Typical internship duration is required.'
+      if (!isValidEmail(contactEmail)) return 'A valid contact email is required.'
+    }
+
     if (index === 2) {
       if (!address.trim()) return 'Address is required.'
       if (!locationCity.trim()) return 'City is required.'
@@ -299,7 +321,7 @@ export default function EmployerSignupDetailsPage() {
   async function saveProfileDetails() {
     setError(null)
 
-    const validationError = validateStep(0) ?? validateStep(2)
+    const validationError = validateStep(0) ?? validateStep(1) ?? validateStep(2)
     if (validationError) {
       setError(validationError)
       return
@@ -389,6 +411,9 @@ export default function EmployerSignupDetailsPage() {
           contact_email: contactEmail.trim() || user.email || null,
           industry: industry.trim() || null,
           founded_date: foundedDateValue,
+          company_size: companySize.trim() || null,
+          internship_types: internshipTypes.trim() || null,
+          typical_internship_duration: typicalDuration.trim() || null,
           location: `${locationCity.trim()}, ${resolvedStateCode}`,
           location_city: locationCity.trim(),
           location_state: resolvedStateCode,

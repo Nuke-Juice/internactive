@@ -56,6 +56,7 @@ export default function ApplyModalLauncher({
 
   useEffect(() => {
     if (searchParams.get('apply') === '1' && isAuthenticated && userRole === 'student' && !isClosed) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpen(true)
       const params = new URLSearchParams(searchParams.toString())
       params.delete('apply')
@@ -67,8 +68,9 @@ export default function ApplyModalLauncher({
   useEffect(() => {
     if (!state) return
     if (state.ok) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpen(false)
-      showToast({ kind: 'success', message: 'Application submitted successfully.' })
+      showToast({ kind: 'success', message: state.successMessage || 'Application submitted successfully.' })
       if (state.externalApplyRequired && state.externalApplyUrl) {
         showToast({
           kind: 'warning',
@@ -209,4 +211,3 @@ export default function ApplyModalLauncher({
     </>
   )
 }
-

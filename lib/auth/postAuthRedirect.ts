@@ -44,11 +44,11 @@ async function isOnboardingComplete(supabase: SupabaseClient, userId: string, ro
 
   const { data: profile } = await supabase
     .from('employer_profiles')
-    .select('company_name, location_address_line1')
+    .select('company_name, location_address_line1, contact_email')
     .eq('user_id', userId)
     .maybeSingle()
 
-  return isNonEmpty(profile?.company_name) && isNonEmpty(profile?.location_address_line1)
+  return isNonEmpty(profile?.company_name) && isNonEmpty(profile?.location_address_line1) && isNonEmpty(profile?.contact_email)
 }
 
 function hasIdentityName(user: { user_metadata?: Record<string, unknown> | null } | null | undefined) {

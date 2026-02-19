@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { US_CITY_OPTIONS } from '@/lib/locations/usLocationCatalog'
-import type { ApplyMode, ListingStep1FieldKey, WorkMode } from './types'
+import type { ApplyMode, AtsStageMode, ListingStep1FieldKey, WorkMode } from './types'
 
 type Props = {
   title: string
@@ -11,6 +11,7 @@ type Props = {
   locationCity: string
   locationState: string
   applyMode: ApplyMode
+  atsStageMode: AtsStageMode
   externalApplyUrl: string
   externalApplyType: string
   categories: string[]
@@ -228,6 +229,18 @@ export default function ListingStepBasics(props: Props) {
 
       {props.applyMode === 'ats_link' || props.applyMode === 'hybrid' ? (
         <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <div>
+            <label className="text-sm font-medium text-slate-700">ATS stage mode</label>
+            <select
+              name="ats_stage_mode"
+              value={props.atsStageMode}
+              onChange={(event) => props.onChange({ atsStageMode: event.target.value })}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+            >
+              <option value="curated">Curated invite (recommended)</option>
+              <option value="immediate">Immediate ATS requirement</option>
+            </select>
+          </div>
           <div>
             <label><LabelWithError text="External apply URL" hasError={Boolean(props.fieldErrors?.external_apply_url)} /></label>
             <input

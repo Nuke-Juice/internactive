@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabaseServer } from '@/lib/supabase/server'
-import { normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import { normalizeAtsStageMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 
 type Params = { params: Promise<{ listingId: string }> }
@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: Params) {
 
   const { data: application } = await supabase
     .from('applications')
-    .select('id, student_id, internship_id, external_apply_clicks')
+    .select('id, student_id, internship_id, external_apply_clicks, ats_invite_status')
     .eq('id', applicationId)
     .eq('student_id', user.id)
     .eq('internship_id', listingId)
@@ -37,13 +37,20 @@ export async function GET(request: Request, { params }: Params) {
 
   const { data: internship } = await supabase
     .from('internships')
-    .select('id, apply_mode, external_apply_url')
+    .select('id, apply_mode, ats_stage_mode, external_apply_url')
     .eq('id', listingId)
     .eq('is_active', true)
     .maybeSingle()
 
   if (!internship?.id) {
     return NextResponse.redirect(new URL(`/apply/${encodeURIComponent(listingId)}?error=Listing+not+found`, url.origin))
+  }
+  const atsStageMode = normalizeAtsStageMode(String(internship.ats_stage_mode ?? 'curated'))
+  const inviteStatus = String(application.ats_invite_status ?? 'not_invited')
+  if (atsStageMode === 'curated' && !['invited', 'clicked', 'self_reported_complete', 'employer_confirmed'].includes(inviteStatus)) {
+    return NextResponse.redirect(
+      new URL(`/applications?error=You+need+an+ATS+invite+from+the+employer+before+continuing.`, url.origin)
+    )
   }
 
   const externalUrl = normalizeExternalApplyUrl(String(internship.external_apply_url ?? ''))
@@ -56,6 +63,12 @@ export async function GET(request: Request, { params }: Params) {
     .update({
       external_apply_clicks: (application.external_apply_clicks ?? 0) + 1,
       external_apply_last_clicked_at: new Date().toISOString(),
+      ats_invite_status:
+        inviteStatus === 'invited'
+          ? 'clicked'
+          : inviteStatus === 'not_invited'
+            ? 'clicked'
+            : inviteStatus,
     })
     .eq('id', applicationId)
     .eq('student_id', user.id)

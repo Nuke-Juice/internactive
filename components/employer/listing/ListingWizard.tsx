@@ -15,6 +15,7 @@ import {
 } from '@/lib/internships/draftStorage'
 import type {
   ApplyMode,
+  AtsStageMode,
   CatalogOption,
   ListingStep1FieldKey,
   ListingStep2FieldKey,
@@ -554,6 +555,7 @@ export default function ListingWizard(props: Props) {
         locationCity: typeof parsed.location_city === 'string' ? parsed.location_city : prev.locationCity,
         locationState: typeof parsed.location_state === 'string' ? parsed.location_state : prev.locationState,
         applyMode: typeof parsed.apply_mode === 'string' ? (parsed.apply_mode as ApplyMode) : prev.applyMode,
+        atsStageMode: typeof parsed.ats_stage_mode === 'string' ? (parsed.ats_stage_mode as AtsStageMode) : prev.atsStageMode,
         externalApplyUrl: typeof parsed.external_apply_url === 'string' ? parsed.external_apply_url : prev.externalApplyUrl,
         externalApplyType: typeof parsed.external_apply_type === 'string' ? parsed.external_apply_type : prev.externalApplyType,
         payType: typeof parsed.pay_type === 'string' ? 'hourly' : prev.payType,
@@ -704,6 +706,7 @@ export default function ListingWizard(props: Props) {
         Object.entries(patch).map(([key, value]) => {
           if (key === 'workMode') return ['workMode', value as WorkMode]
           if (key === 'applyMode') return ['applyMode', value as ApplyMode]
+          if (key === 'atsStageMode') return ['atsStageMode', value as AtsStageMode]
           if (key === 'startDate') return ['startDate', value.trim()]
           if (key === 'applicationDeadline') {
             const normalized = normalizeDateInputValue(value)
@@ -1093,6 +1096,7 @@ export default function ListingWizard(props: Props) {
                   locationCity={state.locationCity}
                   locationState={state.locationState}
                   applyMode={state.applyMode}
+                  atsStageMode={state.atsStageMode}
                   externalApplyUrl={state.externalApplyUrl}
                   externalApplyType={state.externalApplyType}
                   categories={props.categoryOptions}

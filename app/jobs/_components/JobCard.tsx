@@ -45,8 +45,6 @@ type Props = {
   isAuthenticated: boolean
   userRole?: 'student' | 'employer' | null
   showMatchPrompt?: boolean
-  showWhyMatch?: boolean
-  whyMatchReasons?: string[]
   isSponsored?: boolean
 }
 
@@ -327,6 +325,7 @@ export default function JobCard({
               {listing.employer_id ? (
                 <Link
                   href={`/employers/${encodeURIComponent(listing.employer_id)}`}
+                  prefetch={false}
                   className="text-sm font-medium text-blue-700 hover:underline"
                   title="View employer profile"
                 >
@@ -404,6 +403,7 @@ export default function JobCard({
       <div className="mt-3 flex items-center gap-2">
         <Link
           href={`/jobs/${listing.id}`}
+          prefetch={false}
           className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
           View details

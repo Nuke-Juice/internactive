@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { normalizeStateCode, US_CITY_OPTIONS, US_STATE_OPTIONS } from '@/lib/locations/usLocationCatalog'
 
@@ -68,6 +69,7 @@ export default function FiltersPanel({
   basePath = '/jobs',
   anchorId,
 }: Props) {
+  const router = useRouter()
   const initialMin = clamp(parseIntOrFallback(state.hoursMin, 10), SLIDER_MIN, SLIDER_MAX)
   const initialMax = clamp(parseIntOrFallback(state.hoursMax, 40), SLIDER_MIN, SLIDER_MAX)
 
@@ -145,8 +147,12 @@ export default function FiltersPanel({
     return query ? `${basePath}?${query}${hash}` : `${basePath}${hash}`
   }
 
+  function applyFilters(overrides: Partial<FilterState>) {
+    router.replace(href(overrides))
+  }
+
   function chipClass(active: boolean) {
-    return `inline-flex h-8 items-center justify-center rounded-md border px-2.5 text-xs font-medium transition-colors ${
+    return `inline-flex h-10 w-full items-center justify-center rounded-md border px-2.5 text-sm font-medium transition-colors ${
       active
         ? 'border-blue-300 bg-blue-50 text-blue-700'
         : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
@@ -221,8 +227,6 @@ export default function FiltersPanel({
     setAutoFilledState(null)
   }
 
-  const submitAction = anchorId ? `${basePath}#${anchorId}` : basePath
-
   const sliderFillStyle = useMemo(() => {
     const minPercent = ((hoursMinValue - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN)) * 100
     const maxPercent = ((hoursMaxValue - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN)) * 100
@@ -235,34 +239,41 @@ export default function FiltersPanel({
     <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-6">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-900">Filters</h2>
-        <Link
-          href={href({
-            sort: state.sort,
-            searchQuery: '',
-            category: '',
-            payMin: '',
-            remoteOnly: false,
-            experience: '',
-            hoursMin: '',
-            hoursMax: '',
-            locationCity: '',
-            locationState: '',
-            radius: '',
-          })}
+        <button
+          type="button"
+          onClick={() =>
+            applyFilters({
+              sort: state.sort,
+              searchQuery: '',
+              category: '',
+              payMin: '',
+              remoteOnly: false,
+              experience: '',
+              hoursMin: '',
+              hoursMax: '',
+              locationCity: '',
+              locationState: '',
+              radius: '',
+            })
+          }
           className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
         >
           Clear
-        </Link>
+        </button>
       </div>
       {noMatchesHint ? (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <p className="font-semibold">No matches with current filters</p>
           <p className="mt-1">Try clearing: {noMatchesHint.labels.join(', ')}</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <Link href={noMatchesHint.clearSuggestedHref} className="font-medium text-amber-900 underline underline-offset-2">
+            <Link
+              href={noMatchesHint.clearSuggestedHref}
+              prefetch={false}
+              className="font-medium text-amber-900 underline underline-offset-2"
+            >
               Clear suggested filter(s)
             </Link>
-            <Link href={noMatchesHint.resetAllHref} className="text-amber-800/90 hover:underline">
+            <Link href={noMatchesHint.resetAllHref} prefetch={false} className="text-amber-800/90 hover:underline">
               Reset all filters
             </Link>
           </div>
@@ -276,9 +287,14 @@ export default function FiltersPanel({
             {categories.map((category) => {
               const active = state.category === category
               return (
-                <Link key={category} href={href({ category: active ? '' : category })} className={categoryChipClass(active, category)}>
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => applyFilters({ category: active ? '' : category })}
+                  className={categoryChipClass(active, category)}
+                >
                   <span className="whitespace-normal break-words [overflow-wrap:anywhere]">{renderCategoryLabel(category)}</span>
-                </Link>
+                </button>
               )
             })}
           </div>
@@ -286,7 +302,7 @@ export default function FiltersPanel({
 
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Year in school</h3>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
             {[
               { label: 'Any', value: '' },
               { label: 'Freshman', value: 'freshman' },
@@ -296,18 +312,41 @@ export default function FiltersPanel({
             ].map((option) => {
               const active = state.experience === option.value
               return (
-                <Link key={option.label} href={href({ experience: option.value })} className={chipClass(active)}>
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() => applyFilters({ experience: option.value })}
+                  className={chipClass(active)}
+                >
                   {option.label}
-                </Link>
+                </button>
               )
             })}
-            <Link href={href({ remoteOnly: !state.remoteOnly })} className={chipClass(state.remoteOnly)}>
+            <button
+              type="button"
+              onClick={() => applyFilters({ remoteOnly: !state.remoteOnly })}
+              className={chipClass(state.remoteOnly)}
+            >
               Remote only
-            </Link>
+            </button>
           </div>
         </section>
 
-        <form action={submitAction} className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <form
+          className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const form = new FormData(event.currentTarget)
+            applyFilters({
+              payMin: String(form.get('paymin') ?? '').trim(),
+              hoursMin: String(form.get('hmin') ?? '').trim(),
+              hoursMax: String(form.get('hmax') ?? '').trim(),
+              locationCity: String(form.get('city') ?? '').trim(),
+              locationState: normalizeStateCode(String(form.get('state') ?? '').trim()),
+              radius: String(form.get('radius') ?? '').trim(),
+            })
+          }}
+        >
           {state.sort ? <input type="hidden" name="sort" value={state.sort} /> : null}
           {state.searchQuery ? <input type="hidden" name="q" value={state.searchQuery} /> : null}
           {state.category ? <input type="hidden" name="category" value={state.category} /> : null}

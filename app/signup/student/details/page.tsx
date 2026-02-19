@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { hasUniversitySpecificCourses } from '@/lib/coursework/universityCourseCatalog'
 import { normalizeCourseworkClient } from '@/lib/coursework/normalizeCourseworkClient'
+import { normalizeSkillsClient } from '@/lib/skills/normalizeSkillsClient'
 import {
   US_CITY_OPTIONS,
   isVerifiedCityForState,
@@ -81,11 +82,20 @@ type StudentDraft = {
   secondMajorId?: string | null
   secondMajorQuery?: string
   coursework?: string[]
+  skillsInput?: string
   desiredRoles?: string
   interests?: string
   hoursPerWeek?: string
   preferredLocation?: string
   preferredWorkMode?: string
+}
+
+type ParsedOnboardingInterests = {
+  profileHeadline: string
+  preferredTerms: string[]
+  preferredLocations: string[]
+  preferredWorkModes: string[]
+  skills: string[]
 }
 
 function parseMajors(value: StudentProfileRow['majors']) {
@@ -157,6 +167,61 @@ function canonicalPreferredLocationFromRaw(value: string | null | undefined) {
   return ''
 }
 
+function parseDelimitedTokens(value: string) {
+  return value
+    .split(/[\n,]/g)
+    .map((token) => token.trim())
+    .filter(Boolean)
+}
+
+function seasonFromMonth(value: string | null | undefined) {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized.startsWith('jun') || normalized.startsWith('jul') || normalized.startsWith('aug')) return 'summer'
+  if (normalized.startsWith('sep') || normalized.startsWith('oct') || normalized.startsWith('nov')) return 'fall'
+  if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
+  if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
+  return ''
+}
+
+function parseOnboardingInterests(value: string | null | undefined): ParsedOnboardingInterests {
+  if (!value) {
+    return {
+      profileHeadline: '',
+      preferredTerms: [],
+      preferredLocations: [],
+      preferredWorkModes: [],
+      skills: [],
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    const asStringArray = (input: unknown) =>
+      Array.isArray(input)
+        ? input.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : []
+    return {
+      profileHeadline:
+        (typeof parsed.profile_headline === 'string' && parsed.profile_headline.trim()) ||
+        (typeof parsed.profileHeadline === 'string' && parsed.profileHeadline.trim()) ||
+        (typeof parsed.bio === 'string' && parsed.bio.trim()) ||
+        '',
+      preferredTerms: asStringArray(parsed.preferred_terms ?? parsed.seasons),
+      preferredLocations: asStringArray(parsed.preferred_locations),
+      preferredWorkModes: asStringArray(parsed.preferred_work_modes),
+      skills: asStringArray(parsed.skills),
+    }
+  } catch {
+    return {
+      profileHeadline: value,
+      preferredTerms: [],
+      preferredLocations: [],
+      preferredWorkModes: [],
+      skills: [],
+    }
+  }
+}
+
 function parsePreferredLocation(value: string) {
   const raw = value.trim()
   if (!raw) return { city: null, state: null }
@@ -189,6 +254,7 @@ export default function StudentSignupDetailsPage() {
   const [selectedSecondMajor, setSelectedSecondMajor] = useState<CanonicalMajor | null>(null)
   const [coursework, setCoursework] = useState<string[]>([])
   const [courseworkUnverified, setCourseworkUnverified] = useState<string[]>([])
+  const [skillsInput, setSkillsInput] = useState('')
   const [hoursPerWeek, setHoursPerWeek] = useState('15')
   const [desiredRoles, setDesiredRoles] = useState('')
   const [interests, setInterests] = useState('')
@@ -271,6 +337,14 @@ export default function StudentSignupDetailsPage() {
       if (coursework.length === 0) {
         return 'Add at least one coursework item to continue.'
       }
+      const unverifiedTokens = new Set(courseworkUnverified.map((item) => item.trim().toLowerCase()))
+      const verifiedCourseCount = coursework.filter((item) => !unverifiedTokens.has(item.trim().toLowerCase())).length
+      if (verifiedCourseCount === 0) {
+        return 'Select at least one verified coursework suggestion so we can map coursework categories.'
+      }
+      if (parseDelimitedTokens(skillsInput).length === 0) {
+        return 'Add at least one skill to continue.'
+      }
       return null
     }
 
@@ -278,6 +352,9 @@ export default function StudentSignupDetailsPage() {
       const parsedHours = Number(hoursPerWeek)
       if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
         return 'Availability hours per week must be a number greater than 0.'
+      }
+      if (!preferredWorkMode.trim() && !preferredLocation.trim()) {
+        return 'Add a preferred work mode or location to improve match quality.'
       }
     }
 
@@ -289,14 +366,16 @@ export default function StudentSignupDetailsPage() {
       return Boolean(firstName.trim() && lastName.trim() && school.trim() && year.trim() && selectedMajor)
     }
     if (stepIndex === 1) {
-      return coursework.length > 0
+      const unverifiedTokens = new Set(courseworkUnverified.map((item) => item.trim().toLowerCase()))
+      const verifiedCourseCount = coursework.filter((item) => !unverifiedTokens.has(item.trim().toLowerCase())).length
+      return coursework.length > 0 && verifiedCourseCount > 0 && parseDelimitedTokens(skillsInput).length > 0
     }
     if (stepIndex === 3) {
       const parsedHours = Number(hoursPerWeek)
-      return Number.isFinite(parsedHours) && parsedHours > 0
+      return Number.isFinite(parsedHours) && parsedHours > 0 && Boolean(preferredWorkMode.trim() || preferredLocation.trim())
     }
     return true
-  }, [firstName, lastName, school, year, selectedMajor, stepIndex, coursework.length, hoursPerWeek])
+  }, [firstName, lastName, school, year, selectedMajor, stepIndex, coursework, courseworkUnverified, skillsInput, hoursPerWeek, preferredWorkMode, preferredLocation])
 
   useEffect(() => {
     const supabase = supabaseBrowser()
@@ -413,8 +492,19 @@ export default function StudentSignupDetailsPage() {
         }
         setGender(profile.gender || '')
         setHoursPerWeek(profile.availability_hours_per_week ? String(profile.availability_hours_per_week) : '15')
-        setInterests(profile.interests || '')
+        const parsedInterests = parseOnboardingInterests(profile.interests || '')
+        setInterests(parsedInterests.profileHeadline)
+        setSkillsInput(parsedInterests.skills.join(', '))
+        if (parsedInterests.preferredWorkModes.length > 0) {
+          const firstMode = parsedInterests.preferredWorkModes[0]
+          if (firstMode === 'remote' || firstMode === 'hybrid' || firstMode === 'in_person') {
+            setPreferredWorkMode(firstMode)
+          }
+        }
         setPreferredLocation(canonicalPreferredLocationFromCityState(profile.preferred_city, profile.preferred_state))
+        if (!canonicalPreferredLocationFromCityState(profile.preferred_city, profile.preferred_state) && parsedInterests.preferredLocations.length > 0) {
+          setPreferredLocation(canonicalPreferredLocationFromRaw(parsedInterests.preferredLocations[0]))
+        }
 
         const primaryMajor =
           profile.major_id && catalog.length > 0 ? catalog.find((item) => item.id === profile.major_id) || null : null
@@ -482,6 +572,7 @@ export default function StudentSignupDetailsPage() {
         if (typeof draft.majorQuery === 'string') setMajorQuery(draft.majorQuery)
         if (typeof draft.secondMajorQuery === 'string') setSecondMajorQuery(draft.secondMajorQuery)
         if (Array.isArray(draft.coursework)) setCoursework(draft.coursework)
+        if (typeof draft.skillsInput === 'string') setSkillsInput(draft.skillsInput)
         if (typeof draft.desiredRoles === 'string') setDesiredRoles(draft.desiredRoles)
         if (typeof draft.interests === 'string') setInterests(draft.interests)
         if (typeof draft.hoursPerWeek === 'string') setHoursPerWeek(draft.hoursPerWeek)
@@ -530,6 +621,7 @@ export default function StudentSignupDetailsPage() {
       secondMajorId: selectedSecondMajor?.id ?? null,
       secondMajorQuery,
       coursework,
+      skillsInput,
       desiredRoles,
       interests,
       hoursPerWeek,
@@ -552,6 +644,7 @@ export default function StudentSignupDetailsPage() {
     selectedSecondMajor,
     secondMajorQuery,
     coursework,
+    skillsInput,
     desiredRoles,
     interests,
     hoursPerWeek,
@@ -658,6 +751,9 @@ export default function StudentSignupDetailsPage() {
       )
     )
     const normalizedCourseworkList = coursework.map((course) => normalizeCourseText(course)).filter(Boolean)
+    const normalizedSkillsList = Array.from(
+      new Set(parseDelimitedTokens(skillsInput).map((skill) => skill.trim()).filter(Boolean))
+    )
     const normalizedUnverifiedCoursework = courseworkUnverified
       .map((course) => normalizeCourseText(course))
       .filter(Boolean)
@@ -666,15 +762,20 @@ export default function StudentSignupDetailsPage() {
 
     let courseworkItemIds: string[] = []
     let mappedCategoryIdsFromText: string[] = []
+    let normalizedSkillIds: string[] = []
 
     try {
       const normalized = await normalizeCourseworkClient(verifiedCourseworkList)
       courseworkItemIds = normalized.courseworkItemIds
-      const response = await fetch('/api/coursework/map-categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: verifiedCourseworkList }),
-      })
+      const [normalizedSkills, response] = await Promise.all([
+        normalizeSkillsClient(normalizedSkillsList),
+        fetch('/api/coursework/map-categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: normalizedCourseworkList }),
+        }),
+      ])
+      normalizedSkillIds = normalizedSkills.skillIds
       if (response.ok) {
         const payload = (await response.json()) as { categoryIds?: string[] }
         mappedCategoryIdsFromText = Array.isArray(payload.categoryIds)
@@ -690,7 +791,21 @@ export default function StudentSignupDetailsPage() {
 
     const parsedHours = Number(hoursPerWeek)
     const parsedPreferredLocation = parsePreferredLocation(preferredLocation)
+    const preferredSeason = seasonFromMonth('May')
+    const preferredLocationLabel =
+      parsedPreferredLocation.city && parsedPreferredLocation.state
+        ? formatPreferredLocation(parsedPreferredLocation.city, parsedPreferredLocation.state)
+        : ''
     const fullName = `${firstName.trim()} ${lastName.trim()}`.trim()
+    const interestsPayload = {
+      profile_headline: interests.trim() || null,
+      preferred_terms: preferredSeason ? [preferredSeason] : [],
+      preferred_locations: preferredLocationLabel ? [preferredLocationLabel] : [],
+      preferred_work_modes: preferredWorkMode ? [preferredWorkMode] : [],
+      remote_only: preferredWorkMode === 'remote',
+      skills: normalizedSkillsList,
+      desired_roles: desiredRoles.trim() || null,
+    }
 
     const profileUpsertPayload = {
       user_id: user.id,
@@ -703,7 +818,7 @@ export default function StudentSignupDetailsPage() {
       experience_level: 'none',
       availability_start_month: 'May',
       availability_hours_per_week: parsedHours,
-      interests: interests || null,
+      interests: JSON.stringify(interestsPayload),
       preferred_city: parsedPreferredLocation.city,
       preferred_state: parsedPreferredLocation.state,
     }
@@ -750,6 +865,20 @@ export default function StudentSignupDetailsPage() {
     if (userError) return setError(toUserFacingErrorMessage(userError.message))
     if (profileError) return setError(toUserFacingErrorMessage(profileError.message))
     if (authError) return setError(toUserFacingErrorMessage(authError.message))
+
+    const { error: clearSkillItemsError } = await supabase.from('student_skill_items').delete().eq('student_id', user.id)
+    if (clearSkillItemsError) return setError(toUserFacingErrorMessage(clearSkillItemsError.message))
+
+    if (normalizedSkillIds.length > 0) {
+      const { error: insertSkillItemsError } = await supabase.from('student_skill_items').insert(
+        normalizedSkillIds.map((skillId) => ({
+          student_id: user.id,
+          skill_id: skillId,
+          level: null,
+        }))
+      )
+      if (insertSkillItemsError) return setError(toUserFacingErrorMessage(insertSkillItemsError.message))
+    }
 
     const { error: clearCourseworkItemsError } = await supabase
       .from('student_coursework_items')
@@ -966,9 +1095,11 @@ export default function StudentSignupDetailsPage() {
             label,
             verified: !courseworkUnverified.some((item) => item.toLowerCase() === label.toLowerCase()),
           }))}
+          skillsInput={skillsInput}
           desiredRoles={desiredRoles}
           onAddCoursework={addCoursework}
           onRemoveCoursework={removeCoursework}
+          onSkillsInputChange={setSkillsInput}
           onDesiredRolesChange={setDesiredRoles}
         />
       )

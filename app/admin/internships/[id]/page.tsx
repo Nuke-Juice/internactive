@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 import { ArrowLeft } from 'lucide-react'
+import { isVerifiedEmployerStatus } from '@/lib/billing/subscriptions'
 import { requireAnyRole } from '@/lib/auth/requireAnyRole'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
 import { INTERNSHIP_CATEGORIES, type InternshipCategory } from '@/lib/admin/internshipTemplates'
@@ -23,6 +25,7 @@ import { normalizeSkills } from '@/lib/skills/normalizeSkills'
 import { sanitizeSkillLabels } from '@/lib/skills/sanitizeSkillLabels'
 import { requireVerifiedEmail } from '@/lib/auth/emailVerification'
 import { validateListingForPublish } from '@/lib/listings/validateListingForPublish'
+import { computeInternshipMatchCoverage } from '@/lib/admin/internshipMatchCoverage'
 import InternshipLocationFields from '@/components/forms/InternshipLocationFields'
 import CatalogMultiSelect from '../_components/CatalogMultiSelect'
 
@@ -73,6 +76,17 @@ function formatList(value: string[] | string | null | undefined) {
   if (Array.isArray(value)) return value.join('\n')
   if (typeof value === 'string') return value
   return ''
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return 'n/a'
+  return new Date(value).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 function isValidCategory(value: string | null): value is InternshipCategory {
@@ -189,11 +203,12 @@ export default async function AdminInternshipEditPage({
     { data: preferredSkillLinkRows },
     { data: courseworkLinkRows },
     { data: courseworkCategoryLinkRows },
+    { count: applicantsCount },
   ] = await Promise.all([
     admin
       .from('internships')
       .select(
-        'id, title, employer_id, source, is_active, category, experience_level, work_mode, location_city, location_state, remote_allowed, remote_eligibility, pay_min_hourly, pay_max_hourly, hours_per_week_min, hours_per_week_max, short_summary, description, responsibilities, qualifications, majors, term, target_graduation_years, required_skills, preferred_skills, recommended_coursework, apply_deadline, application_deadline, admin_notes, template_used'
+        'id, title, employer_id, company_name, source, is_active, category, experience_level, work_mode, location_city, location_state, remote_allowed, remote_eligibility, pay_min_hourly, pay_max_hourly, hours_per_week_min, hours_per_week_max, short_summary, description, responsibilities, qualifications, majors, term, target_graduation_years, required_skills, preferred_skills, recommended_coursework, apply_deadline, application_deadline, admin_notes, template_used, created_at, updated_at'
       )
       .eq('id', id)
       .maybeSingle(),
@@ -217,11 +232,18 @@ export default async function AdminInternshipEditPage({
       .from('internship_coursework_category_links')
       .select('category_id, category:coursework_categories(name)')
       .eq('internship_id', id),
+    admin.from('applications').select('id', { count: 'exact', head: true }).eq('internship_id', id),
   ])
 
   if (!internship?.id) {
     redirect('/admin/internships?error=Internship+not+found')
   }
+
+  const { data: subscriptionRow } = await admin
+    .from('subscriptions')
+    .select('status')
+    .eq('user_id', internship.employer_id)
+    .maybeSingle()
 
   const employerOptions = ((employerOptionsData ?? []) as EmployerOption[]).filter((row) => row.user_id)
   const skillCatalog = ((skillCatalogRows ?? []) as CatalogSkillItem[])
@@ -259,6 +281,29 @@ export default async function AdminInternshipEditPage({
   const legacyGraduationYears = Array.from(selectedGraduationYearSet).filter(
     (year) => !graduationYearOptions.includes(year)
   )
+  const majorsPresent = Array.isArray(internship.majors)
+    ? internship.majors.length > 0
+    : typeof internship.majors === 'string'
+      ? internship.majors.trim().length > 0
+      : false
+  const coverage = computeInternshipMatchCoverage({
+    majorsPresent,
+    courseworkCategoryLinkCount: courseworkCategoryLabels.length,
+    requiredSkillsCount: requiredSkillLabels.length || internship.required_skills?.length || 0,
+    preferredSkillsCount: preferredSkillLabels.length || internship.preferred_skills?.length || 0,
+    verifiedRequiredSkillLinks: requiredSkillLinkRows?.length ?? 0,
+    verifiedPreferredSkillLinks: preferredSkillLinkRows?.length ?? 0,
+    targetGraduationYearsPresent: Array.isArray(internship.target_graduation_years) && internship.target_graduation_years.length > 0,
+    experiencePresent: Boolean(internship.experience_level?.trim()),
+    termPresent: Boolean(internship.term?.trim()),
+    hoursPresent:
+      (typeof internship.hours_per_week_max === 'number' && internship.hours_per_week_max > 0) ||
+      (typeof internship.hours_per_week_min === 'number' && internship.hours_per_week_min > 0),
+    locationOrRemotePresent:
+      Boolean(internship.remote_allowed) || Boolean(internship.location_city?.trim() || internship.location_state?.trim()),
+  })
+  const verificationStatus = isVerifiedEmployerStatus(subscriptionRow?.status ?? null) ? 'verified' : 'unverified'
+  const applicantsTotal = applicantsCount ?? 0
 
   async function updateInternship(formData: FormData) {
     'use server'
@@ -652,6 +697,86 @@ export default async function AdminInternshipEditPage({
     redirect(`/admin/internships/${internshipId}?success=Internship+updated`)
   }
 
+  async function updateActivation(formData: FormData) {
+    'use server'
+
+    await requireAnyRole(ADMIN_ROLES, { requestedPath: '/admin/internships/[id]' })
+    const adminWrite = supabaseAdmin()
+
+    const internshipId = String(formData.get('internship_id') ?? '').trim()
+    const nextActive = String(formData.get('next_active') ?? '').trim() === 'true'
+    const confirmationPhrase = String(formData.get('confirmation_phrase') ?? '').trim().toUpperCase()
+
+    if (!internshipId) {
+      redirect('/admin/internships?error=Missing+internship+id')
+    }
+    if (!nextActive && confirmationPhrase !== 'DEACTIVATE') {
+      redirect(`/admin/internships/${internshipId}?error=Type+DEACTIVATE+to+confirm`)
+    }
+
+    const { error } = await adminWrite.from('internships').update({ is_active: nextActive }).eq('id', internshipId)
+    if (error) {
+      redirect(`/admin/internships/${internshipId}?error=${encodeURIComponent(error.message)}`)
+    }
+
+    revalidatePath('/admin/internships')
+    revalidatePath(`/admin/internships/${internshipId}`)
+    redirect(`/admin/internships/${internshipId}?success=Listing+status+updated`)
+  }
+
+  async function deleteInternship(formData: FormData) {
+    'use server'
+
+    await requireAnyRole(ADMIN_ROLES, { requestedPath: '/admin/internships/[id]' })
+    const adminWrite = supabaseAdmin()
+
+    const internshipId = String(formData.get('internship_id') ?? '').trim()
+    const typedTitle = String(formData.get('typed_title') ?? '').trim()
+    const expectedTitle = String(formData.get('expected_title') ?? '').trim()
+
+    if (!internshipId) {
+      redirect('/admin/internships?error=Missing+internship+id')
+    }
+    if (!typedTitle || typedTitle !== expectedTitle) {
+      redirect(`/admin/internships/${internshipId}?error=Title+confirmation+does+not+match`)
+    }
+
+    const deleteByInternshipId = async (table: string) => {
+      const { error } = await adminWrite.from(table).delete().eq('internship_id', internshipId)
+      if (error) {
+        redirect(`/admin/internships/${internshipId}?error=${encodeURIComponent(error.message)}`)
+      }
+    }
+
+    await deleteByInternshipId('applications')
+    await deleteByInternshipId('internship_required_skill_items')
+    await deleteByInternshipId('internship_preferred_skill_items')
+    await deleteByInternshipId('internship_required_course_categories')
+    await deleteByInternshipId('internship_coursework_items')
+    await deleteByInternshipId('internship_coursework_category_links')
+    await deleteByInternshipId('internship_major_links')
+    await deleteByInternshipId('internship_events')
+
+    const { error: claimTokenError } = await adminWrite
+      .from('employer_claim_tokens')
+      .delete()
+      .eq('internship_id', internshipId)
+    if (claimTokenError) {
+      redirect(`/admin/internships/${internshipId}?error=${encodeURIComponent(claimTokenError.message)}`)
+    }
+
+    const { error } = await adminWrite.from('internships').delete().eq('id', internshipId)
+    if (error) {
+      redirect(`/admin/internships/${internshipId}?error=${encodeURIComponent(error.message)}`)
+    }
+
+    revalidatePath('/admin/internships')
+    revalidatePath('/')
+    revalidatePath('/jobs')
+    revalidatePath(`/jobs/${internshipId}`)
+    redirect('/admin/internships?success=Internship+deleted')
+  }
+
   return (
     <main className="min-h-screen bg-white px-6 py-10">
       <section className="mx-auto max-w-5xl space-y-4">
@@ -663,7 +788,8 @@ export default async function AdminInternshipEditPage({
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">Edit internship</h1>
+          <h1 className="mt-2 text-2xl font-semibold text-slate-900">Internship review</h1>
+          <p className="mt-1 text-sm text-slate-600">Review match quality, completeness, and admin actions before editing fields.</p>
         </div>
 
         {resolvedSearchParams?.error ? (
@@ -677,7 +803,174 @@ export default async function AdminInternshipEditPage({
           </div>
         ) : null}
 
-        <form action={updateInternship} className="admin-readable grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <section className="rounded-xl border border-slate-200 bg-white p-4 lg:col-span-2">
+            <h2 className="text-sm font-semibold text-slate-900">Summary</h2>
+            <dl className="mt-3 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Title</dt>
+                <dd className="mt-0.5">{internship.title || 'Untitled'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Employer</dt>
+                <dd className="mt-0.5">{internship.company_name || internship.employer_id}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Status</dt>
+                <dd className="mt-0.5">{internship.is_active ? 'active' : 'inactive'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Verification</dt>
+                <dd className="mt-0.5">{verificationStatus}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Source</dt>
+                <dd className="mt-0.5">{normalizeSource(internship.source)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Updated</dt>
+                <dd className="mt-0.5">{formatDateTime(internship.updated_at)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Created</dt>
+                <dd className="mt-0.5">{formatDateTime(internship.created_at)}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4">
+            <h2 className="text-sm font-semibold text-slate-900">Applicants</h2>
+            <p className="mt-2 text-3xl font-semibold text-slate-900">{applicantsTotal}</p>
+            <Link
+              href={`/admin/internships/${internship.id}/applicants`}
+              className="mt-3 inline-flex rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Review applicants
+            </Link>
+          </section>
+        </div>
+
+        <section id="match-quality" className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">Match quality</h2>
+            <span
+              className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                coverage.met === coverage.total
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                  : 'border-amber-300 bg-amber-50 text-amber-700'
+              }`}
+              title={`Coverage uses 8 deterministic signals. Missing fields reduce ranking confidence.`}
+            >
+              Coverage {coverage.met}/{coverage.total}
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-slate-600">
+            Coverage is the number of populated match signals out of {coverage.total}. Signals drive student matching quality and ranking confidence.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {coverage.signals.map((signal) => (
+              <div key={signal.key} className="rounded-md border border-slate-200 px-3 py-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-slate-900">{signal.label}</span>
+                  <span className={signal.present ? 'text-emerald-700' : 'text-amber-700'}>{signal.present ? 'Present' : 'Missing'}</span>
+                </div>
+                <div className="mt-1 text-slate-600">{signal.detail}</div>
+                {!signal.present ? <div className="mt-1 text-amber-700">Fix: {signal.fixHint}</div> : null}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 sm:grid-cols-3">
+            <div>
+              Skills: {coverage.skillsBreakdown.requiredCount} required / {coverage.skillsBreakdown.preferredCount} preferred
+            </div>
+            <div>Verified skill links: {coverage.skillsBreakdown.verifiedLinks}</div>
+            <div>Required coursework categories: {coverage.courseworkBreakdown.categoryLinks}</div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-2">
+          <div id="status-action" className="rounded-xl border border-slate-200 bg-white p-4">
+            <h2 className="text-sm font-semibold text-slate-900">Admin actions</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href={`/admin/matching/preview?internship=${encodeURIComponent(internship.id)}`}
+                className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+              >
+                Preview as student
+              </Link>
+              <Link
+                href="#listing-edit"
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Edit fields below
+              </Link>
+            </div>
+            <div className="mt-4 space-y-3">
+              {internship.is_active ? (
+                <form action={updateActivation} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <input type="hidden" name="internship_id" value={internship.id} />
+                  <input type="hidden" name="next_active" value="false" />
+                  <label className="block text-xs font-medium">Type DEACTIVATE to confirm status change</label>
+                  <input
+                    type="text"
+                    name="confirmation_phrase"
+                    className="mt-1 w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                    placeholder="DEACTIVATE"
+                  />
+                  <button
+                    type="submit"
+                    className="mt-2 rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                  >
+                    Deactivate listing
+                  </button>
+                </form>
+              ) : (
+                <form action={updateActivation}>
+                  <input type="hidden" name="internship_id" value={internship.id} />
+                  <input type="hidden" name="next_active" value="true" />
+                  <button
+                    type="submit"
+                    className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                  >
+                    Activate listing
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+
+          <div id="danger-zone" className="rounded-xl border border-red-200 bg-red-50 p-4">
+            <h2 className="text-sm font-semibold text-red-800">Danger zone</h2>
+            <p className="mt-2 text-xs text-red-700">
+              Delete permanently removes this listing, applications, and related links.
+            </p>
+            <form action={deleteInternship} className="mt-3 space-y-2">
+              <input type="hidden" name="internship_id" value={internship.id} />
+              <input type="hidden" name="expected_title" value={internship.title || 'Untitled'} />
+              <label className="block text-xs font-medium text-red-800">
+                Type exact title to confirm: <span className="font-semibold">{internship.title || 'Untitled'}</span>
+              </label>
+              <input
+                type="text"
+                name="typed_title"
+                className="w-full rounded-md border border-red-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                placeholder={internship.title || 'Untitled'}
+              />
+              <button
+                type="submit"
+                className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+              >
+                Delete listing
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <form
+          id="listing-edit"
+          action={updateInternship}
+          className="admin-readable grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-2"
+        >
           <input type="hidden" name="internship_id" value={internship.id} />
 
           <div className="space-y-4">

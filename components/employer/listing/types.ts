@@ -1,4 +1,5 @@
 export type ApplyMode = 'native' | 'ats_link' | 'hybrid'
+export type AtsStageMode = 'curated' | 'immediate'
 export type WorkMode = 'in_person' | 'hybrid' | 'remote'
 
 export type CatalogOption = {
@@ -47,6 +48,7 @@ export type ListingWizardInitialValues = {
   locationCity: string
   locationState: string
   applyMode: ApplyMode
+  atsStageMode: AtsStageMode
   externalApplyUrl: string
   externalApplyType: string
   payType: 'hourly'

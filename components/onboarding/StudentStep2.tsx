@@ -12,9 +12,11 @@ type Props = {
   schoolName: string
   hasSchoolSpecificCoursework: boolean
   courseworkSelections: CourseworkSelection[]
+  skillsInput: string
   desiredRoles: string
   onAddCoursework: (course: CourseworkSelection) => void
   onRemoveCoursework: (courseLabel: string) => void
+  onSkillsInputChange: (value: string) => void
   onDesiredRolesChange: (value: string) => void
 }
 
@@ -23,9 +25,11 @@ export default function StudentStep2({
   schoolName,
   hasSchoolSpecificCoursework,
   courseworkSelections,
+  skillsInput,
   desiredRoles,
   onAddCoursework,
   onRemoveCoursework,
+  onSkillsInputChange,
   onDesiredRolesChange,
 }: Props) {
   return (
@@ -39,7 +43,19 @@ export default function StudentStep2({
           onAdd={onAddCoursework}
           onRemove={onRemoveCoursework}
         />
-        <p className="mt-1 text-xs text-slate-500">Add at least one course to continue.</p>
+        <p className="mt-1 text-xs text-slate-500">Add at least one course and pick at least one verified suggestion.</p>
+      </div>
+
+      <div className="sm:col-span-2">
+        <label className="text-sm font-medium text-slate-700">Top skills (required)</label>
+        <textarea
+          rows={3}
+          className={fieldClassName}
+          value={skillsInput}
+          onChange={(e) => onSkillsInputChange(e.target.value)}
+          placeholder="Examples: Excel, SQL, PowerPoint, Financial modeling"
+        />
+        <p className="mt-1 text-xs text-slate-500">Use commas or new lines. Add at least one skill to improve matching.</p>
       </div>
 
       <div className="sm:col-span-2">

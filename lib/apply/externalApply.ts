@@ -38,3 +38,9 @@ export function normalizeApplyMode(value: string | null | undefined): 'native' |
   if (normalized === 'ats_link' || normalized === 'hybrid') return normalized
   return 'native'
 }
+
+export function normalizeAtsStageMode(value: string | null | undefined): 'immediate' | 'curated' {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized === 'immediate') return 'immediate'
+  return 'curated'
+}

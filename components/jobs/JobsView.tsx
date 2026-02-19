@@ -6,9 +6,15 @@ import { fetchInternships, fetchInternshipsByIds, formatMajors, type Internship 
 import { parseSponsoredInternshipIds, splitSponsoredListings } from '@/lib/jobs/sponsored'
 import { normalizeStateCode } from '@/lib/locations/usLocationCatalog'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
+import {
+  MINIMUM_PROFILE_FIELDS,
+  getMinimumProfileCompleteness,
+  getMinimumProfileFieldLabel,
+} from '@/lib/profileCompleteness'
 import { supabaseServer } from '@/lib/supabase/server'
 import { INTERNSHIP_CATEGORIES } from '@/lib/internships/categories'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
+import ProfileCompletionBanner from '@/components/jobs/ProfileCompletionBanner'
 import FiltersPanel from '@/app/jobs/_components/FiltersPanel'
 import JobCard from '@/app/jobs/_components/JobCard'
 import JobCardSkeleton from '@/app/jobs/_components/JobCardSkeleton'
@@ -120,6 +126,13 @@ function seasonFromMonth(value: string | null | undefined) {
   if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
   if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
   return ''
+}
+
+function fallbackPreferredLocation(city: string | null | undefined, state: string | null | undefined) {
+  const normalizedCity = (city ?? '').trim()
+  const normalizedState = normalizeStateCode(state ?? '')
+  if (!normalizedCity || !normalizedState) return ''
+  return `${normalizedCity}, ${normalizedState}`
 }
 
 function canonicalMajorName(value: unknown) {
@@ -367,6 +380,7 @@ export default async function JobsView({
   let profileCanonicalCourseworkCategoryIds: string[] = []
   let profileCanonicalCourseworkCategoryNames: string[] = []
   let profileCanonicalCourseLevelBands: Array<'intro' | 'intermediate' | 'advanced'> = []
+  let profilePreferredLocations: string[] = []
   let preferenceSignals = parseStudentPreferenceSignals(null)
   let studentTransportMode: string | null = null
   let studentMaxCommuteMinutes: number | null = null
@@ -376,10 +390,11 @@ export default async function JobsView({
     zip: null,
     point: null,
   }
-  const whyMatchById = new Map<string, string[]>()
   const commuteMinutesById = new Map<string, number>()
   const employerAvatarById = new Map<string, string | null>()
   let role: 'student' | 'employer' | undefined
+  let minimumProfileCompletionPercent = 0
+  let minimumProfileMissingLabels: string[] = []
 
   if (user) {
     const { data: userRow } = await supabase
@@ -443,6 +458,13 @@ export default async function JobsView({
       .filter((value): value is string => value.length > 0)
     preferenceSignals = parseStudentPreferenceSignals(profile?.interests ?? null)
     profileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels]))
+    const profilePreferredLocation = fallbackPreferredLocation(profile?.preferred_city, profile?.preferred_state)
+    profilePreferredLocations =
+      preferenceSignals.preferredLocations.length > 0
+        ? preferenceSignals.preferredLocations
+        : profilePreferredLocation
+          ? [profilePreferredLocation]
+          : []
     studentTransportMode = typeof profile?.transport_mode === 'string' ? profile.transport_mode : 'driving'
     studentMaxCommuteMinutes = typeof profile?.max_commute_minutes === 'number' ? profile.max_commute_minutes : null
     studentLocation = {
@@ -492,8 +514,11 @@ export default async function JobsView({
         completionProfile = minimalCompletionResult.data ?? null
       }
 
-      if (completionProfile) {
-      }
+      const minimumCompleteness = getMinimumProfileCompleteness(completionProfile ?? null)
+      minimumProfileMissingLabels = minimumCompleteness.missing.map((field) => getMinimumProfileFieldLabel(field))
+      minimumProfileCompletionPercent = Math.round(
+        ((MINIMUM_PROFILE_FIELDS.length - minimumProfileMissingLabels.length) / MINIMUM_PROFILE_FIELDS.length) * 100
+      )
     }
 
   }
@@ -555,7 +580,7 @@ export default async function JobsView({
             : profileAvailabilityStartMonth
               ? [seasonFromMonth(profileAvailabilityStartMonth)]
               : [],
-        preferred_locations: preferenceSignals.preferredLocations,
+        preferred_locations: profilePreferredLocations,
         preferred_work_modes: preferenceSignals.preferredWorkModes,
         remote_only: preferenceSignals.remoteOnly,
       }
@@ -566,7 +591,6 @@ export default async function JobsView({
       .map((item) => {
         const listing = listingById.get(item.internship.id)
         if (!listing) return null
-        whyMatchById.set(item.internship.id, item.match.reasons.slice(0, 3))
         return { ...listing, matchScore: item.match.score }
       })
       .filter((listing): listing is Internship & { matchScore: number } => Boolean(listing))
@@ -589,12 +613,6 @@ export default async function JobsView({
     sponsoredInternships = split.sponsored
     filteredInternships = split.organic
   }
-
-  const topBestMatchIds = new Set(
-    isStudent && activeSortMode === 'best_match'
-      ? filteredInternships.slice(0, 3).map((listing) => listing.id)
-      : []
-  )
 
   if (user && role === 'student' && filteredInternships.length > 0) {
     const employerIds = Array.from(
@@ -850,6 +868,14 @@ export default async function JobsView({
       ) : null}
 
       <section id={anchorId} className="mx-auto max-w-6xl scroll-mt-24 px-6 py-8">
+        {basePath === '/' && isStudent && user && minimumProfileMissingLabels.length > 0 ? (
+          <ProfileCompletionBanner
+            userId={user.id}
+            completionPercent={minimumProfileCompletionPercent}
+            missingFieldLabels={minimumProfileMissingLabels}
+          />
+        ) : null}
+
         <div className="flex items-end justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold text-slate-900">{listingsTitle}</h2>
@@ -862,6 +888,7 @@ export default async function JobsView({
               <div className="flex items-center justify-end gap-2">
                 <Link
                   href={bestMatchHref}
+                  prefetch={false}
                   className={`inline-flex items-center rounded-md border px-2.5 py-1 ${
                     activeSortMode === 'best_match'
                       ? 'border-blue-300 bg-blue-50 text-blue-700'
@@ -872,6 +899,7 @@ export default async function JobsView({
                 </Link>
                 <Link
                   href={newestHref}
+                  prefetch={false}
                   className={`inline-flex items-center rounded-md border px-2.5 py-1 ${
                     activeSortMode === 'newest'
                       ? 'border-blue-300 bg-blue-50 text-blue-700'
@@ -895,7 +923,7 @@ export default async function JobsView({
             </div>
             {shouldShowResetToMatchedView ? (
               <div className="mt-1">
-                <Link href={resetMatchedViewHref} className="text-blue-700 hover:underline">
+                <Link href={resetMatchedViewHref} prefetch={false} className="text-blue-700 hover:underline">
                   Reset to matched view
                 </Link>
               </div>
@@ -904,6 +932,7 @@ export default async function JobsView({
             <div className="mt-2 flex items-center justify-end gap-2">
               <Link
                 href={previousPageHref}
+                prefetch={false}
                 className={`inline-flex items-center rounded-md border px-2.5 py-1 ${page <= 1 ? 'pointer-events-none border-slate-200 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
               >
                 Prev
@@ -911,6 +940,7 @@ export default async function JobsView({
               <span className="text-xs text-slate-500">Page {page}</span>
               <Link
                 href={nextPageHref}
+                prefetch={false}
                 className={`inline-flex items-center rounded-md border px-2.5 py-1 ${!hasMoreResults ? 'pointer-events-none border-slate-200 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
               >
                 Next
@@ -963,8 +993,6 @@ export default async function JobsView({
                         isAuthenticated={Boolean(user)}
                         userRole={role ?? null}
                         showMatchPrompt={!user}
-                        showWhyMatch={false}
-                        whyMatchReasons={[]}
                         isSponsored
                       />
                     )
@@ -1005,12 +1033,14 @@ export default async function JobsView({
                     <div className="mt-5 flex flex-col items-center justify-center gap-2 sm:flex-row">
                       <Link
                         href={buildBrowseHref(basePath, anchorId)}
+                        prefetch={false}
                         className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                       >
                         Clear filters
                       </Link>
                       <Link
                         href={buildBrowseHref(basePath, anchorId)}
+                        prefetch={false}
                         className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                       >
                         Browse all internships
@@ -1023,7 +1053,7 @@ export default async function JobsView({
                   <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-base font-semibold text-slate-900">Newest internships</h3>
-                      <Link href={buildBrowseHref(basePath, anchorId)} className="text-sm font-medium text-blue-700 hover:underline">
+                      <Link href={buildBrowseHref(basePath, anchorId)} prefetch={false} className="text-sm font-medium text-blue-700 hover:underline">
                         Browse all internships
                       </Link>
                     </div>
@@ -1046,8 +1076,6 @@ export default async function JobsView({
                             isAuthenticated={Boolean(user)}
                             userRole={role ?? null}
                             showMatchPrompt={!user}
-                            showWhyMatch={topBestMatchIds.has(listing.id)}
-                            whyMatchReasons={whyMatchById.get(listing.id) ?? []}
                             isSponsored={false}
                           />
                         )
@@ -1075,8 +1103,6 @@ export default async function JobsView({
                     isAuthenticated={Boolean(user)}
                     userRole={role ?? null}
                     showMatchPrompt={!user}
-                    showWhyMatch={topBestMatchIds.has(listing.id)}
-                    whyMatchReasons={whyMatchById.get(listing.id) ?? []}
                     isSponsored={false}
                   />
                 )

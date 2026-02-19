@@ -846,7 +846,7 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
       user_id: employerId,
       company_name: companyName,
       website: website || null,
-      contact_email: contactEmail || syntheticAuthEmail,
+      contact_email: contactEmail || null,
       industry: 'Unknown',
       location: 'Unknown',
     })

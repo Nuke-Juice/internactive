@@ -281,6 +281,13 @@ export default async function EmployerClaimPage({ searchParams }: { searchParams
   const sourceEmployerId = consumedToken.employer_id
 
   if (sourceEmployerId !== user.id) {
+    await admin
+      .from('employer_claim_tokens')
+      .update({ used_at: nowIso, used_by: user.id })
+      .eq('employer_id', sourceEmployerId)
+      .is('used_at', null)
+      .gt('expires_at', nowIso)
+
     const [{ data: sourceProfile }, { data: targetProfile }, { data: sourcePublicProfile }, { data: targetPublicProfile }] = await Promise.all([
       admin
         .from('employer_profiles')

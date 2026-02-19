@@ -10,12 +10,16 @@ import {
   type EmployerClaimTokenRow,
 } from '@/lib/auth/employerClaimAdmin'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
+import CopyValueButton from '@/components/admin/CopyValueButton'
+import BetaEmployerToggle from '@/components/admin/BetaEmployerToggle'
 
 type SearchParams = Promise<{
   q?: string
   edit?: string
   sent?: string
   resent?: string
+  sent_employer_id?: string
+  resent_employer_id?: string
   contactSaved?: string
   deleted?: string
   error?: string
@@ -25,6 +29,7 @@ type EmployerRow = {
   user_id: string
   company_name: string | null
   contact_email: string | null
+  is_beta_employer: boolean | null
 }
 
 type InternshipRow = {
@@ -38,6 +43,8 @@ function encodeParams(input: {
   edit?: string
   sent?: string
   resent?: string
+  sentEmployerId?: string
+  resentEmployerId?: string
   contactSaved?: string
   error?: string
 }) {
@@ -46,6 +53,8 @@ function encodeParams(input: {
   if (input.edit?.trim()) params.set('edit', input.edit.trim())
   if (input.sent) params.set('sent', input.sent)
   if (input.resent) params.set('resent', input.resent)
+  if (input.sentEmployerId?.trim()) params.set('sent_employer_id', input.sentEmployerId.trim())
+  if (input.resentEmployerId?.trim()) params.set('resent_employer_id', input.resentEmployerId.trim())
   if (input.contactSaved) params.set('contactSaved', input.contactSaved)
   if (input.error) params.set('error', input.error)
   const query = params.toString()
@@ -59,6 +68,12 @@ function formatDate(value: string | null) {
   } catch {
     return value
   }
+}
+
+function isPlaceholderContactEmail(value: string | null | undefined) {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (!normalized) return false
+  return normalized.endsWith('@example.invalid') || normalized.endsWith('.invalid')
 }
 
 export default async function AdminEmployersPage({ searchParams }: { searchParams?: SearchParams }) {
@@ -82,10 +97,10 @@ export default async function AdminEmployersPage({ searchParams }: { searchParam
   const admin = supabaseAdmin()
 
   const [{ data: employersData }, { data: tokensData }, { data: internshipsData }] = await Promise.all([
-    admin.from('employer_profiles').select('user_id, company_name, contact_email').order('company_name', { ascending: true }),
+    admin.from('employer_profiles').select('user_id, company_name, contact_email, is_beta_employer').order('company_name', { ascending: true }),
     admin
       .from('employer_claim_tokens')
-      .select('employer_id, created_at, expires_at, used_at')
+      .select('employer_id, created_at, expires_at, used_at, contact_email')
       .order('created_at', { ascending: false }),
     admin.from('internships').select('id, employer_id, created_at').order('created_at', { ascending: false }),
   ])
@@ -214,6 +229,7 @@ export default async function AdminEmployersPage({ searchParams }: { searchParam
       `/admin/employers${encodeParams({
         q: qValue,
         ...(mode === 'resend' ? { resent: '1' } : { sent: '1' }),
+        ...(mode === 'resend' ? { resentEmployerId: employerId } : { sentEmployerId: employerId }),
       })}`
     )
   }
@@ -298,6 +314,7 @@ export default async function AdminEmployersPage({ searchParams }: { searchParam
                 <tr className="text-left text-xs uppercase tracking-wide text-slate-600">
                   <th className="px-3 py-2">Company</th>
                   <th className="px-3 py-2">Contact email</th>
+                  <th className="px-3 py-2">Beta</th>
                   <th className="px-3 py-2">Claim status</th>
                   <th className="px-3 py-2">Actions</th>
                 </tr>
@@ -305,7 +322,7 @@ export default async function AdminEmployersPage({ searchParams }: { searchParam
               <tbody className="divide-y divide-slate-100">
                 {filteredEmployers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-8 text-center text-sm text-slate-500">
+                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-slate-500">
                       No employers found.
                     </td>
                   </tr>
@@ -313,6 +330,13 @@ export default async function AdminEmployersPage({ searchParams }: { searchParam
                   filteredEmployers.map((employer) => {
                     const claimStatus = buildEmployerClaimStatus(tokensByEmployer.get(employer.user_id) ?? [])
                     const latestInternship = latestInternshipByEmployer.get(employer.user_id)
+                    const contactEmail = employer.contact_email?.trim() ?? ''
+                    const hasContactEmail = contactEmail.length > 0
+                    const isPlaceholderEmail = isPlaceholderContactEmail(contactEmail)
+                    const canSendClaimLink = hasContactEmail && !isPlaceholderEmail
+                    const sentEmployerId = (resolvedSearchParams?.sent_employer_id ?? '').trim()
+                    const resentEmployerId = (resolvedSearchParams?.resent_employer_id ?? '').trim()
+                    const highlightedByAction = sentEmployerId === employer.user_id || resentEmployerId === employer.user_id
 
                     return (
                       <tr key={employer.user_id}>
@@ -353,21 +377,59 @@ export default async function AdminEmployersPage({ searchParams }: { searchParam
                             </form>
                           ) : (
                             <div className="space-y-1.5">
-                              <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm text-slate-800">
-                                {employer.contact_email?.trim() || 'No contact email set'}
+                              <div className="flex items-center gap-2">
+                                <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm text-slate-800">
+                                  {contactEmail || 'No contact email set'}
+                                </div>
+                                {contactEmail ? <CopyValueButton value={contactEmail} label="Copy email" /> : null}
                               </div>
-                              <Link
-                                href={`/admin/employers${encodeParams({ q: resolvedSearchParams?.q ?? '', edit: employer.user_id })}`}
-                                className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                              >
-                                Change email
-                              </Link>
+                              {isPlaceholderEmail ? (
+                                <div className="text-[11px] text-amber-700">
+                                  Placeholder contact email. Add a real inbox before sending claim links.
+                                </div>
+                              ) : null}
+                              {!hasContactEmail ? (
+                                <div className="text-[11px] text-amber-700">Set a contact email to send a claim link.</div>
+                              ) : null}
+                              <div>
+                                <Link
+                                  href={`/admin/employers${encodeParams({ q: resolvedSearchParams?.q ?? '', edit: employer.user_id })}`}
+                                  className="inline-flex rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                >
+                                  Change email
+                                </Link>
+                              </div>
                             </div>
                           )}
                         </td>
+                        <td className="px-3 py-3">
+                          <BetaEmployerToggle employerId={employer.user_id} initialIsBetaEmployer={Boolean(employer.is_beta_employer)} />
+                        </td>
                         <td className="px-3 py-3 text-xs text-slate-700">
+                          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                            {highlightedByAction ? (
+                              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+                                Claim link sent
+                              </span>
+                            ) : null}
+                            {claimStatus.pendingCount > 0 ? (
+                              <span className="rounded-full border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-800">
+                                Active link available
+                              </span>
+                            ) : claimStatus.lastClaimedAt ? (
+                              <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+                                Claimed
+                              </span>
+                            ) : (
+                              <span className="rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                                Not sent
+                              </span>
+                            )}
+                          </div>
                           <div>Pending tokens: {claimStatus.pendingCount}</div>
                           <div>Last sent: {formatDate(claimStatus.lastSentAt)}</div>
+                          <div>Sent to: {claimStatus.lastSentTo || '—'}</div>
+                          <div>Latest pending expires: {formatDate(claimStatus.latestPendingExpiresAt)}</div>
                           <div>Last claimed: {formatDate(claimStatus.lastClaimedAt)}</div>
                         </td>
                         <td className="px-3 py-3">
@@ -378,7 +440,8 @@ export default async function AdminEmployersPage({ searchParams }: { searchParam
                               <input type="hidden" name="mode" value="send" />
                               <button
                                 type="submit"
-                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                disabled={!canSendClaimLink}
+                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 Send claim link
                               </button>
@@ -393,7 +456,8 @@ export default async function AdminEmployersPage({ searchParams }: { searchParam
                               </label>
                               <button
                                 type="submit"
-                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                disabled={!canSendClaimLink}
+                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 Resend claim link
                               </button>

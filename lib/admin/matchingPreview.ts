@@ -76,6 +76,8 @@ type StudentProfileRow = {
   year: string | null
   experience_level: string | null
   interests: string | null
+  preferred_city: string | null
+  preferred_state: string | null
   majors: string[] | string | null
   major?: { name?: string | null } | Array<{ name?: string | null }> | null
   availability_start_month: string | null
@@ -308,7 +310,7 @@ function toInternshipPreviewItem(row: InternshipRow): AdminInternshipPreviewItem
 export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, query: string) {
   const { data: studentRowsData } = await admin
     .from('student_profiles')
-    .select('user_id, school, major:canonical_majors(name), majors, year, experience_level, interests, availability_start_month, availability_hours_per_week')
+    .select('user_id, school, major:canonical_majors(name), majors, year, experience_level, interests, preferred_city, preferred_state, availability_start_month, availability_hours_per_week')
     .limit(250)
 
   const studentRows = (studentRowsData ?? []) as StudentProfileRow[]
@@ -441,6 +443,16 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
         : fallbackSeason
           ? [fallbackSeason]
           : []
+    const fallbackPreferredLocation =
+      row.preferred_city?.trim() && row.preferred_state?.trim()
+        ? `${row.preferred_city.trim()}, ${row.preferred_state.trim()}`
+        : ''
+    const preferredLocations =
+      preferenceSignals.preferredLocations.length > 0
+        ? preferenceSignals.preferredLocations
+        : fallbackPreferredLocation
+          ? [fallbackPreferredLocation]
+          : []
 
     const skillIds = Array.from(new Set(skillIdsByStudent.get(row.user_id) ?? []))
     const courseworkCategoryIds = Array.from(new Set(courseworkCategoryIdsByStudent.get(row.user_id) ?? []))
@@ -457,9 +469,9 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
       experienceLevel: row.experience_level,
       preferredTerms,
       availabilityHours: row.availability_hours_per_week,
-      preferredLocations: preferenceSignals.preferredLocations,
+      preferredLocations,
       preferredWorkModes: preferenceSignals.preferredWorkModes,
-      skillCount: skillIds.length,
+      skillCount: skillIds.length + preferenceSignals.skills.length,
       courseworkCategoryCount: canonicalCourseworkCategoryIds.length > 0 ? canonicalCourseworkCategoryIds.length : courseworkCategoryIds.length,
     })
 
@@ -478,7 +490,7 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
       availability_hours_per_week: row.availability_hours_per_week,
       availability_start_month: row.availability_start_month,
       preferred_terms: preferredTerms,
-      preferred_locations: preferenceSignals.preferredLocations,
+      preferred_locations: preferredLocations,
       preferred_work_modes: preferenceSignals.preferredWorkModes,
       remote_only: preferenceSignals.remoteOnly,
     }
@@ -500,7 +512,7 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
       courseworkCategoryNames,
       preferredTerms,
       preferredWorkModes: preferenceSignals.preferredWorkModes,
-      preferredLocations: preferenceSignals.preferredLocations,
+      preferredLocations,
       coverage,
       profile,
     } satisfies AdminStudentPreviewOption

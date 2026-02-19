@@ -13,6 +13,16 @@ type NotificationItem = {
   tone?: 'default' | 'success' | 'warning'
 }
 
+type StoredNotificationRow = {
+  id: string
+  type: string
+  title: string
+  body: string
+  href: string | null
+  created_at: string | null
+  read_at: string | null
+}
+
 type StudentApplicationNotificationRow = {
   id: string
   internship_id: string
@@ -136,7 +146,32 @@ export default async function NotificationsPage() {
 
   let items: NotificationItem[] = []
 
-  if (role === 'student') {
+  const { data: storedNotifications } = await supabase
+    .from('notifications')
+    .select('id, type, title, body, href, created_at, read_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(40)
+
+  const storedItems = ((storedNotifications ?? []) as StoredNotificationRow[]).map((row) => ({
+    id: row.id,
+    title: row.title,
+    description: row.body,
+    timestamp: row.created_at,
+    href: row.href || '/notifications',
+    tone:
+      row.type === 'ats_invite_sent'
+        ? 'success'
+        : row.type === 'ats_completed_self_reported'
+          ? 'default'
+          : row.type === 'message_received'
+            ? 'default'
+            : 'default',
+  }))
+
+  if (storedItems.length > 0) {
+    items = storedItems
+  } else if (role === 'student') {
     const { data } = await supabase
       .from('applications')
       .select('id, internship_id, status, created_at, reviewed_at, internship:internships(title, company_name)')

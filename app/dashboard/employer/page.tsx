@@ -36,7 +36,7 @@ import { sanitizeSkillLabels } from '@/lib/skills/sanitizeSkillLabels'
 import BackWithFallbackButton from '@/components/navigation/BackWithFallbackButton'
 import { INTERNSHIP_CATEGORIES } from '@/lib/internships/categories'
 import { TARGET_STUDENT_YEAR_LABELS, TARGET_STUDENT_YEAR_OPTIONS } from '@/lib/internships/years'
-import { inferExternalApplyType, normalizeApplyMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import { inferExternalApplyType, normalizeApplyMode, normalizeAtsStageMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import ListingDraftCleanup from '@/components/employer/listing/ListingDraftCleanup'
 import ListingWizard from '@/components/employer/listing/ListingWizard'
@@ -299,11 +299,11 @@ export default async function EmployerDashboardPage({
 
   const { data: employerProfile } = await supabase
     .from('employer_profiles')
-    .select('company_name, location_address_line1, location_state')
+    .select('company_name, location_address_line1, location_state, contact_email')
     .eq('user_id', user.id)
     .single()
 
-  if (!employerProfile?.company_name?.trim() || !employerProfile?.location_address_line1?.trim()) {
+  if (!employerProfile?.company_name?.trim() || !employerProfile?.location_address_line1?.trim() || !employerProfile?.contact_email?.trim()) {
     redirect('/signup/employer/details')
   }
 
@@ -385,7 +385,7 @@ export default async function EmployerDashboardPage({
     ? await supabase
         .from('internships')
         .select(
-          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, external_apply_url, external_apply_type, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
+          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
         )
         .eq('id', editingInternshipId)
         .eq('employer_id', user.id)
@@ -456,7 +456,8 @@ export default async function EmployerDashboardPage({
       : Array.isArray(editingInternship?.majors)
         ? editingInternship.majors
         : parseCommaList(formatMajors(editingInternship?.majors ?? ''))
-  const { plan } = await getEmployerVerificationStatus({ supabase, userId: user.id })
+  const verificationSummary = await getEmployerVerificationStatus({ supabase, userId: user.id })
+  const { plan } = verificationSummary
   const { data: conciergeRequests } = launchConciergeEnabled && !createOnly
     ? await supabase
         .from('employer_concierge_requests')
@@ -609,11 +610,14 @@ export default async function EmployerDashboardPage({
     const requiredCourseCategoryIdsRaw = selectedRequiredCourseCategoryIds.join(',')
     const applicationDeadline = normalizeDateInputValue(String(formData.get('application_deadline') ?? '').trim())
     const applyMode = normalizeApplyMode(String(formData.get('apply_mode') ?? 'native'))
+    const atsStageModeInput = String(formData.get('ats_stage_mode') ?? '').trim()
+    const atsStageMode = normalizeAtsStageMode(atsStageModeInput || (verification.isBetaEmployer ? 'curated' : 'immediate'))
     const externalApplyUrlInput = String(formData.get('external_apply_url') ?? '').trim()
     const externalApplyUrl = normalizeExternalApplyUrl(externalApplyUrlInput)
     const externalApplyTypeInput = String(formData.get('external_apply_type') ?? '').trim().toLowerCase()
     const externalApplyType = externalApplyTypeInput || (externalApplyUrl ? inferExternalApplyType(externalApplyUrl) : null)
     const requiresExternalApply = applyMode === 'ats_link' || applyMode === 'hybrid'
+    const resolvedAtsStageMode = requiresExternalApply ? atsStageMode : null
     const resolvedExternalApplyUrl = requiresExternalApply ? externalApplyUrl : null
     const resolvedExternalApplyType = requiresExternalApply ? externalApplyType : null
     if (requiresExternalApply && !externalApplyUrl) {
@@ -795,6 +799,7 @@ export default async function EmployerDashboardPage({
       experience_level: targetStudentYear || null,
       work_mode: workMode,
       apply_mode: applyMode,
+      ats_stage_mode: resolvedAtsStageMode,
       external_apply_url: resolvedExternalApplyUrl,
       external_apply_type: resolvedExternalApplyType,
       location_type: locationType,
@@ -827,6 +832,7 @@ export default async function EmployerDashboardPage({
         work_mode: workMode,
         location_type: locationType,
         apply_mode: applyMode,
+        ats_stage_mode: resolvedAtsStageMode,
         category: category || null,
         role_category: category || null,
         is_active: isPublishing,
@@ -1100,7 +1106,7 @@ export default async function EmployerDashboardPage({
     const { data: draft } = await supabaseAction
       .from('internships')
       .select(
-        'id, title, employer_id, work_mode, location_city, location_state, pay, pay_min, pay_max, hours_min, hours_max, term, majors, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, apply_mode, external_apply_url, is_active, status, internship_required_skill_items(skill_id), internship_required_course_categories(category_id)'
+        'id, title, employer_id, work_mode, location_city, location_state, pay, pay_min, pay_max, hours_min, hours_max, term, majors, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, apply_mode, ats_stage_mode, external_apply_url, is_active, status, internship_required_skill_items(skill_id), internship_required_course_categories(category_id)'
       )
       .eq('id', internshipId)
       .eq('employer_id', currentUser.id)
@@ -1478,6 +1484,25 @@ export default async function EmployerDashboardPage({
         </div>
         ) : null}
 
+        {!createOnly && launchConciergeEnabled && !showConciergeForm ? (
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-blue-900">Need help publishing your internship?</h2>
+                <p className="mt-1 text-sm text-blue-800">
+                  Concierge can draft and publish your listing from a short intake.
+                </p>
+              </div>
+              <Link
+                href="/dashboard/employer?concierge=1"
+                className="inline-flex items-center justify-center rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100"
+              >
+                Request concierge help
+              </Link>
+            </div>
+          </div>
+        ) : null}
+
         {!createOnly ? (
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1718,6 +1743,9 @@ export default async function EmployerDashboardPage({
                 applyMode:
                   (editingInternship?.apply_mode as 'native' | 'ats_link' | 'hybrid' | null) ??
                   (plan.id === 'free' ? 'native' : 'ats_link'),
+                atsStageMode:
+                  (editingInternship?.ats_stage_mode as 'curated' | 'immediate' | null) ??
+                  (verificationSummary.isBetaEmployer ? 'curated' : 'immediate'),
                 externalApplyUrl: editingInternship?.external_apply_url ?? '',
                 externalApplyType: editingInternship?.external_apply_type ?? '',
                 payType: 'hourly',

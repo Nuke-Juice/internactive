@@ -12,9 +12,10 @@ import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
 import { buildApplicationMatchSnapshot } from '@/lib/applicationMatchSnapshot'
 import { sendEmployerApplicationAlert } from '@/lib/email/employerAlerts'
 import { guardApplicationSubmit, EMAIL_VERIFICATION_ERROR } from '@/lib/auth/verifiedActionGate'
-import { normalizeApplyMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import { normalizeApplyMode, normalizeAtsStageMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
+import { dispatchInAppNotification } from '@/lib/notifications/dispatcher'
 
 type ApplyFromMicroOnboardingInput = {
   listingId: string
@@ -34,6 +35,7 @@ export type ApplyFromListingModalState = {
   code?: ApplyErrorCode
   externalApplyUrl?: string | null
   externalApplyRequired?: boolean
+  successMessage?: string
 }
 
 function isSchemaCacheError(message: string | null | undefined) {
@@ -96,7 +98,7 @@ export async function applyFromMicroOnboardingAction({
     supabase
       .from('internships')
       .select(
-        'id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, external_apply_url, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
       .eq('is_active', true)
@@ -205,8 +207,10 @@ export async function applyFromMicroOnboardingAction({
   })
   const applyMode = normalizeApplyMode(String(listing.apply_mode ?? 'native'))
   const requiresExternalApply = applyMode === 'ats_link' || applyMode === 'hybrid'
+  const atsStageMode = normalizeAtsStageMode(String((listing as { ats_stage_mode?: string | null }).ats_stage_mode ?? 'curated'))
   const externalApplyUrl = normalizeExternalApplyUrl(String(listing.external_apply_url ?? ''))
-  if (requiresExternalApply && !externalApplyUrl) {
+  const shouldRequireImmediateAts = requiresExternalApply && atsStageMode === 'immediate'
+  if (shouldRequireImmediateAts && !externalApplyUrl) {
     await trackAnalyticsEvent({
       eventName: 'apply_blocked',
       userId: user.id,
@@ -215,17 +219,19 @@ export async function applyFromMicroOnboardingAction({
     return { ok: false, code: APPLY_ERROR.APPLICATION_INSERT_FAILED }
   }
 
-  const { data: insertedApplication, error: insertError } = await supabase.rpc('submit_application_with_cap', {
+  const initialInviteStatus = shouldRequireImmediateAts ? 'invited' : 'not_invited'
+  const { data: insertedApplication, error: insertError } = await supabase.rpc('submit_application_with_cap_v2', {
     in_internship_id: listingId,
     in_student_id: user.id,
     in_resume_url: resumePath,
     in_status: 'submitted',
-    in_external_apply_required: requiresExternalApply,
+    in_external_apply_required: shouldRequireImmediateAts,
     in_quick_apply_note: null,
     in_match_score: snapshot.match_score,
     in_match_reasons: snapshot.match_reasons,
     in_match_gaps: snapshot.match_gaps,
     in_matching_version: snapshot.matching_version,
+    in_ats_invite_status: initialInviteStatus,
   })
 
   if (insertError) {
@@ -274,6 +280,21 @@ export async function applyFromMicroOnboardingAction({
     } catch {
       // no-op; email should not block application submission
     }
+    const employerId = (listing as { employer_id?: string | null }).employer_id ?? null
+    if (employerId) {
+      try {
+        await dispatchInAppNotification({
+          userId: employerId,
+          type: 'application_submitted',
+          title: `New Quick Apply: ${String((listing as { title?: string | null }).title ?? 'Internship')}`,
+          body: 'A student submitted a Quick Apply. Review in your applicant inbox.',
+          href: `/dashboard/employer/applicants?internship_id=${encodeURIComponent(listingId)}`,
+          metadata: { internship_id: listingId, application_id: insertedApplicationId },
+        })
+      } catch (notificationError) {
+        console.warn('[notifications] application_submitted dispatch failed', notificationError)
+      }
+    }
   }
 
   return { ok: true }
@@ -310,7 +331,7 @@ export async function submitApplicationFromListingModalAction(
     supabase
       .from('internships')
       .select(
-        'id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, external_apply_url, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
       .eq('is_active', true)
@@ -422,8 +443,10 @@ export async function submitApplicationFromListingModalAction(
 
   const applyMode = normalizeApplyMode(String(listing.apply_mode ?? 'native'))
   const requiresExternalApply = applyMode === 'ats_link' || applyMode === 'hybrid'
+  const atsStageMode = normalizeAtsStageMode(String((listing as { ats_stage_mode?: string | null }).ats_stage_mode ?? 'curated'))
   const externalApplyUrl = normalizeExternalApplyUrl(String(listing.external_apply_url ?? ''))
-  if (requiresExternalApply && !externalApplyUrl) {
+  const shouldRequireImmediateAts = requiresExternalApply && atsStageMode === 'immediate'
+  if (shouldRequireImmediateAts && !externalApplyUrl) {
     return {
       ok: false,
       code: APPLY_ERROR.APPLICATION_INSERT_FAILED,
@@ -431,17 +454,19 @@ export async function submitApplicationFromListingModalAction(
     }
   }
 
-  const { data: insertedApplication, error: insertError } = await supabase.rpc('submit_application_with_cap', {
+  const initialInviteStatus = shouldRequireImmediateAts ? 'invited' : 'not_invited'
+  const { data: insertedApplication, error: insertError } = await supabase.rpc('submit_application_with_cap_v2', {
     in_internship_id: listingId,
     in_student_id: user.id,
     in_resume_url: resumePath,
     in_status: 'submitted',
-    in_external_apply_required: requiresExternalApply,
+    in_external_apply_required: shouldRequireImmediateAts,
     in_quick_apply_note: screeningResponse || null,
     in_match_score: snapshot.match_score,
     in_match_reasons: snapshot.match_reasons,
     in_match_gaps: snapshot.match_gaps,
     in_matching_version: snapshot.matching_version,
+    in_ats_invite_status: initialInviteStatus,
   })
 
   if (insertError) {
@@ -463,11 +488,29 @@ export async function submitApplicationFromListingModalAction(
     } catch {
       // no-op
     }
+    const employerId = (listing as { employer_id?: string | null }).employer_id ?? null
+    if (employerId) {
+      try {
+        await dispatchInAppNotification({
+          userId: employerId,
+          type: 'application_submitted',
+          title: `New Quick Apply: ${String((listing as { title?: string | null }).title ?? 'Internship')}`,
+          body: 'A student submitted a Quick Apply. Review in your applicant inbox.',
+          href: `/dashboard/employer/applicants?internship_id=${encodeURIComponent(listingId)}`,
+          metadata: { internship_id: listingId, application_id: insertedApplicationId },
+        })
+      } catch (notificationError) {
+        console.warn('[notifications] application_submitted dispatch failed', notificationError)
+      }
+    }
   }
 
   return {
     ok: true,
-    externalApplyRequired: requiresExternalApply,
-    externalApplyUrl: externalApplyUrl || null,
+    externalApplyRequired: shouldRequireImmediateAts,
+    externalApplyUrl: shouldRequireImmediateAts ? (externalApplyUrl || null) : null,
+    successMessage: shouldRequireImmediateAts
+      ? 'Application submitted successfully.'
+      : 'Application sent. If the employer wants to move forward, you’ll receive an invite to complete their official application.',
   }
 }

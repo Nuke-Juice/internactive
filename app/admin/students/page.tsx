@@ -19,6 +19,8 @@ type StudentRow = {
   interests: string | null
   availability_start_month: string | null
   availability_hours_per_week: number | null
+  preferred_city: string | null
+  preferred_state: string | null
 }
 
 type StudentViewRow = StudentRow & {
@@ -103,7 +105,7 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
   const query = admin
     .from('student_profiles')
     .select(
-      'user_id, school, major:canonical_majors(name), majors, year, experience_level, interests, availability_start_month, availability_hours_per_week'
+      'user_id, school, major:canonical_majors(name), majors, year, experience_level, interests, availability_start_month, availability_hours_per_week, preferred_city, preferred_state'
     )
     .limit(200)
   const { data } = await query
@@ -178,10 +180,14 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
     const majorTokens = parseMajors(row.majors)
     const hasHours = typeof row.availability_hours_per_week === 'number' && row.availability_hours_per_week > 0
     const hasTerm = preferences.preferredTerms.length > 0 || Boolean(row.availability_start_month?.trim())
-    const hasLocationOrMode = preferences.preferredLocations.length > 0 || preferences.preferredWorkModes.length > 0
+    const hasLocationOrMode =
+      preferences.preferredLocations.length > 0 ||
+      preferences.preferredWorkModes.length > 0 ||
+      Boolean(row.preferred_city?.trim() && row.preferred_state?.trim())
+    const totalSkillSignals = canonicalSkillLabels.length + preferences.skills.length
     const checks = [
       ['majors', majorTokens.length > 0 || major !== 'Major not set'],
-      ['skills', canonicalSkillLabels.length > 0],
+      ['skills', totalSkillSignals > 0],
       ['coursework categories', courseworkCategoryNames.length > 0],
       ['term', hasTerm],
       ['hours', hasHours],

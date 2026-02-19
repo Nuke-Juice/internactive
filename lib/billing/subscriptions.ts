@@ -27,6 +27,29 @@ export function resolveEmployerPlan(params: { status: string | null | undefined;
   return getEmployerPlan(resolveEmployerPlanId(params))
 }
 
+export function getEmployerPaidAccess(params: {
+  status: string | null | undefined
+  isBetaEmployer: boolean
+}) {
+  return isVerifiedEmployerStatus(params.status) || params.isBetaEmployer
+}
+
+export function getEmployerFeaturePlanId(params: {
+  subscriptionPlanId: EmployerPlanId
+  isBetaEmployer: boolean
+}): EmployerPlanId {
+  if (!params.isBetaEmployer) return params.subscriptionPlanId
+  return params.subscriptionPlanId === 'free' ? 'pro' : params.subscriptionPlanId
+}
+
+export function getEmployerListingLimit(params: {
+  plan: EmployerPlan
+  isBetaEmployer: boolean
+}) {
+  if (params.isBetaEmployer) return null
+  return params.plan.maxActiveInternships
+}
+
 export async function getEmployerVerificationStatus(params: {
   supabase: SupabaseClient
   userId: string
@@ -36,28 +59,47 @@ export async function getEmployerVerificationStatus(params: {
     supabase.from('subscriptions').select('status, price_id').eq('user_id', userId).maybeSingle(),
     supabase
       .from('employer_profiles')
-      .select('verified_employer, verified_employer_manual_override')
+      .select('verified_employer, verified_employer_manual_override, is_beta_employer')
       .eq('user_id', userId)
       .maybeSingle(),
   ])
 
   if (subscriptionError) {
     const fallbackPlan = getEmployerPlan('free')
-    return { isVerifiedEmployer: false, status: null as string | null, planId: fallbackPlan.id, plan: fallbackPlan, priceId: null as string | null }
+    return {
+      isVerifiedEmployer: false,
+      hasPaidAccess: false,
+      isBetaEmployer: false,
+      status: null as string | null,
+      planId: fallbackPlan.id,
+      plan: fallbackPlan,
+      priceId: null as string | null,
+      listingLimit: fallbackPlan.maxActiveInternships,
+    }
   }
 
   const status = subscriptionData?.status ?? null
   const priceId = subscriptionData?.price_id ?? null
-  const plan = resolveEmployerPlan({ status, priceId })
+  const subscriptionPlan = resolveEmployerPlan({ status, priceId })
+  const isBetaEmployer = Boolean((employerProfileData as { is_beta_employer?: boolean | null } | null)?.is_beta_employer)
+  const hasPaidAccess = getEmployerPaidAccess({ status, isBetaEmployer })
+  const planId = getEmployerFeaturePlanId({ subscriptionPlanId: subscriptionPlan.id, isBetaEmployer })
+  const basePlan = getEmployerPlan(planId)
+  const plan =
+    isBetaEmployer && basePlan.maxActiveInternships !== null ? { ...basePlan, maxActiveInternships: null } : basePlan
+  const listingLimit = getEmployerListingLimit({ plan, isBetaEmployer })
   const hasManualOverride = Boolean((employerProfileData as { verified_employer_manual_override?: boolean | null } | null)?.verified_employer_manual_override)
-  const paidVerifiedTier = isVerifiedEmployerStatus(status) && plan.id === 'pro'
-  const isVerifiedEmployer = hasManualOverride || paidVerifiedTier
+  const paidVerifiedTier = hasPaidAccess && plan.id === 'pro'
+  const isVerifiedEmployer = hasManualOverride || paidVerifiedTier || isBetaEmployer
 
   return {
     isVerifiedEmployer,
+    hasPaidAccess,
+    isBetaEmployer,
     status,
-    planId: plan.id,
+    planId,
     plan,
     priceId,
+    listingLimit,
   }
 }

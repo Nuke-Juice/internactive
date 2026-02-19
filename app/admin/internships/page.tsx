@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { revalidatePath } from 'next/cache'
 import { isVerifiedEmployerStatus } from '@/lib/billing/subscriptions'
 import { requireAnyRole } from '@/lib/auth/requireAnyRole'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
@@ -22,6 +21,7 @@ import { isVerifiedCityForState, normalizeStateCode } from '@/lib/locations/usLo
 import { normalizeSkills } from '@/lib/skills/normalizeSkills'
 import { sanitizeSkillLabels } from '@/lib/skills/sanitizeSkillLabels'
 import { requireVerifiedEmail } from '@/lib/auth/emailVerification'
+import { MATCH_SIGNALS, computeInternshipMatchCoverage } from '@/lib/admin/internshipMatchCoverage'
 import InternshipLocationFields from '@/components/forms/InternshipLocationFields'
 import CatalogMultiSelect from './_components/CatalogMultiSelect'
 import TemplatePicker from './_components/TemplatePicker'
@@ -50,7 +50,6 @@ type InternshipAdminRow = {
   apply_deadline: string | null
   required_skills: string[] | null
   preferred_skills: string[] | null
-  recommended_coursework: string[] | null
   majors: string[] | string | null
   term: string | null
   target_graduation_years: string[] | null
@@ -60,6 +59,11 @@ type InternshipAdminRow = {
   remote_allowed: boolean | null
 }
 
+function formatDate(value: string | null) {
+  if (!value) return 'No deadline'
+  return value
+}
+
 type EmployerOption = {
   user_id: string
   company_name: string | null
@@ -67,6 +71,7 @@ type EmployerOption = {
 type EmployerIdentityRow = {
   user_id: string
   company_name: string | null
+  contact_email: string | null
 }
 
 type EmployerUserIdRow = { user_id: string | null }
@@ -177,11 +182,6 @@ function validatePublishInput(params: {
   return null
 }
 
-function formatDate(value: string | null) {
-  if (!value) return 'No deadline'
-  return value
-}
-
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function parseJsonStringArray(raw: FormDataEntryValue | null) {
@@ -270,7 +270,7 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
   let internshipsQuery = admin
     .from('internships')
     .select(
-      'id, title, employer_id, company_name, source, is_active, category, experience_level, apply_deadline, required_skills, preferred_skills, recommended_coursework, majors, term, target_graduation_years, hours_per_week, location_city, location_state, remote_allowed',
+      'id, title, employer_id, company_name, source, is_active, category, experience_level, apply_deadline, required_skills, preferred_skills, majors, term, target_graduation_years, hours_per_week, location_city, location_state, remote_allowed',
       {
       count: 'exact',
       }
@@ -771,12 +771,18 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
     if (contactEmail) {
       const { data: existingByContact } = await adminWrite
         .from('employer_profiles')
-        .select('user_id')
+        .select('user_id, company_name, website')
         .eq('contact_email', contactEmail)
         .limit(1)
         .maybeSingle()
 
       if (existingByContact?.user_id) {
+        const updatePayload: { company_name?: string; website?: string | null } = {}
+        if (!existingByContact.company_name?.trim()) updatePayload.company_name = companyName
+        if (!existingByContact.website?.trim() && website) updatePayload.website = website
+        if (Object.keys(updatePayload).length > 0) {
+          await adminWrite.from('employer_profiles').update(updatePayload).eq('user_id', existingByContact.user_id)
+        }
         redirect(
           `${baseHref}${baseHref.includes('?') ? '&' : '?'}success=Employer+already+exists&new_employer_id=${encodeURIComponent(existingByContact.user_id)}`
         )
@@ -785,14 +791,28 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
 
     const { data: existingByCompany } = await adminWrite
       .from('employer_profiles')
-      .select('user_id, company_name')
-      .limit(500)
+      .select('user_id, company_name, contact_email')
+      .ilike('company_name', companyName)
+      .limit(5)
 
     const matchedByCompany = ((existingByCompany ?? []) as EmployerIdentityRow[]).find(
       (row: EmployerIdentityRow) => normalizeCompanyName(row.company_name) === normalizeCompanyName(companyName)
     )
 
     if (matchedByCompany?.user_id) {
+      const updatePayload: { contact_email?: string; website?: string | null } = {}
+      if (contactEmail && (matchedByCompany.contact_email ?? '').trim().toLowerCase() !== contactEmail) {
+        updatePayload.contact_email = contactEmail
+      }
+      if (website) {
+        updatePayload.website = website
+      }
+      if (Object.keys(updatePayload).length > 0) {
+        await adminWrite
+          .from('employer_profiles')
+          .update(updatePayload)
+          .eq('user_id', matchedByCompany.user_id)
+      }
       redirect(
         `${baseHref}${baseHref.includes('?') ? '&' : '?'}success=Employer+already+exists&new_employer_id=${encodeURIComponent(matchedByCompany.user_id)}`
       )
@@ -830,7 +850,7 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
       user_id: employerId,
       company_name: companyName,
       website: website || null,
-      contact_email: contactEmail || syntheticAuthEmail,
+      contact_email: contactEmail || null,
       industry: 'Unknown',
       location: 'Unknown',
     })
@@ -846,104 +866,6 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
     redirect(
       `${baseHref}${baseHref.includes('?') ? '&' : '?'}success=Employer+created&new_employer_id=${encodeURIComponent(employerId)}`
     )
-  }
-
-  async function toggleActive(formData: FormData) {
-    'use server'
-
-    await requireAnyRole(ADMIN_ROLES, { requestedPath: '/admin/internships' })
-    const adminWrite = supabaseAdmin()
-
-    const internshipId = String(formData.get('internship_id') ?? '').trim()
-    const nextActive = String(formData.get('next_active') ?? '') === 'true'
-    const qValue = String(formData.get('q') ?? '').trim()
-    const pageValue = normalizePage(String(formData.get('page') ?? '1'))
-    const templateValue = String(formData.get('template') ?? '').trim()
-
-    if (!internshipId) {
-      redirect('/admin/internships?error=Missing+internship+id')
-    }
-
-    const { error } = await adminWrite
-      .from('internships')
-      .update({ is_active: nextActive })
-      .eq('id', internshipId)
-
-    if (error) {
-      redirect(`/admin/internships?error=${encodeURIComponent(error.message)}`)
-    }
-
-    const href = buildPageHref({
-      q: qValue || undefined,
-      page: pageValue,
-      template: templateValue || undefined,
-    })
-    redirect(`${href}${href.includes('?') ? '&' : '?'}success=Internship+status+updated`)
-  }
-
-  async function deleteInternship(formData: FormData) {
-    'use server'
-
-    await requireAnyRole(ADMIN_ROLES, { requestedPath: '/admin/internships' })
-    const adminWrite = supabaseAdmin()
-
-    const internshipId = String(formData.get('internship_id') ?? '').trim()
-    const confirmationPhrase = String(formData.get('confirmation_phrase') ?? '').trim().toUpperCase()
-    const qValue = String(formData.get('q') ?? '').trim()
-    const pageValue = normalizePage(String(formData.get('page') ?? '1'))
-    const templateValue = String(formData.get('template') ?? '').trim()
-
-    if (!internshipId) {
-      redirect('/admin/internships?error=Missing+internship+id')
-    }
-    if (confirmationPhrase !== 'DELETE') {
-      redirect('/admin/internships?error=Deletion+not+confirmed')
-    }
-
-    const deleteByInternshipId = async (table: string) => {
-      const { error } = await adminWrite.from(table).delete().eq('internship_id', internshipId)
-      if (error) {
-        redirect(`/admin/internships?error=${encodeURIComponent(error.message)}`)
-      }
-    }
-
-    await deleteByInternshipId('applications')
-    await deleteByInternshipId('internship_required_skill_items')
-    await deleteByInternshipId('internship_preferred_skill_items')
-    await deleteByInternshipId('internship_required_course_categories')
-    await deleteByInternshipId('internship_coursework_items')
-    await deleteByInternshipId('internship_coursework_category_links')
-    await deleteByInternshipId('internship_major_links')
-    await deleteByInternshipId('internship_events')
-
-    const { error: claimTokenError } = await adminWrite
-      .from('employer_claim_tokens')
-      .delete()
-      .eq('internship_id', internshipId)
-    if (claimTokenError) {
-      redirect(`/admin/internships?error=${encodeURIComponent(claimTokenError.message)}`)
-    }
-
-    const { error } = await adminWrite
-      .from('internships')
-      .delete()
-      .eq('id', internshipId)
-
-    if (error) {
-      redirect(`/admin/internships?error=${encodeURIComponent(error.message)}`)
-    }
-
-    revalidatePath('/admin/internships')
-    revalidatePath('/')
-    revalidatePath('/jobs')
-    revalidatePath(`/jobs/${internshipId}`)
-
-    const href = buildPageHref({
-      q: qValue || undefined,
-      page: pageValue,
-      template: templateValue || undefined,
-    })
-    redirect(`${href}${href.includes('?') ? '&' : '?'}success=Internship+deleted`)
   }
 
   const defaultResponsibilities = formatList(selectedTemplate?.responsibilities)
@@ -1040,20 +962,18 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50">
                 <tr className="text-left text-xs font-semibold text-slate-600">
-                  <th className="px-3 py-2">Title</th>
-                  <th className="px-3 py-2">Employer</th>
+                  <th className="px-3 py-2">Title / Employer</th>
                   <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Source</th>
-                  <th className="px-3 py-2">Verification status</th>
-                  <th className="px-3 py-2">Match signals</th>
-                  <th className="px-3 py-2">Applicants count</th>
+                  <th className="px-3 py-2">Verification</th>
+                  <th className="px-3 py-2">Applicants</th>
+                  <th className="px-3 py-2">Coverage</th>
                   <th className="px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {internships.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-3 py-8 text-center text-sm text-slate-500">
+                    <td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-500">
                       No internships found.
                     </td>
                   </tr>
@@ -1068,7 +988,6 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                     const preferredSkillLinks = preferredSkillLinksByInternshipId.get(row.id) ?? 0
                     const requiredSkillsCount = row.required_skills?.length ?? 0
                     const preferredSkillsCount = row.preferred_skills?.length ?? 0
-                    const courseworkCount = row.recommended_coursework?.length ?? 0
                     const courseworkCategoryLinkCount = courseworkCategoryLinksByInternshipId.get(row.id) ?? 0
                     const majorsPresent = Array.isArray(row.majors)
                       ? row.majors.length > 0
@@ -1083,58 +1002,44 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                     const hoursPresent = typeof row.hours_per_week === 'number' && row.hours_per_week > 0
                     const locationOrRemotePresent =
                       Boolean(row.remote_allowed) || Boolean(row.location_city?.trim() || row.location_state?.trim())
-                    const coverageChecks = [
-                      ['majors', majorsPresent] as const,
-                      ['coursework categories', courseworkCategoryLinkCount > 0] as const,
-                      ['skills', requiredSkillsCount + preferredSkillsCount > 0] as const,
-                      ['target_graduation_years', targetGraduationYearsPresent] as const,
-                      ['experience_level', experiencePresent] as const,
-                      ['term', termPresent] as const,
-                      ['hours_per_week', hoursPresent] as const,
-                      ['location/remote', locationOrRemotePresent] as const,
-                    ]
-                    const coverageMet = coverageChecks.filter(([, present]) => present).length
-                    const missingCoverageFields = coverageChecks
-                      .filter(([, present]) => !present)
-                      .map(([field]) => field)
-                    const coverageTooltip =
-                      missingCoverageFields.length > 0
-                        ? `Missing: ${missingCoverageFields.join(', ')}`
-                        : 'All key matching fields present'
-                    const deleteModalId = `admin-delete-internship-${row.id}`
+                    const coverage = computeInternshipMatchCoverage({
+                      majorsPresent,
+                      courseworkCategoryLinkCount,
+                      requiredSkillsCount,
+                      preferredSkillsCount,
+                      verifiedRequiredSkillLinks: requiredSkillLinks,
+                      verifiedPreferredSkillLinks: preferredSkillLinks,
+                      targetGraduationYearsPresent,
+                      experiencePresent,
+                      termPresent,
+                      hoursPresent,
+                      locationOrRemotePresent,
+                    })
+                    const reviewHref = `/admin/internships/${row.id}`
+                    const missingPreview = coverage.missingLabels.slice(0, 2).join(', ')
+                    const coverageSecondary =
+                      coverage.missingLabels.length > 0
+                        ? `Missing: ${coverage.missingLabels.length > 2 ? `${missingPreview}, +${coverage.missingLabels.length - 2}` : missingPreview}`
+                        : 'All signals present'
 
                     return (
-                      <tr key={row.id}>
+                      <tr key={row.id} className="hover:bg-slate-50/80">
                         <td className="px-3 py-3 text-slate-900">
-                          <div className="font-medium">{row.title || 'Untitled'}</div>
-                          <div className="text-xs text-slate-500">
-                            {row.category || 'Uncategorized'} · {row.experience_level || 'n/a'} · {formatDate(row.apply_deadline)}
+                          <div className="font-medium">
+                            <Link href={reviewHref} className="hover:underline">
+                              {row.title || 'Untitled'}
+                            </Link>
+                          </div>
+                          <div className="text-xs text-slate-500">{employerName}</div>
+                          <div className="text-[11px] text-slate-400">
+                            {row.category || 'Uncategorized'} · {row.experience_level || 'n/a'} · {formatDate(row.apply_deadline)} · {source}
                           </div>
                         </td>
-                        <td className="px-3 py-3 text-slate-700">{employerName}</td>
-                        <td className="px-3 py-3">
+                        <td className="px-3 py-3 text-slate-900">
                           <span className="rounded-full border border-slate-300 px-2 py-1 text-xs">{status}</span>
                         </td>
-                        <td className="px-3 py-3 text-slate-700">{source}</td>
                         <td className="px-3 py-3">
                           <span className="rounded-full border border-slate-300 px-2 py-1 text-xs">{verification}</span>
-                        </td>
-                        <td className="px-3 py-3 text-xs text-slate-700">
-                          <div>Skills: {requiredSkillsCount} required, {preferredSkillsCount} preferred</div>
-                          <div>Verified skill links: {requiredSkillLinks + preferredSkillLinks}</div>
-                          <div>Recommended coursework: {courseworkCount}</div>
-                          <div className="mt-1">
-                            <span
-                              title={coverageTooltip}
-                              className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-                                coverageMet === coverageChecks.length
-                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                                  : 'border-amber-300 bg-amber-50 text-amber-700'
-                              }`}
-                            >
-                              Coverage: {coverageMet}/{coverageChecks.length}
-                            </span>
-                          </div>
                         </td>
                         <td className="px-3 py-3">
                           <Link
@@ -1144,78 +1049,70 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                             {applicantsCount}
                           </Link>
                         </td>
+                        <td className="px-3 py-3 text-xs text-slate-700">
+                          <details>
+                            <summary className="list-none">
+                              <span
+                                className={`inline-flex cursor-pointer rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                  coverage.met === coverage.total
+                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                    : 'border-amber-300 bg-amber-50 text-amber-700'
+                                }`}
+                                title={`Coverage = ${coverage.met}/${coverage.total}. Click for breakdown.`}
+                              >
+                                Coverage {coverage.met}/{coverage.total}
+                              </span>
+                            </summary>
+                            <div className="mt-2 w-72 rounded-md border border-slate-200 bg-slate-50 p-2 text-[11px]">
+                              <div className="mb-1 font-medium text-slate-700">
+                                Signals present: {coverage.met}/{coverage.total}
+                              </div>
+                              <div className="space-y-1 text-slate-600">
+                                {coverage.signals.map((signal) => (
+                                  <div key={signal.key} className="flex items-center justify-between gap-2">
+                                    <span>{signal.label}</span>
+                                    <span className={signal.present ? 'text-emerald-700' : 'text-amber-700'}>
+                                      {signal.present ? 'present' : 'missing'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="mt-2 border-t border-slate-200 pt-2 text-slate-600">
+                                Skills: {coverage.skillsBreakdown.requiredCount} req, {coverage.skillsBreakdown.preferredCount} pref, {coverage.skillsBreakdown.verifiedLinks} verified
+                              </div>
+                              <div className="text-slate-600">
+                                Coursework categories: {coverage.courseworkBreakdown.categoryLinks}
+                              </div>
+                              <Link href={`${reviewHref}#match-quality`} className="mt-2 inline-block text-blue-700 hover:underline">
+                                Open full review and fixes
+                              </Link>
+                            </div>
+                          </details>
+                          <div className="mt-1 text-[11px] text-slate-500">{coverageSecondary}</div>
+                        </td>
                         <td className="px-3 py-3">
-                          <input id={deleteModalId} type="checkbox" className="peer sr-only" />
-                          <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
                             <Link
-                              href={`/admin/internships/${row.id}`}
-                              className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                              href={reviewHref}
+                              className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
                             >
-                              Edit
+                              Review
                             </Link>
                             <Link
                               href={`/admin/matching/preview?internship=${encodeURIComponent(row.id)}`}
-                              className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                              className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
                             >
-                              Preview as student
+                              Preview
                             </Link>
-                            <form action={toggleActive}>
-                              <input type="hidden" name="internship_id" value={row.id} />
-                              <input type="hidden" name="q" value={q} />
-                              <input type="hidden" name="page" value={String(page)} />
-                              <input type="hidden" name="template" value={selectedTemplateKey} />
-                              <input type="hidden" name="next_active" value={row.is_active ? 'false' : 'true'} />
-                              <button
-                                type="submit"
-                                className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                              >
-                                {row.is_active ? 'Deactivate' : 'Activate'}
-                              </button>
-                            </form>
-                            <label
-                              htmlFor={deleteModalId}
-                              className="cursor-pointer rounded-md border border-red-300 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                            <Link
+                              href={`${reviewHref}#status-action`}
+                              className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
                             >
-                              Delete
-                            </label>
+                              {row.is_active ? 'Deactivate' : 'Activate'}
+                            </Link>
                           </div>
-                          <label
-                            htmlFor={deleteModalId}
-                            className="pointer-events-none fixed inset-0 z-40 hidden bg-slate-900/50 peer-checked:pointer-events-auto peer-checked:block"
-                          />
-                          <div className="pointer-events-none fixed inset-0 z-50 hidden items-center justify-center p-4 peer-checked:flex">
-                            <div className="pointer-events-auto w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
-                              <h3 className="text-lg font-semibold text-slate-900">Delete internship?</h3>
-                              <p className="mt-2 text-sm text-slate-600">
-                                This will permanently remove this listing and its applicants. This cannot be undone.
-                              </p>
-                              <form action={deleteInternship} className="mt-4 space-y-3">
-                                <input type="hidden" name="internship_id" value={row.id} />
-                                <input type="hidden" name="q" value={q} />
-                                <input type="hidden" name="page" value={String(page)} />
-                                <input type="hidden" name="template" value={selectedTemplateKey} />
-                                <input
-                                  name="confirmation_phrase"
-                                  placeholder="Type DELETE to confirm"
-                                  className="w-full rounded-md border border-red-300 px-3 py-2 text-sm text-slate-900"
-                                  autoComplete="off"
-                                />
-                                <div className="flex items-center justify-end gap-2">
-                                  <label
-                                    htmlFor={deleteModalId}
-                                    className="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                                  >
-                                    Cancel
-                                  </label>
-                                  <button
-                                    type="submit"
-                                    className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </form>
-                            </div>
+                          <div className="mt-1 text-right text-[11px] text-slate-500">
+                            Delete in review page
                           </div>
                         </td>
                       </tr>
@@ -1224,6 +1121,9 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="mt-2 text-xs text-slate-500">
+            Coverage tracks {MATCH_SIGNALS.length} matching signals. Click a coverage badge to see full breakdown and fixes.
           </div>
 
           <div className="mt-4 flex items-center justify-between">
