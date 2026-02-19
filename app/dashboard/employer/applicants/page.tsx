@@ -130,7 +130,9 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
         school: profile.school?.trim() || 'School not set',
         major:
           (Array.isArray(profile.majors) ? profile.majors[0] : profile.majors) ||
-          (typeof profile.major?.name === 'string' ? profile.major.name : '') ||
+          (Array.isArray(profile.major)
+            ? (typeof profile.major[0]?.name === 'string' ? profile.major[0].name : '')
+            : (typeof profile.major?.name === 'string' ? profile.major.name : '')) ||
           'Major not set',
       },
     ])
