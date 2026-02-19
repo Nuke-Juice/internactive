@@ -51,6 +51,7 @@ export type ListingWizardInitialValues = {
   atsStageMode: AtsStageMode
   externalApplyUrl: string
   externalApplyType: string
+  useEmployerAtsDefaults: boolean
   payType: 'hourly'
   payMin: string
   payMax: string

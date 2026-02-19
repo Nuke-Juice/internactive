@@ -14,6 +14,12 @@ type Props = {
   atsStageMode: AtsStageMode
   externalApplyUrl: string
   externalApplyType: string
+  useEmployerAtsDefaults: boolean
+  employerDefaultApplyMode: ApplyMode
+  employerDefaultAtsStageMode: AtsStageMode
+  employerDefaultExternalApplyUrl: string
+  employerDefaultExternalApplyType: string
+  employerDefaultsConfigured: boolean
   categories: string[]
   fieldErrors?: Partial<Record<ListingStep1FieldKey, string>>
   onChange: (patch: Partial<Record<string, string>>) => void
@@ -72,6 +78,13 @@ export default function ListingStepBasics(props: Props) {
     props.applyMode === 'native' ? 'native' : props.atsStageMode === 'curated' ? 'curated' : 'immediate'
   const externalApplyBehavior = props.externalApplyType === 'redirect' ? 'redirect' : 'new_tab'
   const derivedAtsLabel = hostnameFromUrl(props.externalApplyUrl)
+  const employerDefaultAtsLabel = hostnameFromUrl(props.employerDefaultExternalApplyUrl)
+  const employerDefaultModeLabel =
+    props.employerDefaultApplyMode === 'native'
+      ? 'Quick Apply only'
+      : props.employerDefaultAtsStageMode === 'curated'
+        ? 'Curated ATS'
+        : 'Immediate redirect'
 
   return (
     <div className="space-y-4">
@@ -235,45 +248,80 @@ export default function ListingStepBasics(props: Props) {
           <p className="mt-1 text-xs text-slate-600">Set how candidates apply and where ATS invites should send them.</p>
         </div>
 
-        <fieldset>
-          <legend className="text-sm font-medium text-slate-700">Application mode</legend>
-          <div className="mt-2 space-y-2">
-            <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
-              <input
-                type="radio"
-                name="application_mode_selection"
-                value="native"
-                checked={applicationModeSelection === 'native'}
-                onChange={() => props.onChange({ applyMode: 'native', atsStageMode: 'curated' })}
-              />
-              <span>Internactive Quick Apply only</span>
-            </label>
-            <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
-              <input
-                type="radio"
-                name="application_mode_selection"
-                value="curated"
-                checked={applicationModeSelection === 'curated'}
-                onChange={() => props.onChange({ applyMode: 'hybrid', atsStageMode: 'curated' })}
-              />
-              <span>Curated ATS (invite required)</span>
-            </label>
-            <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
-              <input
-                type="radio"
-                name="application_mode_selection"
-                value="immediate"
-                checked={applicationModeSelection === 'immediate'}
-                onChange={() => props.onChange({ applyMode: 'ats_link', atsStageMode: 'immediate' })}
-              />
-              <span>Immediate external redirect</span>
-            </label>
-          </div>
-          <input type="hidden" name="apply_mode" value={props.applyMode} />
-          <input type="hidden" name="ats_stage_mode" value={props.atsStageMode} />
-        </fieldset>
+        <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={props.useEmployerAtsDefaults}
+            onChange={(event) =>
+              props.onChange(
+                event.target.checked
+                  ? {
+                      useEmployerAtsDefaults: '1',
+                      applyMode: props.employerDefaultApplyMode,
+                      atsStageMode: props.employerDefaultAtsStageMode,
+                      externalApplyUrl: props.employerDefaultExternalApplyUrl,
+                      externalApplyType: props.employerDefaultExternalApplyType,
+                    }
+                  : { useEmployerAtsDefaults: '0' }
+              )
+            }
+          />
+          <span>Use employer ATS defaults for this listing</span>
+        </label>
+        <input type="hidden" name="use_employer_ats_defaults" value={props.useEmployerAtsDefaults ? '1' : '0'} />
 
-        {(props.applyMode === 'ats_link' || props.applyMode === 'hybrid') ? (
+        {props.useEmployerAtsDefaults ? (
+          <div className={`rounded-md border px-3 py-2 text-sm ${props.employerDefaultsConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+            <div className="font-medium">
+              {props.employerDefaultsConfigured
+                ? `Using employer defaults: ${employerDefaultModeLabel}${employerDefaultAtsLabel ? ` • ${employerDefaultAtsLabel}` : ''}`
+                : 'Employer ATS defaults are not configured'}
+            </div>
+            <div className="mt-1 text-xs">
+              <a href="/dashboard/employer/settings" className="font-medium underline">
+                Edit ATS defaults
+              </a>
+            </div>
+          </div>
+        ) : (
+          <fieldset>
+            <legend className="text-sm font-medium text-slate-700">Application mode</legend>
+            <div className="mt-2 space-y-2">
+              <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="application_mode_selection"
+                  value="native"
+                  checked={applicationModeSelection === 'native'}
+                  onChange={() => props.onChange({ applyMode: 'native', atsStageMode: 'curated' })}
+                />
+                <span>Internactive Quick Apply only</span>
+              </label>
+              <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="application_mode_selection"
+                  value="curated"
+                  checked={applicationModeSelection === 'curated'}
+                  onChange={() => props.onChange({ applyMode: 'hybrid', atsStageMode: 'curated' })}
+                />
+                <span>Curated ATS (invite required)</span>
+              </label>
+              <label className="flex items-start gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="application_mode_selection"
+                  value="immediate"
+                  checked={applicationModeSelection === 'immediate'}
+                  onChange={() => props.onChange({ applyMode: 'ats_link', atsStageMode: 'immediate' })}
+                />
+                <span>Immediate external redirect</span>
+              </label>
+            </div>
+          </fieldset>
+        )}
+
+        {!props.useEmployerAtsDefaults && (props.applyMode === 'ats_link' || props.applyMode === 'hybrid') ? (
           <div className="space-y-3">
             <div>
               <label><LabelWithError text="Official application URL" hasError={Boolean(props.fieldErrors?.external_apply_url)} /></label>

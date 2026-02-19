@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
-import { normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import { normalizeEmployerAtsDefaultMode, resolveEffectiveAtsConfig, type EmployerAtsDefaults } from '@/lib/apply/effectiveAts'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { dispatchInAppNotification } from '@/lib/notifications/dispatcher'
 
@@ -32,7 +32,10 @@ type ApplicationRow = {
         company_name?: string | null
         employer_id?: string | null
         apply_mode?: string | null
+        ats_stage_mode?: string | null
         external_apply_url?: string | null
+        external_apply_type?: string | null
+        use_employer_ats_defaults?: boolean | null
       }
     | null
 }
@@ -195,7 +198,7 @@ export default async function ApplicationsPage() {
   const { data: rawApplications } = await supabase
     .from('applications')
     .select(
-      'id, internship_id, status, created_at, submitted_at, employer_viewed_at, match_score, match_reasons, quick_apply_note, ats_invite_status, ats_invited_at, ats_invite_message, external_apply_required, external_apply_completed_at, external_apply_clicks, external_apply_last_clicked_at, internship:internships(id, title, company_name, employer_id, apply_mode, external_apply_url)'
+      'id, internship_id, status, created_at, submitted_at, employer_viewed_at, match_score, match_reasons, quick_apply_note, ats_invite_status, ats_invited_at, ats_invite_message, external_apply_required, external_apply_completed_at, external_apply_clicks, external_apply_last_clicked_at, internship:internships(id, title, company_name, employer_id, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults)'
     )
     .eq('student_id', user.id)
     .order('created_at', { ascending: false })
@@ -218,13 +221,44 @@ export default async function ApplicationsPage() {
     messagesByApplicationId.set(row.application_id, list)
   }
 
+  const employerIds = Array.from(
+    new Set(applications.map((application) => application.internship?.employer_id).filter((value): value is string => Boolean(value)))
+  )
+  const { data: employerSettingsData } =
+    employerIds.length > 0
+      ? await supabase
+          .from('employer_settings')
+          .select('employer_id, default_ats_stage_mode, default_external_apply_url, default_external_apply_type')
+          .in('employer_id', employerIds)
+      : { data: [] as Array<{ employer_id: string; default_ats_stage_mode: string | null; default_external_apply_url: string | null; default_external_apply_type: string | null }> }
+  const employerSettingsByEmployerId = new Map(
+    (employerSettingsData ?? []).map((row) => [row.employer_id, row] as const)
+  )
+
   const pendingInvites = applications.filter((application) => {
     const inviteStatus = normalizeInviteStatus(application.ats_invite_status)
-    const externalUrl = normalizeExternalApplyUrl(application.internship?.external_apply_url ?? null)
+    const employerSettings = application.internship?.employer_id
+      ? employerSettingsByEmployerId.get(application.internship.employer_id)
+      : undefined
+    const employerDefaults: EmployerAtsDefaults = {
+      defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettings?.default_ats_stage_mode),
+      defaultExternalApplyUrl: employerSettings?.default_external_apply_url ?? null,
+      defaultExternalApplyType: employerSettings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+    }
+    const effectiveAts = resolveEffectiveAtsConfig({
+      internship: {
+        applyMode: application.internship?.apply_mode,
+        atsStageMode: application.internship?.ats_stage_mode,
+        externalApplyUrl: application.internship?.external_apply_url,
+        externalApplyType: application.internship?.external_apply_type,
+        useEmployerAtsDefaults: application.internship?.use_employer_ats_defaults !== false,
+      },
+      employerDefaults,
+    })
     return ['invited', 'clicked', 'self_reported_complete'].includes(inviteStatus) &&
       Boolean(application.external_apply_required) &&
       !application.external_apply_completed_at &&
-      Boolean(externalUrl)
+      Boolean(effectiveAts.externalApplyUrl)
   })
 
   return (

@@ -12,7 +12,7 @@ import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
 import { buildApplicationMatchSnapshot } from '@/lib/applicationMatchSnapshot'
 import { sendEmployerApplicationAlert } from '@/lib/email/employerAlerts'
 import { guardApplicationSubmit, EMAIL_VERIFICATION_ERROR } from '@/lib/auth/verifiedActionGate'
-import { normalizeApplyMode, normalizeAtsStageMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import { normalizeEmployerAtsDefaultMode, resolveEffectiveAtsConfig, type EmployerAtsDefaults } from '@/lib/apply/effectiveAts'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
 import { dispatchInAppNotification } from '@/lib/notifications/dispatcher'
@@ -98,7 +98,7 @@ export async function applyFromMicroOnboardingAction({
     supabase
       .from('internships')
       .select(
-        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
       .eq('is_active', true)
@@ -205,12 +205,28 @@ export async function applyFromMicroOnboardingAction({
       coursework_unverified: courseworkFeatures.unverifiedText,
     },
   })
-  const applyMode = normalizeApplyMode(String(listing.apply_mode ?? 'native'))
-  const requiresExternalApply = applyMode === 'ats_link' || applyMode === 'hybrid'
-  const atsStageMode = normalizeAtsStageMode(String((listing as { ats_stage_mode?: string | null }).ats_stage_mode ?? 'curated'))
-  const externalApplyUrl = normalizeExternalApplyUrl(String(listing.external_apply_url ?? ''))
-  const shouldRequireImmediateAts = requiresExternalApply && atsStageMode === 'immediate'
-  if (shouldRequireImmediateAts && !externalApplyUrl) {
+  const { data: employerSettings } = await supabase
+    .from('employer_settings')
+    .select('default_ats_stage_mode, default_external_apply_url, default_external_apply_type')
+    .eq('employer_id', String(listing.employer_id ?? ''))
+    .maybeSingle()
+  const employerDefaults: EmployerAtsDefaults = {
+    defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettings?.default_ats_stage_mode),
+    defaultExternalApplyUrl: employerSettings?.default_external_apply_url ?? null,
+    defaultExternalApplyType: employerSettings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+  }
+  const effectiveAts = resolveEffectiveAtsConfig({
+    internship: {
+      applyMode: listing.apply_mode,
+      atsStageMode: (listing as { ats_stage_mode?: string | null }).ats_stage_mode ?? null,
+      externalApplyUrl: listing.external_apply_url,
+      externalApplyType: null,
+      useEmployerAtsDefaults: (listing as { use_employer_ats_defaults?: boolean | null }).use_employer_ats_defaults !== false,
+    },
+    employerDefaults,
+  })
+  const shouldRequireImmediateAts = effectiveAts.requiresExternalApply && effectiveAts.atsStageMode === 'immediate'
+  if (shouldRequireImmediateAts && !effectiveAts.externalApplyUrl) {
     await trackAnalyticsEvent({
       eventName: 'apply_blocked',
       userId: user.id,
@@ -271,7 +287,7 @@ export async function applyFromMicroOnboardingAction({
   await trackAnalyticsEvent({
     eventName: 'quick_apply_submitted',
     userId: user.id,
-    properties: { listing_id: listingId, application_id: insertedApplicationId ?? null, apply_mode: applyMode },
+    properties: { listing_id: listingId, application_id: insertedApplicationId ?? null, apply_mode: effectiveAts.applyMode },
   })
 
   if (insertedApplicationId) {
@@ -331,7 +347,7 @@ export async function submitApplicationFromListingModalAction(
     supabase
       .from('internships')
       .select(
-        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
       .eq('is_active', true)
@@ -441,12 +457,28 @@ export async function submitApplicationFromListingModalAction(
     },
   })
 
-  const applyMode = normalizeApplyMode(String(listing.apply_mode ?? 'native'))
-  const requiresExternalApply = applyMode === 'ats_link' || applyMode === 'hybrid'
-  const atsStageMode = normalizeAtsStageMode(String((listing as { ats_stage_mode?: string | null }).ats_stage_mode ?? 'curated'))
-  const externalApplyUrl = normalizeExternalApplyUrl(String(listing.external_apply_url ?? ''))
-  const shouldRequireImmediateAts = requiresExternalApply && atsStageMode === 'immediate'
-  if (shouldRequireImmediateAts && !externalApplyUrl) {
+  const { data: employerSettings } = await supabase
+    .from('employer_settings')
+    .select('default_ats_stage_mode, default_external_apply_url, default_external_apply_type')
+    .eq('employer_id', String(listing.employer_id ?? ''))
+    .maybeSingle()
+  const employerDefaults: EmployerAtsDefaults = {
+    defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettings?.default_ats_stage_mode),
+    defaultExternalApplyUrl: employerSettings?.default_external_apply_url ?? null,
+    defaultExternalApplyType: employerSettings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+  }
+  const effectiveAts = resolveEffectiveAtsConfig({
+    internship: {
+      applyMode: listing.apply_mode,
+      atsStageMode: (listing as { ats_stage_mode?: string | null }).ats_stage_mode ?? null,
+      externalApplyUrl: listing.external_apply_url,
+      externalApplyType: null,
+      useEmployerAtsDefaults: (listing as { use_employer_ats_defaults?: boolean | null }).use_employer_ats_defaults !== false,
+    },
+    employerDefaults,
+  })
+  const shouldRequireImmediateAts = effectiveAts.requiresExternalApply && effectiveAts.atsStageMode === 'immediate'
+  if (shouldRequireImmediateAts && !effectiveAts.externalApplyUrl) {
     return {
       ok: false,
       code: APPLY_ERROR.APPLICATION_INSERT_FAILED,
@@ -508,7 +540,7 @@ export async function submitApplicationFromListingModalAction(
   return {
     ok: true,
     externalApplyRequired: shouldRequireImmediateAts,
-    externalApplyUrl: shouldRequireImmediateAts ? (externalApplyUrl || null) : null,
+    externalApplyUrl: shouldRequireImmediateAts ? (effectiveAts.externalApplyUrl || null) : null,
     successMessage: shouldRequireImmediateAts
       ? 'Application submitted successfully.'
       : 'Application sent. If the employer wants to move forward, you’ll receive an invite to complete their official application.',

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { type FormEvent, useEffect, useState } from 'react'
-import { Bell, Briefcase, FileText, LayoutDashboard, LogIn, Mail, Menu, MessageSquare, ShieldCheck, User, X } from 'lucide-react'
+import { Bell, FileText, LayoutDashboard, LogIn, Mail, Menu, ShieldCheck, User, X } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { isAdminRole, type UserRole } from '@/lib/auth/roles'
 import { useToast } from '@/components/feedback/ToastProvider'
@@ -81,12 +81,11 @@ export default function SiteHeader({
 
   const homeActive = pathname === '/' || pathname.startsWith('/jobs')
   const notificationsActive = pathname.startsWith('/notifications')
-  const inboxActive = pathname.startsWith('/inbox') || pathname.startsWith('/dashboard/employer/applicants')
+  const inboxActive = pathname.startsWith('/inbox')
   const profileActive = pathname.startsWith('/account')
   const profilePageActive = pathname.startsWith('/profile')
   const adminActive = pathname.startsWith('/admin')
   const applicationsActive = pathname.startsWith('/applications')
-  const employerMessagesActive = pathname.startsWith('/dashboard/employer/messages')
   const employerDashboardActive = pathname.startsWith('/dashboard/employer')
   const studentDashboardActive = pathname.startsWith('/student/dashboard') || pathname.startsWith('/dashboard/student')
   const employersActive = pathname.startsWith('/signup/employer') || pathname.startsWith('/for-employers')
@@ -95,8 +94,6 @@ export default function SiteHeader({
   const studentUpgradeActive = pathname.startsWith('/student/upgrade')
   const isAdmin = isAdminRole(role)
   const showVerificationBanner = isAuthenticated && !isEmailVerified
-  const inboxHref = role === 'employer' ? '/dashboard/employer/applicants' : '/inbox'
-
   useEffect(() => {
     if (resendCooldown <= 0) return
     const timer = setTimeout(() => {
@@ -444,24 +441,16 @@ export default function SiteHeader({
                     <FileText className="h-5 w-5" />
                   </Link>
                 ) : null}
-                {isAuthenticated && role === 'employer' ? (
-                  <Link
-                    href="/dashboard/employer/messages"
-                    className={iconNavClasses(employerMessagesActive)}
-                    aria-label="Messages"
-                    title="Messages"
-                  >
-                    <MessageSquare className="h-5 w-5" />
-                  </Link>
+                {isAuthenticated && role === 'student' ? (
+                  <div className="relative">
+                    <Link href="/inbox" className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
+                      <Mail className="h-5 w-5" />
+                    </Link>
+                    {showInboxNotificationDot ? (
+                      <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
+                    ) : null}
+                  </div>
                 ) : null}
-                <div className="relative">
-                  <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Applicant inbox" title="Applicant inbox">
-                    {role === 'employer' ? <Briefcase className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
-                  </Link>
-                  {showInboxNotificationDot ? (
-                    <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
-                  ) : null}
-                </div>
                 <div className="relative">
                   <Link
                     href="/notifications"
@@ -517,24 +506,16 @@ export default function SiteHeader({
                   <FileText className="h-5 w-5" />
                 </Link>
               ) : null}
-              {isAuthenticated && role === 'employer' ? (
-                <Link
-                  href="/dashboard/employer/messages"
-                  className={iconNavClasses(employerMessagesActive)}
-                  aria-label="Messages"
-                  title="Messages"
-                >
-                  <MessageSquare className="h-5 w-5" />
-                </Link>
+              {isAuthenticated && role === 'student' ? (
+                <div className="relative">
+                  <Link href="/inbox" className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
+                    <Mail className="h-5 w-5" />
+                  </Link>
+                  {showInboxNotificationDot ? (
+                    <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
+                  ) : null}
+                </div>
               ) : null}
-              <div className="relative">
-                <Link href={inboxHref} className={iconNavClasses(inboxActive)} aria-label="Applicant inbox" title="Applicant inbox">
-                  {role === 'employer' ? <Briefcase className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
-                </Link>
-                {showInboxNotificationDot ? (
-                  <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
-                ) : null}
-              </div>
               <div className="relative">
                 <Link
                   href="/notifications"

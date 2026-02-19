@@ -20,18 +20,17 @@ type ApplicantRow = {
   externalApplyCompletedAt: string | null
 }
 
-type InternshipOption = {
-  internshipId: string
-  title: string
-}
-
 type SelectedInternshipConfig = {
   internshipId: string
   title: string
-  applyMode: string | null
-  atsStageMode: string | null
+  editListingHref: string
+  applyMode: 'native' | 'ats_link' | 'hybrid'
+  atsStageMode: 'curated' | 'immediate' | null
   externalApplyUrl: string | null
-  externalApplyType: string | null
+  externalApplyType: 'new_tab' | 'redirect' | null
+  hasConfiguredDestination: boolean
+  isCuratedInviteFlow: boolean
+  source: 'employer_defaults' | 'listing_override'
 }
 
 type TabKey = 'new' | 'invited' | 'completed' | 'finalists'
@@ -70,13 +69,6 @@ async function readErrorMessage(response: Response) {
   return 'Request failed.'
 }
 
-function isCuratedMode(config: SelectedInternshipConfig | null) {
-  if (!config) return false
-  const applyMode = String(config.applyMode ?? '').trim().toLowerCase()
-  const atsStageMode = String(config.atsStageMode ?? '').trim().toLowerCase()
-  return applyMode === 'hybrid' && (atsStageMode === 'curated' || !atsStageMode)
-}
-
 function normalizeDestinationUrl(value: string | null | undefined) {
   const input = String(value ?? '').trim()
   if (!input) return null
@@ -102,27 +94,13 @@ function destinationLabel(value: string | null | undefined) {
   }
 }
 
-async function postAnalyticsEvent(eventName: string, properties: Record<string, unknown>) {
-  try {
-    await fetch('/api/analytics/event', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ event_name: eventName, properties }),
-    })
-  } catch {
-    // Analytics should not block user actions.
-  }
-}
-
 export default function EmployerApplicantsInboxClient({
   rows,
   defaultInternshipId,
-  internshipOptions,
   selectedInternshipConfig,
 }: {
   rows: ApplicantRow[]
   defaultInternshipId?: string
-  internshipOptions: InternshipOption[]
   selectedInternshipConfig: SelectedInternshipConfig | null
 }) {
   const router = useRouter()
@@ -137,17 +115,23 @@ export default function EmployerApplicantsInboxClient({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const selectedInternshipIsCurated = isCuratedMode(selectedInternshipConfig)
-  const selectedInternshipApplyMode = String(selectedInternshipConfig?.applyMode ?? '').trim().toLowerCase()
+  const selectedInternshipApplyMode = selectedInternshipConfig?.applyMode ?? 'native'
   const selectedInternshipDestination = normalizeDestinationUrl(selectedInternshipConfig?.externalApplyUrl ?? null)
   const selectedInternshipDestinationLabel = destinationLabel(selectedInternshipDestination)
   const selectedInternshipHasAtsConfig =
-    selectedInternshipApplyMode !== 'native' && Boolean(selectedInternshipDestination)
+    selectedInternshipApplyMode !== 'native' && (selectedInternshipConfig?.hasConfiguredDestination ?? false)
+  const selectedRows = useMemo(() => rows.filter((row) => selectedIds.includes(row.applicationId)), [rows, selectedIds])
+  const selectedRowsContainMixedListings = selectedRows.length > 0 && new Set(selectedRows.map((row) => row.internshipId)).size > 1
   const canInviteForSelectedListing =
-    Boolean(defaultInternshipId) && selectedInternshipIsCurated && Boolean(selectedInternshipDestination)
+    Boolean(defaultInternshipId) &&
+    (selectedInternshipConfig?.isCuratedInviteFlow ?? false) &&
+    Boolean(selectedInternshipDestination) &&
+    !selectedRowsContainMixedListings
   const inviteDisabledReason = !defaultInternshipId
-    ? 'Select a listing to configure ATS before sending invites.'
-    : !selectedInternshipIsCurated
+    ? 'Select a single listing to invite candidates.'
+    : selectedRowsContainMixedListings
+      ? 'Select applicants from one listing to send ATS invites.'
+      : !(selectedInternshipConfig?.isCuratedInviteFlow ?? false)
       ? 'This listing is not in curated ATS invite mode.'
       : !selectedInternshipDestination
         ? 'Set up ATS to invite candidates.'
@@ -163,8 +147,6 @@ export default function EmployerApplicantsInboxClient({
       finalists: rows.filter((row) => tabForStatus(row.atsInviteStatus) === 'finalists').length,
     }
   }, [rows])
-
-  const selectedRows = useMemo(() => rows.filter((row) => selectedIds.includes(row.applicationId)), [rows, selectedIds])
 
   function buildExportUrl(mode: 'csv' | 'emails' | 'packet_links' | 'summary') {
     const params = new URLSearchParams({ mode, scope: exportScope })
@@ -312,34 +294,8 @@ export default function EmployerApplicantsInboxClient({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-        Invite candidates to complete your official application (ATS). This reduces noise and sends only top candidates to your ATS.
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
-        <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Listing</label>
-        <select
-          value={defaultInternshipId ?? ''}
-          onChange={(event) => {
-            const internshipId = event.target.value
-            const params = new URLSearchParams(window.location.search)
-            if (internshipId) {
-              params.set('internship_id', internshipId)
-            } else {
-              params.delete('internship_id')
-            }
-            const query = params.toString()
-            router.push(`/dashboard/employer/applicants${query ? `?${query}` : ''}`)
-          }}
-          className="min-w-[260px] rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700"
-        >
-          <option value="">All listings</option>
-          {internshipOptions.map((option) => (
-            <option key={option.internshipId} value={option.internshipId}>
-              {option.title}
-            </option>
-          ))}
-        </select>
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
+        Review applicants across all listings, then switch to a single listing for ATS invite actions.
       </div>
 
       {defaultInternshipId ? (
@@ -347,46 +303,41 @@ export default function EmployerApplicantsInboxClient({
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
             <div className="font-medium">ATS configured for this listing: {selectedInternshipDestinationLabel || 'Configured destination'}</div>
             <div className="mt-1 text-xs text-emerald-800">Official application: {selectedInternshipDestinationLabel || selectedInternshipDestination}</div>
-            {!selectedInternshipIsCurated ? (
+            {selectedInternshipConfig?.source === 'employer_defaults' ? (
+              <div className="mt-1 text-xs text-emerald-800">Using employer ATS defaults.</div>
+            ) : (
+              <div className="mt-1 text-xs text-emerald-800">Using listing-specific ATS override.</div>
+            )}
+            {selectedInternshipApplyMode !== 'hybrid' ? (
               <div className="mt-1 text-xs text-emerald-800">Invites are available only when the listing is set to curated ATS mode.</div>
             ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                void postAnalyticsEvent('ats_setup_clicked', {
-                  internship_id: defaultInternshipId,
-                  source: 'employer_applicants_banner',
-                })
-                router.push(`/dashboard/employer/new?edit=${encodeURIComponent(defaultInternshipId)}#application-settings`)
-              }}
-              className="mt-2 inline-flex rounded-md border border-emerald-300 bg-white px-2.5 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
-            >
-              Edit ATS
-            </button>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a href="/dashboard/employer/settings" className="inline-flex rounded-md border border-emerald-300 bg-white px-2.5 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100">
+                Edit ATS defaults
+              </a>
+              <a href={selectedInternshipConfig?.editListingHref ?? '/dashboard/employer'} className="inline-flex rounded-md border border-emerald-300 bg-white px-2.5 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100">
+                Override ATS for this listing
+              </a>
+            </div>
           </div>
         ) : (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <div className="font-medium">ATS not configured for this listing</div>
-            <div className="mt-1 text-xs text-amber-800">To invite candidates, add your official application URL.</div>
-            <button
-              type="button"
-              onClick={() => {
-                void postAnalyticsEvent('ats_setup_clicked', {
-                  internship_id: defaultInternshipId,
-                  source: 'employer_applicants_banner',
-                })
-                router.push(`/dashboard/employer/new?edit=${encodeURIComponent(defaultInternshipId)}#application-settings`)
-              }}
-              className="mt-2 inline-flex rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
-            >
-              Set up ATS
-            </button>
+            <div className="mt-1 text-xs text-amber-800">Set ATS defaults first, or add a listing-specific override.</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a href="/dashboard/employer/settings" className="inline-flex rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100">
+                Set up ATS defaults
+              </a>
+              <a href={selectedInternshipConfig?.editListingHref ?? '/dashboard/employer'} className="inline-flex rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100">
+                Override this listing
+              </a>
+            </div>
           </div>
         )
       ) : (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <div className="font-medium">Select a listing to configure ATS</div>
-          <div className="mt-1 text-xs text-amber-800">Choose a listing above before sending ATS invites.</div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+          <div className="font-medium">All listings view</div>
+          <div className="mt-1 text-xs text-slate-600">Review applicants here. Select one listing from the dashboard nav to enable ATS invite actions.</div>
         </div>
       )}
 
@@ -549,7 +500,7 @@ export default function EmployerApplicantsInboxClient({
                               ? 'cursor-not-allowed border-slate-300 bg-slate-100 text-slate-500'
                               : 'border-blue-300 bg-blue-50 text-blue-800'
                           }`}
-                          title={!canInviteForSelectedListing ? (inviteDisabledReason ?? 'Set up ATS to invite candidates.') : undefined}
+                            title={!canInviteForSelectedListing ? (inviteDisabledReason ?? 'Set up ATS to invite candidates.') : undefined}
                         >
                           Invite to ATS
                         </button>

@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath, unstable_noStore as noStore } from 'next/cache'
-import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
 import { startStarterEmployerCheckoutAction } from '@/lib/billing/actions'
 import { isUnlimitedInternships } from '@/lib/billing/plan'
@@ -37,11 +36,18 @@ import BackWithFallbackButton from '@/components/navigation/BackWithFallbackButt
 import { INTERNSHIP_CATEGORIES } from '@/lib/internships/categories'
 import { TARGET_STUDENT_YEAR_LABELS, TARGET_STUDENT_YEAR_OPTIONS } from '@/lib/internships/years'
 import { normalizeApplyMode, normalizeAtsStageMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import {
+  deriveAtsFromEmployerDefaults,
+  normalizeEmployerAtsDefaultMode,
+  resolveEffectiveAtsConfig,
+  type EmployerAtsDefaults,
+} from '@/lib/apply/effectiveAts'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import ListingDraftCleanup from '@/components/employer/listing/ListingDraftCleanup'
 import ListingWizard from '@/components/employer/listing/ListingWizard'
 import CreateInternshipCta from '@/app/dashboard/employer/_components/CreateInternshipCta'
 import ActiveInternshipsList, { type ActiveInternshipListItem } from '@/app/dashboard/employer/_components/ActiveInternshipsList'
+import EmployerWorkspaceNav from '@/components/employer/EmployerWorkspaceNav'
 
 function isLaunchConciergeEnabled() {
   const raw = (process.env.LAUNCH_CONCIERGE_ENABLED ?? '').trim().toLowerCase()
@@ -157,6 +163,13 @@ function parseErrorFields(rawFields: string | undefined) {
     .split(',')
     .map((field) => field.trim())
     .filter(Boolean)
+}
+
+type EmployerSettingsRow = {
+  default_ats_stage_mode: string | null
+  default_external_apply_url: string | null
+  default_external_apply_type: string | null
+  default_external_apply_label: string | null
 }
 
 function getCreateInternshipError(searchParams?: {
@@ -284,6 +297,7 @@ export default async function EmployerDashboardPage({
     current?: string
     fields?: string
     reason?: string
+    internship_id?: string
   }>
   createOnly?: boolean
 }) {
@@ -302,6 +316,31 @@ export default async function EmployerDashboardPage({
     .select('company_name, location_address_line1, location_state, contact_email')
     .eq('user_id', user.id)
     .single()
+
+  const { data: employerSettingsData } = await supabase
+    .from('employer_settings')
+    .select('default_ats_stage_mode, default_external_apply_url, default_external_apply_type, default_external_apply_label')
+    .eq('employer_id', user.id)
+    .maybeSingle()
+
+  const employerSettings = (employerSettingsData ?? null) as EmployerSettingsRow | null
+  const employerAtsDefaults: EmployerAtsDefaults = {
+    defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettings?.default_ats_stage_mode),
+    defaultExternalApplyUrl: normalizeExternalApplyUrl(employerSettings?.default_external_apply_url),
+    defaultExternalApplyType: employerSettings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+  }
+  const employerDefaultAts = deriveAtsFromEmployerDefaults(employerAtsDefaults)
+  const employerDefaultsConfigured =
+    employerAtsDefaults.defaultAtsStageMode !== 'none' && Boolean(employerDefaultAts.externalApplyUrl)
+  const employerDefaultAtsHost = employerDefaultAts.externalApplyUrl
+    ? (() => {
+        try {
+          return new URL(employerDefaultAts.externalApplyUrl).hostname
+        } catch {
+          return null
+        }
+      })()
+    : null
 
   if (!employerProfile?.company_name?.trim() || !employerProfile?.location_address_line1?.trim() || !employerProfile?.contact_email?.trim()) {
     redirect('/signup/employer/details')
@@ -385,7 +424,7 @@ export default async function EmployerDashboardPage({
     ? await supabase
         .from('internships')
         .select(
-          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
+          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
         )
         .eq('id', editingInternshipId)
         .eq('employer_id', user.id)
@@ -609,22 +648,38 @@ export default async function EmployerDashboardPage({
     const requiredSkillIdsRaw = selectedRequiredSkillIds.join(',')
     const requiredCourseCategoryIdsRaw = selectedRequiredCourseCategoryIds.join(',')
     const applicationDeadline = normalizeDateInputValue(String(formData.get('application_deadline') ?? '').trim())
-    const applyMode = normalizeApplyMode(String(formData.get('apply_mode') ?? 'native'))
+    const listingApplyMode = normalizeApplyMode(String(formData.get('apply_mode') ?? 'native'))
     const atsStageModeInput = String(formData.get('ats_stage_mode') ?? '').trim()
-    const atsStageMode = normalizeAtsStageMode(atsStageModeInput || (verification.isBetaEmployer ? 'curated' : 'immediate'))
+    const listingAtsStageMode = normalizeAtsStageMode(atsStageModeInput || (verification.isBetaEmployer ? 'curated' : 'immediate'))
     const externalApplyUrlInput = String(formData.get('external_apply_url') ?? '').trim()
-    const externalApplyUrl = normalizeExternalApplyUrl(externalApplyUrlInput)
+    const listingExternalApplyUrl = normalizeExternalApplyUrl(externalApplyUrlInput)
     const externalApplyTypeInput = String(formData.get('external_apply_type') ?? '').trim().toLowerCase()
-    const externalApplyType = externalApplyTypeInput === 'redirect' || externalApplyTypeInput === 'new_tab' ? externalApplyTypeInput : 'new_tab'
-    const requiresExternalApply = applyMode === 'ats_link' || applyMode === 'hybrid'
-    const resolvedAtsStageMode = requiresExternalApply ? atsStageMode : null
-    const resolvedExternalApplyUrl = requiresExternalApply ? externalApplyUrl : null
-    const resolvedExternalApplyType = requiresExternalApply ? externalApplyType : null
-    if (requiresExternalApply && !externalApplyUrl) {
+    const listingExternalApplyType = externalApplyTypeInput === 'redirect' || externalApplyTypeInput === 'new_tab' ? externalApplyTypeInput : 'new_tab'
+    const useEmployerAtsDefaults = String(formData.get('use_employer_ats_defaults') ?? '1').trim() !== '0'
+    const defaultsAts = deriveAtsFromEmployerDefaults(employerAtsDefaults)
+
+    const resolvedApplyMode = useEmployerAtsDefaults ? defaultsAts.applyMode : listingApplyMode
+    const requiresExternalApply = resolvedApplyMode === 'ats_link' || resolvedApplyMode === 'hybrid'
+    const resolvedAtsStageMode = requiresExternalApply
+      ? (useEmployerAtsDefaults ? defaultsAts.atsStageMode : listingAtsStageMode)
+      : null
+    const resolvedExternalApplyUrl = useEmployerAtsDefaults
+      ? null
+      : (requiresExternalApply ? listingExternalApplyUrl : null)
+    const resolvedExternalApplyType = useEmployerAtsDefaults
+      ? null
+      : (requiresExternalApply ? listingExternalApplyType : null)
+    const effectiveExternalApplyUrl = requiresExternalApply
+      ? (useEmployerAtsDefaults ? defaultsAts.externalApplyUrl : resolvedExternalApplyUrl)
+      : null
+
+    if (requiresExternalApply && !effectiveExternalApplyUrl) {
       redirect(
         buildCreateErrorRedirect({
-          message: 'Valid http(s) ATS application URL is required for curated ATS or immediate redirect mode.',
-          reason: 'external_apply_url_required',
+          message: useEmployerAtsDefaults
+            ? 'Employer ATS defaults are missing a valid external URL. Configure defaults or turn on listing override.'
+            : 'Valid http(s) ATS application URL is required for curated ATS or immediate redirect mode.',
+          reason: useEmployerAtsDefaults ? 'employer_defaults_external_apply_url_required' : 'external_apply_url_required',
           fields: ['external_apply_url'],
         })
       )
@@ -695,8 +750,8 @@ export default async function EmployerDashboardPage({
         remoteEligibilityScope: remoteEligibilityScope ?? null,
         remoteEligibleStates,
         remoteEligibleState: remoteEligibleState || null,
-        applyMode,
-        externalApplyUrl: resolvedExternalApplyUrl,
+        applyMode: resolvedApplyMode,
+        externalApplyUrl: effectiveExternalApplyUrl,
       })
       if (!publishValidation.ok) {
         const mapped = getCreateInternshipError({ code: publishValidation.code })
@@ -798,7 +853,8 @@ export default async function EmployerDashboardPage({
       desired_coursework_strength: desiredCourseworkStrength || null,
       experience_level: targetStudentYear || null,
       work_mode: workMode,
-      apply_mode: applyMode,
+      apply_mode: resolvedApplyMode,
+      use_employer_ats_defaults: useEmployerAtsDefaults,
       ats_stage_mode: resolvedAtsStageMode,
       external_apply_url: resolvedExternalApplyUrl,
       external_apply_type: resolvedExternalApplyType,
@@ -831,7 +887,8 @@ export default async function EmployerDashboardPage({
         create_mode: createMode,
         work_mode: workMode,
         location_type: locationType,
-        apply_mode: applyMode,
+        apply_mode: resolvedApplyMode,
+        use_employer_ats_defaults: useEmployerAtsDefaults,
         ats_stage_mode: resolvedAtsStageMode,
         category: category || null,
         role_category: category || null,
@@ -1066,13 +1123,13 @@ export default async function EmployerDashboardPage({
       userId: currentUser.id,
       properties: { internship_id: persistedInternshipId, mode: createMode },
     })
-    if (requiresExternalApply && resolvedExternalApplyUrl) {
+    if (requiresExternalApply && effectiveExternalApplyUrl) {
       await trackAnalyticsEvent({
         eventName: 'ats_setup_saved',
         userId: currentUser.id,
         properties: {
           internship_id: persistedInternshipId,
-          apply_mode: applyMode,
+          apply_mode: resolvedApplyMode,
           ats_stage_mode: resolvedAtsStageMode,
         },
       })
@@ -1117,7 +1174,7 @@ export default async function EmployerDashboardPage({
     const { data: draft } = await supabaseAction
       .from('internships')
       .select(
-        'id, title, employer_id, work_mode, location_city, location_state, pay, pay_min, pay_max, hours_min, hours_max, term, majors, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, apply_mode, ats_stage_mode, external_apply_url, is_active, status, internship_required_skill_items(skill_id), internship_required_course_categories(category_id)'
+        'id, title, employer_id, work_mode, location_city, location_state, pay, pay_min, pay_max, hours_min, hours_max, term, majors, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, is_active, status, internship_required_skill_items(skill_id), internship_required_course_categories(category_id)'
       )
       .eq('id', internshipId)
       .eq('employer_id', currentUser.id)
@@ -1126,6 +1183,27 @@ export default async function EmployerDashboardPage({
     if (!draft?.id) {
       redirect('/dashboard/employer?error=Draft+not+found')
     }
+
+    const { data: employerSettingsForPublish } = await supabaseAction
+      .from('employer_settings')
+      .select('default_ats_stage_mode, default_external_apply_url, default_external_apply_type')
+      .eq('employer_id', currentUser.id)
+      .maybeSingle()
+    const employerDefaultsForPublish: EmployerAtsDefaults = {
+      defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettingsForPublish?.default_ats_stage_mode),
+      defaultExternalApplyUrl: normalizeExternalApplyUrl(employerSettingsForPublish?.default_external_apply_url),
+      defaultExternalApplyType: employerSettingsForPublish?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+    }
+    const effectiveAtsForPublish = resolveEffectiveAtsConfig({
+      internship: {
+        applyMode: draft.apply_mode,
+        atsStageMode: draft.ats_stage_mode,
+        externalApplyUrl: draft.external_apply_url,
+        externalApplyType: null,
+        useEmployerAtsDefaults: draft.use_employer_ats_defaults !== false,
+      },
+      employerDefaults: employerDefaultsForPublish,
+    })
 
     let currentActive = 0
     try {
@@ -1170,8 +1248,8 @@ export default async function EmployerDashboardPage({
       remoteEligibleState: draft.remote_eligible_state,
       remoteEligibilityScope: draft.remote_eligibility_scope,
       remoteEligibleStates: Array.isArray(draft.remote_eligible_states) ? draft.remote_eligible_states : [],
-      applyMode: draft.apply_mode,
-      externalApplyUrl: draft.external_apply_url,
+      applyMode: effectiveAtsForPublish.applyMode,
+      externalApplyUrl: effectiveAtsForPublish.externalApplyUrl,
     })
 
     if (!publishValidation.ok) {
@@ -1435,6 +1513,10 @@ export default async function EmployerDashboardPage({
       Boolean(resolvedSearchParams?.concierge_error))
   const activeInternships = internships.filter((internship) => isEmployerInternshipActive(internship))
   const inactiveInternships = internships.filter((internship) => !isEmployerInternshipActive(internship))
+  const selectedInternshipId = String(resolvedSearchParams?.internship_id ?? '').trim()
+  const internshipIds = internships.map((internship) => internship.id)
+  const activeInternshipId =
+    selectedInternshipId && internshipIds.includes(selectedInternshipId) ? selectedInternshipId : (internshipIds[0] ?? '')
   const activeInternshipItems: ActiveInternshipListItem[] = activeInternships.map((internship) => ({
     id: internship.id,
     title: internship.title,
@@ -1445,24 +1527,27 @@ export default async function EmployerDashboardPage({
     targetYearsLabel: formatTargetStudentYears(internship.target_student_years ?? [internship.target_student_year]),
     majorsLabel: internship.majors ? formatMajors(internship.majors) : null,
   }))
+  const editingUseEmployerDefaults = editingInternship ? editingInternship.use_employer_ats_defaults !== false : true
+  const editingEffectiveAts = resolveEffectiveAtsConfig({
+    internship: {
+      applyMode: editingInternship?.apply_mode ?? null,
+      atsStageMode: editingInternship?.ats_stage_mode ?? null,
+      externalApplyUrl: editingInternship?.external_apply_url ?? null,
+      externalApplyType: editingInternship?.external_apply_type ?? null,
+      useEmployerAtsDefaults: editingUseEmployerDefaults,
+    },
+    employerDefaults: employerAtsDefaults,
+  })
 
   return (
     <main className="min-h-screen bg-white">
       <ListingDraftCleanup userId={user.id} clearedDraftId={String(resolvedSearchParams?.draft_cleared ?? '')} />
       <section className="mx-auto max-w-5xl px-6 py-10">
-        <div className="mb-3">
-          {createOnly ? (
+        {createOnly ? (
+          <div className="mb-3">
             <BackWithFallbackButton fallbackHref="/dashboard/employer" />
-          ) : (
-            <Link
-              href="/"
-              aria-label="Go back"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Link>
-          )}
-        </div>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">{createOnly ? (isEditingListing ? 'Edit internship' : 'Create new internship') : 'Employer dashboard'}</h1>
@@ -1472,6 +1557,37 @@ export default async function EmployerDashboardPage({
           </div>
         </div>
 
+        {!createOnly ? (
+          <div className="mt-4">
+            <EmployerWorkspaceNav
+              activeTab="listings"
+              selectedInternshipId={activeInternshipId || undefined}
+              internships={internships.map((internship) => ({
+                id: internship.id,
+                title: internship.title || 'Untitled listing',
+              }))}
+            />
+          </div>
+        ) : null}
+
+        {!createOnly ? (
+          <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${employerDefaultsConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
+            <div className="font-medium">
+              {employerDefaultsConfigured
+                ? `ATS configured${employerDefaultAtsHost ? `: ${employerDefaultAtsHost}` : ''}`
+                : 'Set up ATS defaults'}
+            </div>
+            <div className="mt-1 text-xs">
+              {employerDefaultsConfigured
+                ? 'Listings can inherit these defaults automatically. Override per listing only when needed.'
+                : 'Configure ATS once and inherit it across listings.'}
+            </div>
+            <Link href="/dashboard/employer/settings" className="mt-2 inline-flex rounded-md border border-current/25 bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-white/80">
+              {employerDefaultsConfigured ? 'Edit ATS defaults' : 'Set up ATS'}
+            </Link>
+          </div>
+        ) : null}
+
         {!createOnly && publishedOwnerMismatchMessage ? (
           <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {publishedOwnerMismatchMessage}
@@ -1479,15 +1595,15 @@ export default async function EmployerDashboardPage({
         ) : null}
 
         {!createOnly ? (
-        <div className="mt-5 grid gap-2 sm:ml-auto sm:max-w-md sm:grid-cols-2">
+        <div className="mt-5 grid gap-2 sm:max-w-md sm:grid-cols-2">
           <Link
-            href="/dashboard/employer/applicants"
+            href={`/dashboard/employer/applicants${activeInternshipId ? `?internship_id=${encodeURIComponent(activeInternshipId)}` : ''}`}
             className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             View applicants
           </Link>
           <Link
-            href="/dashboard/employer/analytics"
+            href={`/dashboard/employer/analytics${activeInternshipId ? `?internship_id=${encodeURIComponent(activeInternshipId)}` : ''}`}
             className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Analytics
@@ -1752,16 +1868,17 @@ export default async function EmployerDashboardPage({
                 locationCity: editingInternship?.location_city ?? '',
                 locationState: editingInternship?.location_state ?? '',
                 applyMode:
-                  (editingInternship?.apply_mode as 'native' | 'ats_link' | 'hybrid' | null) ??
+                  (editingEffectiveAts.applyMode as 'native' | 'ats_link' | 'hybrid' | null) ??
                   (plan.id === 'free' ? 'native' : 'ats_link'),
                 atsStageMode:
-                  (editingInternship?.ats_stage_mode as 'curated' | 'immediate' | null) ??
+                  (editingEffectiveAts.atsStageMode as 'curated' | 'immediate' | null) ??
                   (verificationSummary.isBetaEmployer ? 'curated' : 'immediate'),
-                externalApplyUrl: editingInternship?.external_apply_url ?? '',
+                externalApplyUrl: editingEffectiveAts.externalApplyUrl ?? '',
                 externalApplyType:
-                  editingInternship?.external_apply_type === 'redirect' || editingInternship?.external_apply_type === 'new_tab'
-                    ? editingInternship.external_apply_type
+                  editingEffectiveAts.externalApplyType === 'redirect' || editingEffectiveAts.externalApplyType === 'new_tab'
+                    ? editingEffectiveAts.externalApplyType
                     : 'new_tab',
+                useEmployerAtsDefaults: editingUseEmployerDefaults,
                 payType: 'hourly',
                 payMin: String(editingInternship?.pay_min ?? '20'),
                 payMax: String(editingInternship?.pay_max ?? '28'),
@@ -1798,6 +1915,11 @@ export default async function EmployerDashboardPage({
               majorCatalog={canonicalMajorCatalog}
               courseworkCategoryCatalog={courseCategoryCatalog}
               employerBaseState={employerBaseState}
+              employerDefaultApplyMode={employerDefaultAts.applyMode}
+              employerDefaultAtsStageMode={(employerDefaultAts.atsStageMode ?? 'curated') as 'curated' | 'immediate'}
+              employerDefaultExternalApplyUrl={employerDefaultAts.externalApplyUrl ?? ''}
+              employerDefaultExternalApplyType={employerDefaultAts.externalApplyType ?? 'new_tab'}
+              employerDefaultsConfigured={employerDefaultsConfigured}
             />
           </div>
         ) : null}

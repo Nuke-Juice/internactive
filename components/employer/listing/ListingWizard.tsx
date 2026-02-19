@@ -281,6 +281,11 @@ type Props = {
   majorCatalog: CatalogOption[]
   courseworkCategoryCatalog: CatalogOption[]
   employerBaseState: string
+  employerDefaultApplyMode: ApplyMode
+  employerDefaultAtsStageMode: AtsStageMode
+  employerDefaultExternalApplyUrl: string
+  employerDefaultExternalApplyType: string
+  employerDefaultsConfigured: boolean
 }
 
 type PendingExit = { kind: 'back' } | { kind: 'href'; href: string }
@@ -564,6 +569,10 @@ export default function ListingWizard(props: Props) {
               ? parsed.external_apply_type
               : prev.externalApplyType
             : prev.externalApplyType,
+        useEmployerAtsDefaults:
+          typeof parsed.use_employer_ats_defaults === 'string'
+            ? parsed.use_employer_ats_defaults !== '0'
+            : prev.useEmployerAtsDefaults,
         payType: typeof parsed.pay_type === 'string' ? 'hourly' : prev.payType,
         payMin: typeof parsed.pay_min === 'string' ? parsed.pay_min : prev.payMin,
         payMax: typeof parsed.pay_max === 'string' ? parsed.pay_max : prev.payMax,
@@ -714,6 +723,7 @@ export default function ListingWizard(props: Props) {
           if (key === 'workMode') return ['workMode', normalizedValue as WorkMode]
           if (key === 'applyMode') return ['applyMode', normalizedValue as ApplyMode]
           if (key === 'atsStageMode') return ['atsStageMode', normalizedValue as AtsStageMode]
+          if (key === 'useEmployerAtsDefaults') return ['useEmployerAtsDefaults', normalizedValue !== '0']
           if (key === 'startDate') return ['startDate', normalizedValue.trim()]
           if (key === 'applicationDeadline') {
             const normalized = normalizeDateInputValue(normalizedValue)
@@ -764,9 +774,21 @@ export default function ListingWizard(props: Props) {
       if (!state.locationCity.trim()) step1FieldErrors.location_city = 'City is required for hybrid/in-person roles.'
       if (!state.locationState.trim()) step1FieldErrors.location_state = 'State is required for hybrid/in-person roles.'
     }
-    if ((state.applyMode === 'ats_link' || state.applyMode === 'hybrid') && !isValidExternalUrl(state.externalApplyUrl)) {
+    if (
+      !state.useEmployerAtsDefaults &&
+      (state.applyMode === 'ats_link' || state.applyMode === 'hybrid') &&
+      !isValidExternalUrl(state.externalApplyUrl)
+    ) {
       stepIssues.push('ATS setup requires a valid http(s) URL.')
       step1FieldErrors.external_apply_url = 'A valid http(s) URL is required for ATS setup.'
+    }
+    if (
+      state.useEmployerAtsDefaults &&
+      state.applyMode !== 'native' &&
+      !props.employerDefaultsConfigured
+    ) {
+      stepIssues.push('Set employer ATS defaults first or turn on listing override.')
+      step1FieldErrors.external_apply_url = 'Employer ATS defaults are not configured.'
     }
     const step1Valid = stepIssues.length === 0
 
@@ -858,6 +880,8 @@ export default function ListingWizard(props: Props) {
     state.title,
     state.workMode,
     state.applicationDeadline,
+    state.useEmployerAtsDefaults,
+    props.employerDefaultsConfigured,
   ])
 
   const isCurrentStepValid =
@@ -1094,6 +1118,8 @@ export default function ListingWizard(props: Props) {
               <input type="hidden" name="remote_eligible_state" value={state.locationState || props.employerBaseState || 'UT'} />
               <input type="hidden" name="description" value={derivedDescription} />
               <input type="hidden" name="responsibilities" value={responsibilities.map((item) => item.trim()).filter(Boolean).join('\n')} />
+              <input type="hidden" name="apply_mode" value={state.applyMode} />
+              <input type="hidden" name="ats_stage_mode" value={state.atsStageMode} />
 
               <div className={step === 1 ? '' : 'hidden'}>
                 <ListingStepBasics
@@ -1106,6 +1132,12 @@ export default function ListingWizard(props: Props) {
                   atsStageMode={state.atsStageMode}
                   externalApplyUrl={state.externalApplyUrl}
                   externalApplyType={state.externalApplyType}
+                  useEmployerAtsDefaults={state.useEmployerAtsDefaults}
+                  employerDefaultApplyMode={props.employerDefaultApplyMode}
+                  employerDefaultAtsStageMode={props.employerDefaultAtsStageMode}
+                  employerDefaultExternalApplyUrl={props.employerDefaultExternalApplyUrl}
+                  employerDefaultExternalApplyType={props.employerDefaultExternalApplyType}
+                  employerDefaultsConfigured={props.employerDefaultsConfigured}
                   categories={props.categoryOptions}
                   fieldErrors={step1FieldErrors}
                   onChange={updateState}

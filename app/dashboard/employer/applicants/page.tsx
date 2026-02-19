@@ -1,9 +1,13 @@
-import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
 import { supabaseServer } from '@/lib/supabase/server'
+import {
+  normalizeEmployerAtsDefaultMode,
+  resolveEffectiveAtsConfig,
+  type EmployerAtsDefaults,
+} from '@/lib/apply/effectiveAts'
 import EmployerApplicantsInboxClient from '@/components/employer/inbox/EmployerApplicantsInboxClient'
+import EmployerWorkspaceNav from '@/components/employer/EmployerWorkspaceNav'
 
 type SearchParams = Promise<{ internship_id?: string }>
 
@@ -19,10 +23,19 @@ type ApplicationRow = {
 type InternshipRow = {
   id: string
   title: string | null
+  employer_id: string | null
   apply_mode: string | null
   ats_stage_mode: string | null
   external_apply_url: string | null
   external_apply_type: string | null
+  use_employer_ats_defaults: boolean | null
+}
+
+type EmployerSettingsRow = {
+  employer_id: string
+  default_ats_stage_mode: string | null
+  default_external_apply_url: string | null
+  default_external_apply_type: string | null
 }
 
 function normalizeInviteStatus(value: string | null | undefined) {
@@ -62,14 +75,27 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
 
   const { data: internshipsData } = await supabase
     .from('internships')
-    .select('id, title, apply_mode, ats_stage_mode, external_apply_url, external_apply_type')
+    .select('id, title, employer_id, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults')
     .eq('employer_id', user.id)
     .order('created_at', { ascending: false })
 
   const internships = (internshipsData ?? []) as InternshipRow[]
   const internshipIds = internships.map((row) => row.id)
-  const activeInternshipId = selectedInternshipId && internshipIds.includes(selectedInternshipId) ? selectedInternshipId : ''
+  const activeInternshipId =
+    selectedInternshipId && internshipIds.includes(selectedInternshipId) ? selectedInternshipId : ''
   const scopedInternshipIds = activeInternshipId ? [activeInternshipId] : internshipIds
+
+  const employerIds = Array.from(new Set(internships.map((row) => row.employer_id).filter((value): value is string => Boolean(value))))
+  const { data: employerSettingsData } =
+    employerIds.length > 0
+      ? await supabase
+          .from('employer_settings')
+          .select('employer_id, default_ats_stage_mode, default_external_apply_url, default_external_apply_type')
+          .in('employer_id', employerIds)
+      : { data: [] as EmployerSettingsRow[] }
+  const employerSettingsByEmployerId = new Map(
+    ((employerSettingsData ?? []) as EmployerSettingsRow[]).map((row) => [row.employer_id, row] as const)
+  )
 
   const { data: applicationsData } =
     scopedInternshipIds.length > 0
@@ -146,14 +172,36 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
   const internshipConfigById = new Map(
     internships.map((row) => [
       row.id,
-      {
+      (() => {
+        const employerSettings = row.employer_id ? employerSettingsByEmployerId.get(row.employer_id) : undefined
+        const employerDefaults: EmployerAtsDefaults = {
+          defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettings?.default_ats_stage_mode),
+          defaultExternalApplyUrl: employerSettings?.default_external_apply_url ?? null,
+          defaultExternalApplyType: employerSettings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+        }
+        const effective = resolveEffectiveAtsConfig({
+          internship: {
+            applyMode: row.apply_mode,
+            atsStageMode: row.ats_stage_mode,
+            externalApplyUrl: row.external_apply_url,
+            externalApplyType: row.external_apply_type,
+            useEmployerAtsDefaults: row.use_employer_ats_defaults !== false,
+          },
+          employerDefaults,
+        })
+        return {
         internshipId: row.id,
         title: row.title?.trim() || 'Internship',
-        applyMode: row.apply_mode,
-        atsStageMode: row.ats_stage_mode,
-        externalApplyUrl: row.external_apply_url,
-        externalApplyType: row.external_apply_type,
-      },
+          editListingHref: `/dashboard/employer/new?edit=${encodeURIComponent(row.id)}`,
+          applyMode: effective.applyMode,
+          atsStageMode: effective.atsStageMode,
+          externalApplyUrl: effective.externalApplyUrl,
+          externalApplyType: effective.externalApplyType,
+          hasConfiguredDestination: effective.hasConfiguredDestination,
+          isCuratedInviteFlow: effective.isCuratedInviteFlow,
+          source: effective.source,
+        }
+      })(),
     ])
   )
 
@@ -182,30 +230,31 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
     <main className="min-h-screen bg-white">
       <section className="mx-auto max-w-6xl px-6 py-10">
         <div className="mb-4">
-          <Link
-            href="/dashboard/employer"
-            aria-label="Go back"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">Applicant inbox</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">Applicant inbox</h1>
           <p className="mt-1 text-sm text-slate-600">Review quick applies and invite top candidates into your ATS workflow.</p>
         </div>
 
-        <EmployerApplicantsInboxClient
-          rows={rows}
-          defaultInternshipId={activeInternshipId || undefined}
-          internshipOptions={internships.map((row) => ({
-            internshipId: row.id,
+        <EmployerWorkspaceNav
+          activeTab="applicants"
+          selectedInternshipId={activeInternshipId || undefined}
+          includeAllOption
+          internships={internships.map((row) => ({
+            id: row.id,
             title: row.title?.trim() || 'Internship',
           }))}
+        />
+
+        <div className="mt-4">
+          <EmployerApplicantsInboxClient
+          rows={rows}
+          defaultInternshipId={activeInternshipId || undefined}
           selectedInternshipConfig={
             activeInternshipId && internshipConfigById.has(activeInternshipId)
               ? internshipConfigById.get(activeInternshipId) ?? null
               : null
           }
         />
+        </div>
       </section>
     </main>
   )

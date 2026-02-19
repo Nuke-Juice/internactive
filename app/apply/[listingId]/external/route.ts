@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabaseServer } from '@/lib/supabase/server'
-import { normalizeAtsStageMode, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import { normalizeEmployerAtsDefaultMode, resolveEffectiveAtsConfig, type EmployerAtsDefaults } from '@/lib/apply/effectiveAts'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 
 type Params = { params: Promise<{ listingId: string }> }
@@ -37,7 +37,7 @@ export async function GET(request: Request, { params }: Params) {
 
   const { data: internship } = await supabase
     .from('internships')
-    .select('id, apply_mode, ats_stage_mode, external_apply_url')
+    .select('id, employer_id, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults')
     .eq('id', listingId)
     .eq('is_active', true)
     .maybeSingle()
@@ -45,7 +45,27 @@ export async function GET(request: Request, { params }: Params) {
   if (!internship?.id) {
     return NextResponse.redirect(new URL(`/apply/${encodeURIComponent(listingId)}?error=Listing+not+found`, url.origin))
   }
-  const atsStageMode = normalizeAtsStageMode(String(internship.ats_stage_mode ?? 'curated'))
+  const { data: employerSettings } = await supabase
+    .from('employer_settings')
+    .select('default_ats_stage_mode, default_external_apply_url, default_external_apply_type')
+    .eq('employer_id', internship.employer_id)
+    .maybeSingle()
+  const employerDefaults: EmployerAtsDefaults = {
+    defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettings?.default_ats_stage_mode),
+    defaultExternalApplyUrl: employerSettings?.default_external_apply_url ?? null,
+    defaultExternalApplyType: employerSettings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+  }
+  const effectiveAts = resolveEffectiveAtsConfig({
+    internship: {
+      applyMode: internship.apply_mode,
+      atsStageMode: internship.ats_stage_mode,
+      externalApplyUrl: internship.external_apply_url,
+      externalApplyType: internship.external_apply_type,
+      useEmployerAtsDefaults: internship.use_employer_ats_defaults !== false,
+    },
+    employerDefaults,
+  })
+  const atsStageMode = effectiveAts.atsStageMode
   const inviteStatus = String(application.ats_invite_status ?? 'not_invited')
   if (atsStageMode === 'curated' && !['invited', 'clicked', 'self_reported_complete', 'employer_confirmed'].includes(inviteStatus)) {
     return NextResponse.redirect(
@@ -53,7 +73,7 @@ export async function GET(request: Request, { params }: Params) {
     )
   }
 
-  const externalUrl = normalizeExternalApplyUrl(String(internship.external_apply_url ?? ''))
+  const externalUrl = effectiveAts.externalApplyUrl
   if (!externalUrl) {
     return NextResponse.redirect(new URL(`/apply/${encodeURIComponent(listingId)}?error=External+application+link+is+not+configured`, url.origin))
   }
@@ -79,7 +99,7 @@ export async function GET(request: Request, { params }: Params) {
     properties: {
       listing_id: listingId,
       application_id: applicationId,
-      apply_mode: internship.apply_mode ?? 'native',
+      apply_mode: effectiveAts.applyMode,
     },
   })
 

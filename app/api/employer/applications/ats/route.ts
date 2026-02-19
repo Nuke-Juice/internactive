@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
-import { isCuratedAtsFlow, normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
+import { normalizeEmployerAtsDefaultMode, resolveEffectiveAtsConfig, type EmployerAtsDefaults } from '@/lib/apply/effectiveAts'
 import { supabaseServer } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { dispatchInAppNotifications } from '@/lib/notifications/dispatcher'
@@ -18,14 +18,23 @@ type ApplicationRow = {
   student_id: string
   internship_id: string
   ats_invite_status: string | null
-  internship?: {
-    employer_id?: string | null
-    title?: string | null
-    company_name?: string | null
-    apply_mode?: string | null
-    ats_stage_mode?: string | null
-    external_apply_url?: string | null
-  } | null
+    internship?: {
+      employer_id?: string | null
+      title?: string | null
+      company_name?: string | null
+      apply_mode?: string | null
+      ats_stage_mode?: string | null
+      external_apply_url?: string | null
+      external_apply_type?: string | null
+      use_employer_ats_defaults?: boolean | null
+    } | null
+}
+
+type EmployerSettingsRow = {
+  employer_id: string
+  default_ats_stage_mode: string | null
+  default_external_apply_url: string | null
+  default_external_apply_type: string | null
 }
 
 function isUuid(value: string) {
@@ -89,7 +98,7 @@ export async function POST(request: Request) {
   const admin = supabaseAdmin()
   const { data: rows, error: rowsError } = await admin
     .from('applications')
-    .select('id, student_id, internship_id, ats_invite_status, internship:internships!inner(employer_id, title, company_name, apply_mode, ats_stage_mode, external_apply_url)')
+    .select('id, student_id, internship_id, ats_invite_status, internship:internships!inner(employer_id, title, company_name, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults)')
     .in('id', applicationIds)
 
   if (rowsError) {
@@ -108,20 +117,64 @@ export async function POST(request: Request) {
     }
   }
 
+  const employerIds = Array.from(new Set(applications.map((row) => row.internship?.employer_id).filter((value): value is string => Boolean(value))))
+  const { data: employerSettingsData } =
+    employerIds.length > 0
+      ? await admin
+          .from('employer_settings')
+          .select('employer_id, default_ats_stage_mode, default_external_apply_url, default_external_apply_type')
+          .in('employer_id', employerIds)
+      : { data: [] as EmployerSettingsRow[] }
+  const employerSettingsById = new Map(
+    ((employerSettingsData ?? []) as EmployerSettingsRow[]).map((row) => [row.employer_id, row] as const)
+  )
+
   const nowIso = new Date().toISOString()
   if (action === 'invite') {
     const invalidFlow = applications.find((row) => {
       const internship = row.internship
-      return !isCuratedAtsFlow({
-        applyMode: internship?.apply_mode,
-        atsStageMode: internship?.ats_stage_mode,
+      const employerSettings = internship?.employer_id ? employerSettingsById.get(internship.employer_id) : undefined
+      const employerDefaults: EmployerAtsDefaults = {
+        defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettings?.default_ats_stage_mode),
+        defaultExternalApplyUrl: employerSettings?.default_external_apply_url ?? null,
+        defaultExternalApplyType: employerSettings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+      }
+      const effective = resolveEffectiveAtsConfig({
+        internship: {
+          applyMode: internship?.apply_mode,
+          atsStageMode: internship?.ats_stage_mode,
+          externalApplyUrl: internship?.external_apply_url,
+          externalApplyType: internship?.external_apply_type,
+          useEmployerAtsDefaults: internship?.use_employer_ats_defaults !== false,
+        },
+        employerDefaults,
       })
+      return !effective.isCuratedInviteFlow
     })
     if (invalidFlow) {
       return NextResponse.json({ error: 'ATS invites are only available for listings using curated ATS mode.' }, { status: 400 })
     }
 
-    const missingExternalUrl = applications.find((row) => !normalizeExternalApplyUrl(row.internship?.external_apply_url ?? null))
+    const missingExternalUrl = applications.find((row) => {
+      const internship = row.internship
+      const employerSettings = internship?.employer_id ? employerSettingsById.get(internship.employer_id) : undefined
+      const employerDefaults: EmployerAtsDefaults = {
+        defaultAtsStageMode: normalizeEmployerAtsDefaultMode(employerSettings?.default_ats_stage_mode),
+        defaultExternalApplyUrl: employerSettings?.default_external_apply_url ?? null,
+        defaultExternalApplyType: employerSettings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab',
+      }
+      const effective = resolveEffectiveAtsConfig({
+        internship: {
+          applyMode: internship?.apply_mode,
+          atsStageMode: internship?.ats_stage_mode,
+          externalApplyUrl: internship?.external_apply_url,
+          externalApplyType: internship?.external_apply_type,
+          useEmployerAtsDefaults: internship?.use_employer_ats_defaults !== false,
+        },
+        employerDefaults,
+      })
+      return !effective.externalApplyUrl
+    })
     if (missingExternalUrl) {
       return NextResponse.json({ error: 'ATS not configured for this listing.' }, { status: 400 })
     }
