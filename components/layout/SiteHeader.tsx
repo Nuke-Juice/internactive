@@ -86,6 +86,7 @@ export default function SiteHeader({
   const profilePageActive = pathname.startsWith('/profile')
   const adminActive = pathname.startsWith('/admin')
   const applicationsActive = pathname.startsWith('/applications')
+  const employerMessagesActive = pathname.startsWith('/dashboard/employer/messages')
   const employerDashboardActive = pathname.startsWith('/dashboard/employer')
   const studentDashboardActive = pathname.startsWith('/student/dashboard') || pathname.startsWith('/dashboard/student')
   const employersActive = pathname.startsWith('/signup/employer') || pathname.startsWith('/for-employers')
@@ -410,6 +411,12 @@ export default function SiteHeader({
                   Dashboard
                 </Link>
               ) : null}
+              {isAuthenticated && role === 'employer' ? (
+                <Link href="/dashboard/employer/messages" className={navClasses(employerMessagesActive)}>
+                  <Mail className="h-4 w-4" />
+                  Messages
+                </Link>
+              ) : null}
               {isAuthenticated && role === 'student' ? (
                 <Link href="/student/dashboard" className={navClasses(studentDashboardActive)}>
                   <LayoutDashboard className="h-4 w-4" />
@@ -568,6 +575,10 @@ export default function SiteHeader({
                     <Link href="/dashboard/employer" className={navClasses(employerDashboardActive)}>
                       <LayoutDashboard className="h-4 w-4" />
                       Dashboard
+                    </Link>
+                    <Link href="/dashboard/employer/messages" className={navClasses(employerMessagesActive)}>
+                      <Mail className="h-4 w-4" />
+                      Messages
                     </Link>
                     <Link href="/upgrade" className={navClasses(employerUpgradeActive)}>
                       <ShieldCheck className="h-4 w-4 text-amber-500" />

@@ -134,9 +134,6 @@ export default function EmployerApplicantsInboxClient({
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
   const [inviteMessage, setInviteMessage] = useState('')
   const [inviteTargetIds, setInviteTargetIds] = useState<string[]>([])
-  const [messageModalOpen, setMessageModalOpen] = useState(false)
-  const [messageBody, setMessageBody] = useState('')
-  const [messageApplicationId, setMessageApplicationId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -245,33 +242,6 @@ export default function EmployerApplicantsInboxClient({
       router.refresh()
     } catch (confirmError) {
       const message = confirmError instanceof Error ? confirmError.message : 'Could not mark candidate as confirmed.'
-      setError(message)
-      showToast({ kind: 'error', message })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function sendMessage() {
-    if (!messageApplicationId || !messageBody.trim() || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      const response = await fetch('/api/applications/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ application_id: messageApplicationId, body: messageBody.trim() }),
-      })
-      if (!response.ok) {
-        throw new Error(await readErrorMessage(response))
-      }
-      setMessageModalOpen(false)
-      setMessageBody('')
-      setMessageApplicationId('')
-      showToast({ kind: 'success', message: 'Message sent.' })
-      router.refresh()
-    } catch (messageError) {
-      const message = messageError instanceof Error ? messageError.message : 'Could not send message.'
       setError(message)
       showToast({ kind: 'error', message })
     } finally {
@@ -595,17 +565,6 @@ export default function EmployerApplicantsInboxClient({
                           Mark confirmed
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setMessageApplicationId(row.applicationId)
-                          setMessageBody('')
-                          setMessageModalOpen(true)
-                        }}
-                        className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700"
-                      >
-                        Message
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -655,35 +614,6 @@ export default function EmployerApplicantsInboxClient({
         </div>
       ) : null}
 
-      {messageModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
-          <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
-            <h3 className="text-base font-semibold text-slate-900">Message candidate</h3>
-            <textarea
-              value={messageBody}
-              onChange={(event) => setMessageBody(event.target.value)}
-              rows={4}
-              className="mt-3 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
-              placeholder="Send context before ATS invite or follow-up instructions"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setMessageModalOpen(false)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  void sendMessage()
-                }}
-                className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
-              >
-                Send message
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }

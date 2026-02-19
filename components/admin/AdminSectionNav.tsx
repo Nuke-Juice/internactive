@@ -68,7 +68,7 @@ export default function AdminSectionNav() {
   return (
     <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto max-w-7xl px-6 py-3">
-        <div className="flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-2.5">
           <div className="flex items-center gap-2.5">
             <Link
               href="/admin"
@@ -98,14 +98,6 @@ export default function AdminSectionNav() {
               </select>
             </div>
           </div>
-
-          <Link
-            href="/admin/internships/new"
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white hover:bg-blue-700"
-          >
-            <span className="text-base leading-none">+</span>
-            New internship
-          </Link>
         </div>
 
         <div className="mt-2 hidden gap-2 overflow-x-auto pb-0.5 md:flex">

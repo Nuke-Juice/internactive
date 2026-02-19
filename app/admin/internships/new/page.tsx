@@ -921,30 +921,6 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
           </Link>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-3">
-          <div className="mb-2 text-sm font-medium text-slate-800">Quick actions</div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <Link
-              href="/admin/internships"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Manage internships
-            </Link>
-            <Link
-              href="/admin/employers"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Manage employers
-            </Link>
-            <Link
-              href="/admin/students"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Manage student profiles
-            </Link>
-          </div>
-        </div>
-
         {resolvedSearchParams?.error ? (
           <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {decodeURIComponent(resolvedSearchParams.error)}

@@ -26,6 +26,7 @@ import InternshipLocationFields from '@/components/forms/InternshipLocationField
 import CatalogMultiSelect from './_components/CatalogMultiSelect'
 import TemplatePicker from './_components/TemplatePicker'
 import EmployerSelectWithCreate from './_components/EmployerSelectWithCreate'
+import CoverageBadgePopover from './_components/CoverageBadgePopover'
 
 const PAGE_SIZE = 20
 
@@ -892,36 +893,6 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
           </Link>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-3">
-          <div className="mb-2 text-sm font-medium text-slate-800">Quick actions</div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <Link
-              href="/admin/listings-queue"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Listings queue
-            </Link>
-            <Link
-              href="/admin/internships"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Manage internships
-            </Link>
-            <Link
-              href="/admin/employers"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Manage employers
-            </Link>
-            <Link
-              href="/admin/students"
-              className="inline-flex h-10 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Manage student profiles
-            </Link>
-          </div>
-        </div>
-
         {resolvedSearchParams?.error ? (
           <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {decodeURIComponent(resolvedSearchParams.error)}
@@ -1050,44 +1021,16 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                           </Link>
                         </td>
                         <td className="px-3 py-3 text-xs text-slate-700">
-                          <details>
-                            <summary className="list-none">
-                              <span
-                                className={`inline-flex cursor-pointer rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-                                  coverage.met === coverage.total
-                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                                    : 'border-amber-300 bg-amber-50 text-amber-700'
-                                }`}
-                                title={`Coverage = ${coverage.met}/${coverage.total}. Click for breakdown.`}
-                              >
-                                Coverage {coverage.met}/{coverage.total}
-                              </span>
-                            </summary>
-                            <div className="mt-2 w-72 rounded-md border border-slate-200 bg-slate-50 p-2 text-[11px]">
-                              <div className="mb-1 font-medium text-slate-700">
-                                Signals present: {coverage.met}/{coverage.total}
-                              </div>
-                              <div className="space-y-1 text-slate-600">
-                                {coverage.signals.map((signal) => (
-                                  <div key={signal.key} className="flex items-center justify-between gap-2">
-                                    <span>{signal.label}</span>
-                                    <span className={signal.present ? 'text-emerald-700' : 'text-amber-700'}>
-                                      {signal.present ? 'present' : 'missing'}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="mt-2 border-t border-slate-200 pt-2 text-slate-600">
-                                Skills: {coverage.skillsBreakdown.requiredCount} req, {coverage.skillsBreakdown.preferredCount} pref, {coverage.skillsBreakdown.verifiedLinks} verified
-                              </div>
-                              <div className="text-slate-600">
-                                Coursework categories: {coverage.courseworkBreakdown.categoryLinks}
-                              </div>
-                              <Link href={`${reviewHref}#match-quality`} className="mt-2 inline-block text-blue-700 hover:underline">
-                                Open full review and fixes
-                              </Link>
-                            </div>
-                          </details>
+                          <CoverageBadgePopover
+                            met={coverage.met}
+                            total={coverage.total}
+                            signals={coverage.signals}
+                            requiredCount={coverage.skillsBreakdown.requiredCount}
+                            preferredCount={coverage.skillsBreakdown.preferredCount}
+                            verifiedLinks={coverage.skillsBreakdown.verifiedLinks}
+                            courseworkCategoryLinks={coverage.courseworkBreakdown.categoryLinks}
+                            reviewHref={reviewHref}
+                          />
                           <div className="mt-1 text-[11px] text-slate-500">{coverageSecondary}</div>
                         </td>
                         <td className="px-3 py-3">
@@ -1096,13 +1039,13 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                               href={reviewHref}
                               className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
                             >
-                              Review
+                              Review listing
                             </Link>
                             <Link
                               href={`/admin/matching/preview?internship=${encodeURIComponent(row.id)}`}
                               className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
                             >
-                              Preview
+                              View listing
                             </Link>
                             <Link
                               href={`${reviewHref}#status-action`}
