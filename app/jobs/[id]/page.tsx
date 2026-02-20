@@ -202,6 +202,8 @@ export default async function JobDetailPage({
 
   const listingSelectRich =
         'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, ats_stage_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, custom_skill:custom_skills(name)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+  const listingSelectRichLegacy =
+    'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, ats_stage_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
   const listingSelectBase =
     'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, ats_stage_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
 
@@ -229,29 +231,61 @@ export default async function JobDetailPage({
     | null
 
   if (richListingError) {
-    console.error('[jobs] detail rich query failed; retrying with base fields', richListingError.message)
-    const { data: baseListing, error: baseListingError } = await supabase
-      .from('internships')
-      .select(listingSelectBase)
-      .eq('id', id)
-      .eq('is_active', true)
-      .maybeSingle()
+    const missingRelationship =
+      richListingError.message.includes("Could not find a relationship between 'internships' and 'internship_skill_requirements'") ||
+      richListingError.message.toLowerCase().includes('internship_skill_requirements')
 
-    if (baseListingError) {
-      console.error('[jobs] detail base query failed', baseListingError.message)
-    }
+    if (missingRelationship) {
+      const { data: legacyRichListing, error: legacyRichError } = await supabase
+        .from('internships')
+        .select(listingSelectRichLegacy)
+        .eq('id', id)
+        .eq('is_active', true)
+        .maybeSingle()
 
-    listing = baseListing
-      ? {
-          ...baseListing,
-          internship_required_skill_items: [],
-          internship_preferred_skill_items: [],
+      if (!legacyRichError && legacyRichListing) {
+        listing = {
+          ...legacyRichListing,
           internship_skill_requirements: [],
-          internship_required_course_categories: [],
-          internship_coursework_items: [],
-          internship_coursework_category_links: [],
         }
-      : null
+      } else {
+        const { data: baseListing } = await supabase
+          .from('internships')
+          .select(listingSelectBase)
+          .eq('id', id)
+          .eq('is_active', true)
+          .maybeSingle()
+        listing = baseListing
+          ? {
+              ...baseListing,
+              internship_required_skill_items: [],
+              internship_preferred_skill_items: [],
+              internship_skill_requirements: [],
+              internship_required_course_categories: [],
+              internship_coursework_items: [],
+              internship_coursework_category_links: [],
+            }
+          : null
+      }
+    } else {
+      const { data: baseListing } = await supabase
+        .from('internships')
+        .select(listingSelectBase)
+        .eq('id', id)
+        .eq('is_active', true)
+        .maybeSingle()
+      listing = baseListing
+        ? {
+            ...baseListing,
+            internship_required_skill_items: [],
+            internship_preferred_skill_items: [],
+            internship_skill_requirements: [],
+            internship_required_course_categories: [],
+            internship_coursework_items: [],
+            internship_coursework_category_links: [],
+          }
+        : null
+    }
   }
 
   let matchBreakdown:
