@@ -498,12 +498,17 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       const parsedPreferences =
         parsePreferences(row.preferences) ?? parseLegacyInterests((row.interests as string) ?? null)
       const [
+        { data: profileSkillRows },
         { data: canonicalSkillRows },
         { data: canonicalCourseworkRows },
         { data: canonicalCourseworkCategoryRows },
         { data: canonicalStudentCourseRows },
       ] =
         await Promise.all([
+          supabase
+            .from('student_profile_skills')
+            .select('canonical_skill_id, custom_skill_id, canonical_skill:skills(label), custom_skill:custom_skills(name)')
+            .eq('student_id', userId),
           supabase
             .from('student_skill_items')
             .select('skill_id, skill:skills(label)')
@@ -549,7 +554,15 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       setMajorQuery(dbMajor || '')
       setSelectedMajorId(dbMajorId)
       setGraduationYear((row.year as string) ?? '2028')
-      const canonicalSkillLabels = (canonicalSkillRows ?? [])
+      const profileSkillLabels = (profileSkillRows ?? [])
+        .map((rowItem) => {
+          const canonical = rowItem.canonical_skill as { label?: string | null } | null
+          if (typeof canonical?.label === 'string' && canonical.label.trim()) return canonical.label.trim()
+          const custom = rowItem.custom_skill as { name?: string | null } | null
+          return typeof custom?.name === 'string' ? custom.name.trim() : ''
+        })
+        .filter(Boolean)
+      const legacyCanonicalSkillLabels = (canonicalSkillRows ?? [])
         .map((rowItem) => {
           const skill = rowItem.skill as { label?: string | null } | null
           return typeof skill?.label === 'string' ? skill.label.trim() : ''
@@ -595,6 +608,7 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
             : dbCoursework
       )
       setCourseworkCategories(canonicalCourseworkCategoryLabels)
+      const canonicalSkillLabels = profileSkillLabels.length > 0 ? profileSkillLabels : legacyCanonicalSkillLabels
       setSkills(canonicalSkillLabels.length > 0 ? canonicalSkillLabels : (parsedPreferences?.skills ?? []))
       setExperienceLevel(normalizeExperienceLevel((row.experience_level as string) ?? null))
       setAvailabilityStartMonth(dbStartMonth)
@@ -943,7 +957,7 @@ function addCourseworkItem(value: string) {
     const normalizedSkillsList = skills.map((skill) => normalizeSkillName(skill)).filter(Boolean)
     const normalizedCourseworkText =
       normalizedCourseworkList.length > 0 ? normalizedCourseworkList.join(', ') : ''
-    const [{ skillIds: normalizedSkillIds }, { courseworkItemIds }] =
+    const [{ skillIds: normalizedSkillIds, unknown: unknownSkillLabels }, { courseworkItemIds }] =
       await Promise.all([
         normalizeSkillsClient(normalizedSkillsList),
         normalizeCourseworkClient(normalizedCourseworkList),
@@ -1186,6 +1200,78 @@ function addCourseworkItem(value: string) {
 
       if (insertSkillItemsError) {
         setError(insertSkillItemsError.message)
+        return
+      }
+    }
+
+    const normalizedUnknownSkillLabels = Array.from(
+      new Set(
+        unknownSkillLabels
+          .map((label) => normalizeSkillName(label))
+          .map((label) => normalizeCatalogLabel(label))
+          .filter(Boolean)
+      )
+    )
+    const { error: clearProfileSkillsError } = await supabase
+      .from('student_profile_skills')
+      .delete()
+      .eq('student_id', userId)
+    if (clearProfileSkillsError) {
+      setError(clearProfileSkillsError.message)
+      return
+    }
+
+    let customSkillIds: string[] = []
+    if (normalizedUnknownSkillLabels.length > 0) {
+      const upsertPayload = normalizedUnknownSkillLabels.map((label) => ({
+        owner_type: 'student',
+        owner_id: userId,
+        name: label,
+        normalized_name: normalizeCatalogToken(label),
+      }))
+      const { error: upsertCustomSkillsError } = await supabase
+        .from('custom_skills')
+        .upsert(upsertPayload, { onConflict: 'owner_type,owner_id,normalized_name' })
+      if (upsertCustomSkillsError) {
+        setError(upsertCustomSkillsError.message)
+        return
+      }
+      const normalizedNames = upsertPayload.map((row) => row.normalized_name)
+      const { data: customSkillRows, error: customSkillRowsError } = await supabase
+        .from('custom_skills')
+        .select('id, normalized_name')
+        .eq('owner_type', 'student')
+        .eq('owner_id', userId)
+        .in('normalized_name', normalizedNames)
+      if (customSkillRowsError) {
+        setError(customSkillRowsError.message)
+        return
+      }
+      customSkillIds = (customSkillRows ?? [])
+        .map((row) => (typeof row.id === 'string' ? row.id : ''))
+        .filter(Boolean)
+    }
+
+    const nextProfileSkills = [
+      ...normalizedSkillIds.map((skillId) => ({
+        student_id: userId,
+        canonical_skill_id: skillId,
+        custom_skill_id: null,
+        source: 'canonical',
+      })),
+      ...customSkillIds.map((skillId) => ({
+        student_id: userId,
+        canonical_skill_id: null,
+        custom_skill_id: skillId,
+        source: 'custom',
+      })),
+    ]
+    if (nextProfileSkills.length > 0) {
+      const { error: insertProfileSkillsError } = await supabase
+        .from('student_profile_skills')
+        .insert(nextProfileSkills)
+      if (insertProfileSkillsError) {
+        setError(insertProfileSkillsError.message)
         return
       }
     }

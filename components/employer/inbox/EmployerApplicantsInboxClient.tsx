@@ -6,6 +6,7 @@ import { useToast } from '@/components/feedback/ToastProvider'
 
 type InviteStatus = 'not_invited' | 'invited' | 'clicked' | 'self_reported_complete' | 'employer_confirmed'
 type ExportScope = 'current' | 'all'
+type ExportMode = 'csv' | 'emails' | 'packet_links' | 'summary'
 
 type ApplicantRow = {
   applicationId: string
@@ -108,6 +109,7 @@ export default function EmployerApplicantsInboxClient({
 
   const [activeTab, setActiveTab] = useState<TabKey>('new')
   const [exportScope, setExportScope] = useState<ExportScope>('current')
+  const [exportMode, setExportMode] = useState<ExportMode>('csv')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [inviteModalOpen, setInviteModalOpen] = useState(false)
   const [inviteMessage, setInviteMessage] = useState('')
@@ -292,12 +294,24 @@ export default function EmployerApplicantsInboxClient({
     }
   }
 
+  async function runExportAction() {
+    if (exportMode === 'csv') {
+      await downloadCsv()
+      return
+    }
+    if (exportMode === 'emails') {
+      await copyPayload('emails', 'Emails copied.')
+      return
+    }
+    if (exportMode === 'packet_links') {
+      await copyPayload('packet_links', 'Applicant packet links copied.')
+      return
+    }
+    await copyPayload('summary', 'Summary copied.')
+  }
+
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
-        Review applicants across all listings, then switch to a single listing for ATS invite actions.
-      </div>
-
       {defaultInternshipId ? (
         selectedInternshipHasAtsConfig ? (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
@@ -341,58 +355,37 @@ export default function EmployerApplicantsInboxClient({
         </div>
       )}
 
-      <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
-        <div className="text-xs text-slate-600">
-          Export uses <span className="font-medium text-slate-900">{exportScope === 'all' ? 'all applicants' : `current tab (${activeTab})`}</span>.
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-2 rounded-xl border border-slate-200 bg-white p-3">
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={exportScope}
             onChange={(event) => setExportScope(event.target.value === 'all' ? 'all' : 'current')}
             className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700"
+            title="Exports use the current tab and filters unless set to all."
           >
             <option value="current">Current filter</option>
             <option value="all">Export all</option>
+          </select>
+          <select
+            value={exportMode}
+            onChange={(event) => setExportMode((event.target.value as ExportMode) || 'csv')}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700"
+            title="Select export format."
+          >
+            <option value="csv">Download CSV</option>
+            <option value="emails">Copy emails</option>
+            <option value="packet_links">Copy packet links</option>
+            <option value="summary">Copy summary</option>
           </select>
           <button
             type="button"
             disabled={busy}
             onClick={() => {
-              void downloadCsv()
+              void runExportAction()
             }}
             className="rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
           >
-            Download CSV
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              void copyPayload('emails', 'Emails copied.')
-            }}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 disabled:opacity-60"
-          >
-            Copy emails
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              void copyPayload('packet_links', 'Applicant packet links copied.')
-            }}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 disabled:opacity-60"
-          >
-            Copy applicant packet links
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              void copyPayload('summary', 'Summary copied.')
-            }}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 disabled:opacity-60"
-          >
-            Copy summary
+            Export
           </button>
         </div>
       </div>
@@ -443,7 +436,7 @@ export default function EmployerApplicantsInboxClient({
             Invite selected to ATS
           </button>
           <span className="text-xs text-slate-500">{selectedRows.length} selected</span>
-          {!canInviteForSelectedListing ? <span className="text-xs text-amber-700">{inviteDisabledReason}</span> : null}
+          {defaultInternshipId && !canInviteForSelectedListing ? <span className="text-xs text-amber-700">{inviteDisabledReason}</span> : null}
         </div>
       </div>
 

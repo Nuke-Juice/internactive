@@ -139,8 +139,8 @@ export default function EmployerInternshipFormEnhancements({
         }
       }
 
-      if (isBlank(formData.get('required_skill_ids'))) {
-        nextIssues.push({ field: 'required_skill_ids', message: 'Select at least one canonical skill.' })
+      if (isBlank(formData.get('required_skill_ids')) && isBlank(formData.get('required_skill_custom'))) {
+        nextIssues.push({ field: 'required_skill_ids', message: 'Add at least one required skill.' })
       }
       if (isBlank(formData.get('required_course_category_ids'))) {
         nextIssues.push({ field: 'required_course_category_ids', message: 'Select at least one required coursework category.' })

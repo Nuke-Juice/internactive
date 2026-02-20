@@ -23,5 +23,13 @@ export async function requireRole<T extends UserRole>(
 
   if (roleError || !userRow || userRow.role !== role) redirect('/unauthorized')
 
+  if (role === 'student') {
+    await supabase
+      .from('users')
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq('id', data.user.id)
+      .eq('role', 'student')
+  }
+
   return { user: data.user, role: userRow.role as T }
 }

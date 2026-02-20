@@ -66,7 +66,8 @@ export default function ListingStepRequirements(props: Props) {
         inputId="employer-required-skills-input"
         options={props.skillCatalog}
         initialLabels={props.requiredSkillLabels}
-        allowCustom={false}
+        allowCustom
+        searchEndpoint="/api/skills/search"
       />
 
       <CatalogMultiSelect
@@ -78,7 +79,8 @@ export default function ListingStepRequirements(props: Props) {
         inputId="employer-preferred-skills-input"
         options={props.skillCatalog}
         initialLabels={props.preferredSkillLabels}
-        allowCustom={false}
+        allowCustom
+        searchEndpoint="/api/skills/search"
       />
 
       <p className="-mt-1 text-xs text-slate-500">Used to improve matching + ranking for students.</p>

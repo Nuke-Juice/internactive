@@ -161,7 +161,9 @@ export default async function AdminMatchingPreviewPage({ searchParams }: { searc
               ) : (
                 ranked.map((item) => {
                   const href = `/admin/matching/preview?student=${encodeURIComponent(selectedStudent.userId)}&student_q=${encodeURIComponent(studentQuery)}&category=${encodeURIComponent(filters.category ?? '')}&term=${encodeURIComponent(filters.term ?? '')}&remote=${encodeURIComponent(filters.remote ?? 'all')}&internship=${encodeURIComponent(item.internship.id)}`
-                  const score = Math.round(item.match.normalizedScore * 100)
+                  const score = typeof item.match.breakdown?.total_score === 'number'
+                    ? item.match.breakdown.total_score
+                    : item.match.score
                   return (
                     <article key={item.internship.id} className="rounded-xl border border-slate-200 bg-white p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -169,7 +171,7 @@ export default async function AdminMatchingPreviewPage({ searchParams }: { searc
                           <div className="text-base font-semibold text-slate-900">{item.internship.title ?? 'Untitled internship'}</div>
                           <div className="text-sm text-slate-600">{item.internship.companyName ?? 'Unknown employer'}</div>
                         </div>
-                        <span className="rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">{score}</span>
+                        <span className="rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">{score.toFixed(1)}</span>
                       </div>
                       <div className="mt-2 text-xs text-slate-600">
                         {(item.internship.category ?? item.internship.roleCategory ?? 'Uncategorized')} · {item.internship.workMode ?? 'mode n/a'} · {item.internship.term ?? 'term n/a'}
@@ -194,26 +196,26 @@ export default async function AdminMatchingPreviewPage({ searchParams }: { searc
                   <div className="text-base font-semibold text-slate-900">{selectedInternship.title ?? 'Untitled internship'}</div>
                   <div className="text-sm text-slate-600">{selectedInternship.companyName ?? 'Unknown employer'}</div>
                   <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-                    Score: {selectedMatch.score}/{selectedMatch.maxScore} ({Math.round(selectedMatch.normalizedScore * 100)}%)
+                    Score: {(selectedMatch.breakdown?.total_score ?? selectedMatch.score).toFixed(1)}/{selectedMatch.maxScore}
                   </div>
 
                   <div className="mt-3 overflow-x-auto">
                     <table className="min-w-full text-xs">
                       <thead>
                         <tr className="text-left uppercase tracking-wide text-slate-600">
-                          <th className="px-1 py-1">Signal</th>
-                          <th className="px-1 py-1">Weight</th>
-                          <th className="px-1 py-1">Raw</th>
-                          <th className="px-1 py-1">Pts</th>
+                          <th className="px-1 py-1">Category</th>
+                          <th className="px-1 py-1">Weight %</th>
+                          <th className="px-1 py-1">Achieved %</th>
+                          <th className="px-1 py-1">Earned</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(selectedMatch.breakdown?.perSignalContributions ?? []).map((row) => (
-                          <tr key={row.signalKey} className="border-t border-slate-200">
-                            <td className="px-1 py-1 font-mono">{row.signalKey}</td>
-                            <td className="px-1 py-1">{row.weight}</td>
-                            <td className="px-1 py-1">{row.rawMatchValue}</td>
-                            <td className="px-1 py-1">{row.pointsAwarded}</td>
+                        {(selectedMatch.breakdown?.categories ?? []).map((row) => (
+                          <tr key={row.key} className="border-t border-slate-200">
+                            <td className="px-1 py-1">{row.label}</td>
+                            <td className="px-1 py-1">{Math.round(row.weight_points)}%</td>
+                            <td className="px-1 py-1">{Math.round(row.achieved_fraction * 100)}%</td>
+                            <td className="px-1 py-1">{row.earned_points.toFixed(1)}/{row.weight_points}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -221,10 +223,14 @@ export default async function AdminMatchingPreviewPage({ searchParams }: { searc
                   </div>
 
                   <div className="mt-3 space-y-2">
-                    {(selectedMatch.breakdown?.reasons ?? []).map((reason) => (
-                      <div key={reason.reasonKey + reason.humanText} className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
-                        <div className="font-mono text-[11px] text-emerald-700">{reason.reasonKey}</div>
-                        <div>{reason.humanText}</div>
+                    {(selectedMatch.breakdown?.categories ?? [])
+                      .filter((category) => category.reasons.length > 0)
+                      .map((category) => (
+                      <div key={category.key} className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs text-emerald-900">
+                        <div className="font-semibold text-emerald-700">
+                          {category.label} • {category.earned_points.toFixed(1)}/{category.weight_points}
+                        </div>
+                        <div>{category.reasons.map((reason) => reason.text).join(' • ')}</div>
                       </div>
                     ))}
                   </div>

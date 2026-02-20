@@ -1,11 +1,12 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { normalizeCatalogLabel, normalizeCatalogToken } from '@/lib/catalog/normalization'
 
-type CatalogOption = {
+export type CatalogOption = {
   id: string
   name: string
+  category?: string | null
 }
 
 type SelectedItem = {
@@ -24,6 +25,8 @@ type Props = {
   helperText?: string
   allowCustom?: boolean
   required?: boolean
+  searchEndpoint?: string
+  searchDebounceMs?: number
 }
 
 function sameToken(left: string, right: string) {
@@ -45,6 +48,8 @@ export default function CatalogMultiSelect({
   helperText,
   allowCustom = true,
   required = false,
+  searchEndpoint,
+  searchDebounceMs = 180,
 }: Props) {
   const optionsByToken = useMemo(() => {
     const map = new Map<string, CatalogOption>()
@@ -68,18 +73,54 @@ export default function CatalogMultiSelect({
   })
   const [query, setQuery] = useState('')
   const [showMenu, setShowMenu] = useState(false)
+  const [remoteOptions, setRemoteOptions] = useState<CatalogOption[]>([])
+  const [searching, setSearching] = useState(false)
+
+  useEffect(() => {
+    if (!searchEndpoint) return
+    const controller = new AbortController()
+    const q = normalizeCatalogLabel(query)
+    const timer = setTimeout(async () => {
+      try {
+        setSearching(true)
+        const response = await fetch(`${searchEndpoint}?q=${encodeURIComponent(q)}&limit=25`, {
+          signal: controller.signal,
+        })
+        if (!response.ok) return
+        const payload = (await response.json()) as { options?: Array<{ id?: string; label?: string; category?: string | null }> }
+        const optionsFromApi = (payload.options ?? [])
+          .map((option) => ({
+            id: typeof option.id === 'string' ? option.id : '',
+            name: typeof option.label === 'string' ? option.label : '',
+            category: typeof option.category === 'string' ? option.category : null,
+          }))
+          .filter((option) => option.id && option.name)
+        setRemoteOptions(optionsFromApi)
+      } catch {
+        if (!controller.signal.aborted) setRemoteOptions([])
+      } finally {
+        if (!controller.signal.aborted) setSearching(false)
+      }
+    }, searchDebounceMs)
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+    }
+  }, [query, searchDebounceMs, searchEndpoint])
+
+  const searchOptions = searchEndpoint ? remoteOptions : options
 
   const filteredOptions = useMemo(() => {
     const queryToken = normalizeCatalogToken(query)
     const selectedIds = new Set(selected.map((item) => item.id).filter((value): value is string => Boolean(value)))
-    return options
+    return searchOptions
       .filter((option) => {
         if (selectedIds.has(option.id)) return false
         if (!queryToken) return true
         return normalizeCatalogToken(option.name).includes(queryToken)
       })
-      .slice(0, 8)
-  }, [options, query, selected])
+      .slice(0, 16)
+  }, [searchOptions, query, selected])
 
   const canonicalIds = selected
     .map((item) => item.id)
@@ -87,6 +128,20 @@ export default function CatalogMultiSelect({
   const customLabels = selected
     .filter((item) => !item.id)
     .map((item) => item.label)
+  const hasExactCanonicalMatch = filteredOptions.some(
+    (option) => normalizeCatalogToken(option.name) === normalizeCatalogToken(query)
+  )
+  const shouldShowCustomAdd = allowCustom && normalizeCatalogToken(query).length > 0 && !hasExactCanonicalMatch
+
+  const groupedOptions = useMemo(() => {
+    const map = new Map<string, CatalogOption[]>()
+    for (const option of filteredOptions) {
+      const category = option.category?.trim() || 'Other'
+      if (!map.has(category)) map.set(category, [])
+      map.get(category)?.push(option)
+    }
+    return Array.from(map.entries()).sort(([left], [right]) => left.localeCompare(right))
+  }, [filteredOptions])
 
   function addFromText(value: string) {
     const labelValue = normalizeCatalogLabel(value)
@@ -127,9 +182,9 @@ export default function CatalogMultiSelect({
               key={`${item.id ?? 'custom'}:${item.label}`}
               type="button"
               onClick={() => removeItem(item.label)}
-              className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-800 hover:border-blue-300 hover:bg-blue-100"
-            >
-              {item.label} ×
+            className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-800 hover:border-blue-300 hover:bg-blue-100"
+          >
+              {item.label}{item.id ? '' : ' (Custom)'} ×
             </button>
           ))}
           <input
@@ -164,21 +219,39 @@ export default function CatalogMultiSelect({
             placeholder={allowCustom ? 'Type to search, Enter to add' : 'Type to search skills'}
           />
         </div>
-        {showMenu && filteredOptions.length > 0 ? (
+        {showMenu && (filteredOptions.length > 0 || shouldShowCustomAdd || searching) ? (
           <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
-            {filteredOptions.map((option) => (
+            {searching ? <div className="px-3 py-2 text-xs text-slate-500">Searching skills…</div> : null}
+            {groupedOptions.map(([category, categoryOptions]) => (
+              <div key={category}>
+                <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{category}</div>
+                {categoryOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      addOption(option)
+                    }}
+                    className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    {option.name}
+                  </button>
+                ))}
+              </div>
+            ))}
+            {shouldShowCustomAdd ? (
               <button
-                key={option.id}
                 type="button"
                 onMouseDown={(event) => {
                   event.preventDefault()
-                  addOption(option)
+                  addFromText(query)
                 }}
-                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                className="mt-1 block w-full border-t border-slate-100 px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
-                {option.name}
+                Add custom: {normalizeCatalogLabel(query)}
               </button>
-            ))}
+            ) : null}
           </div>
         ) : null}
       </div>

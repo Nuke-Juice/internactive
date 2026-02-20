@@ -6,6 +6,7 @@ import { ADMIN_ROLES } from '@/lib/auth/roles'
 import { deleteUserAccountById } from '@/lib/auth/accountDeletion'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
+import AdminStudentsTable from '@/components/admin/AdminStudentsTable'
 
 type SearchParams = Promise<{ q?: string; success?: string; error?: string }>
 
@@ -305,85 +306,7 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
             </button>
           </form>
 
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50">
-                <tr className="text-left text-xs uppercase tracking-wide text-slate-600">
-                  <th className="px-3 py-2">Student</th>
-                  <th className="px-3 py-2">Major</th>
-                  <th className="px-3 py-2">School</th>
-                  <th className="px-3 py-2">Year</th>
-                  <th className="px-3 py-2">Experience level</th>
-                  <th className="px-3 py-2">Availability</th>
-                  <th className="px-3 py-2">Canonical selections</th>
-                  <th className="px-3 py-2">Match coverage</th>
-                  <th className="px-3 py-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-500">
-                      No student profiles found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredRows.map((row) => (
-                    <tr key={row.user_id}>
-                      <td className="px-3 py-2 text-slate-700">
-                        <div className="font-medium text-slate-900">{row.name}</div>
-                        <div className="text-xs text-slate-500">{row.email}</div>
-                        <div className="font-mono text-[11px] text-slate-500">{row.user_id}</div>
-                      </td>
-                      <td className="px-3 py-2 text-slate-700">{row.major_label}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.school ?? 'n/a'}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.year ?? 'n/a'}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.experience_level ?? 'n/a'}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.availability_label}</td>
-                      <td className="px-3 py-2 text-xs text-slate-700">
-                        <div>Skills: {row.canonical_skill_labels.slice(0, 3).join(', ') || 'none'}</div>
-                        <div>Coursework categories: {row.coursework_category_names.slice(0, 2).join(', ') || 'none'}</div>
-                      </td>
-                      <td className="px-3 py-2 text-xs text-slate-700">
-                        <div
-                          className={`inline-flex rounded-full border px-2 py-0.5 font-medium ${
-                            row.missing_match_dimensions.length === 0
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-                              : 'border-amber-300 bg-amber-50 text-amber-700'
-                          }`}
-                        >
-                          {row.coverage_label}
-                        </div>
-                        <div className="mt-1 text-slate-600">
-                          Missing: {row.missing_match_dimensions.join(', ') || 'none'}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            href={`/admin/matching/preview?student=${encodeURIComponent(row.user_id)}`}
-                            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
-                          >
-                            Preview matches
-                          </Link>
-                          <form action={deleteStudentAccountAction}>
-                            <input type="hidden" name="student_id" value={row.user_id} />
-                            <input type="hidden" name="q" value={q} />
-                            <button
-                              type="submit"
-                              className="rounded-md border border-red-300 bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
-                            >
-                              Delete account
-                            </button>
-                          </form>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <AdminStudentsTable rows={filteredRows} q={q} deleteStudentAccountAction={deleteStudentAccountAction} />
         </div>
       </section>
     </main>

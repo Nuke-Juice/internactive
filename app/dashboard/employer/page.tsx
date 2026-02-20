@@ -32,6 +32,7 @@ import { isVerifiedCityForState, normalizeStateCode } from '@/lib/locations/usLo
 import { supabaseServer } from '@/lib/supabase/server'
 import { guardEmployerInternshipPublish } from '@/lib/auth/verifiedActionGate'
 import { sanitizeSkillLabels } from '@/lib/skills/sanitizeSkillLabels'
+import { resolveSkillSelections } from '@/lib/skills/resolveSkillSelections'
 import BackWithFallbackButton from '@/components/navigation/BackWithFallbackButton'
 import { INTERNSHIP_CATEGORIES } from '@/lib/internships/categories'
 import { TARGET_STUDENT_YEAR_LABELS, TARGET_STUDENT_YEAR_OPTIONS } from '@/lib/internships/years'
@@ -47,7 +48,7 @@ import ListingDraftCleanup from '@/components/employer/listing/ListingDraftClean
 import ListingWizard from '@/components/employer/listing/ListingWizard'
 import CreateInternshipCta from '@/app/dashboard/employer/_components/CreateInternshipCta'
 import ActiveInternshipsList, { type ActiveInternshipListItem } from '@/app/dashboard/employer/_components/ActiveInternshipsList'
-import EmployerWorkspaceNav from '@/components/employer/EmployerWorkspaceNav'
+import EmployerDashboardHeader from '@/components/employer/EmployerDashboardHeader'
 
 function isLaunchConciergeEnabled() {
   const raw = (process.env.LAUNCH_CONCIERGE_ENABLED ?? '').trim().toLowerCase()
@@ -424,7 +425,7 @@ export default async function EmployerDashboardPage({
     ? await supabase
         .from('internships')
         .select(
-          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
+          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, canonical_skill:skills(label), custom_skill:custom_skills(name)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
         )
         .eq('id', editingInternshipId)
         .eq('employer_id', user.id)
@@ -432,28 +433,46 @@ export default async function EmployerDashboardPage({
     : { data: null }
   const { data: skillRows } = await supabase
     .from('skills')
-    .select('id, label')
+    .select('id, label, category')
     .order('label', { ascending: true })
-    .limit(1200)
+    .limit(250)
   const skillCatalog = (skillRows ?? [])
     .map((row) => ({
       id: typeof row.id === 'string' ? row.id : '',
       name: typeof row.label === 'string' ? row.label.trim() : '',
+      category: typeof row.category === 'string' ? row.category.trim() : null,
     }))
     .filter((row) => row.id && row.name)
   const skillLabelsById = new Map(skillCatalog.map((item) => [item.id, item.name]))
-  const editingCanonicalRequiredSkillLabels = (editingInternship?.internship_required_skill_items ?? [])
+  const editingSkillRequirements = (editingInternship?.internship_skill_requirements ?? []) as Array<{
+    importance?: string | null
+    canonical_skill?: { label?: string | null } | null
+    custom_skill?: { name?: string | null } | null
+  }>
+  const initialRequiredSkillLabels = editingSkillRequirements
+    .filter((row) => row.importance === 'required')
     .map((row) => {
-      const skill = row.skill as { label?: string | null } | null
-      return typeof skill?.label === 'string' ? skill.label.trim() : ''
+      const canonicalLabel = row.canonical_skill && typeof row.canonical_skill.label === 'string'
+        ? row.canonical_skill.label.trim()
+        : ''
+      if (canonicalLabel) return canonicalLabel
+      return row.custom_skill && typeof row.custom_skill.name === 'string' ? row.custom_skill.name.trim() : ''
     })
     .filter(Boolean)
-  const initialRequiredSkillLabels =
-    editingCanonicalRequiredSkillLabels.length > 0
-      ? editingCanonicalRequiredSkillLabels
-      : Array.isArray(editingInternship?.required_skills)
-        ? editingInternship.required_skills
-      : []
+  const initialPreferredSkillLabels = editingSkillRequirements
+    .filter((row) => row.importance === 'preferred')
+    .map((row) => {
+      const canonicalLabel = row.canonical_skill && typeof row.canonical_skill.label === 'string'
+        ? row.canonical_skill.label.trim()
+        : ''
+      if (canonicalLabel) return canonicalLabel
+      return row.custom_skill && typeof row.custom_skill.name === 'string' ? row.custom_skill.name.trim() : ''
+    })
+    .filter(Boolean)
+  const fallbackRequiredSkillLabels = Array.isArray(editingInternship?.required_skills) ? editingInternship.required_skills : []
+  const fallbackPreferredSkillLabels = Array.isArray(editingInternship?.preferred_skills) ? editingInternship.preferred_skills : []
+  const editingRequiredSkillLabels = initialRequiredSkillLabels.length > 0 ? initialRequiredSkillLabels : fallbackRequiredSkillLabels
+  const editingPreferredSkillLabels = initialPreferredSkillLabels.length > 0 ? initialPreferredSkillLabels : fallbackPreferredSkillLabels
   const { data: canonicalCourseCategoryRows } = await supabase
     .from('canonical_course_categories')
     .select('id, name')
@@ -640,12 +659,13 @@ export default async function EmployerDashboardPage({
     const hoursMax = Number(String(formData.get('hours_max') ?? '').trim())
     const requiredSkillsRaw = String(formData.get('required_skills') ?? '').trim()
     const selectedRequiredSkillIds = Array.from(new Set(filterUuidList(parseJsonStringArray(formData.get('required_skill_ids')))))
+    const selectedRequiredCustomSkills = sanitizeSkillLabels(parseJsonStringArray(formData.get('required_skill_custom'))).valid
     const preferredSkillsRaw = String(formData.get('preferred_skills') ?? '').trim()
     const selectedPreferredSkillIds = Array.from(new Set(filterUuidList(parseJsonStringArray(formData.get('preferred_skill_ids')))))
+    const selectedPreferredCustomSkills = sanitizeSkillLabels(parseJsonStringArray(formData.get('preferred_skill_custom'))).valid
     const selectedRequiredCourseCategoryIds = Array.from(
       new Set(filterUuidList(parseJsonStringArray(formData.get('required_course_category_ids'))))
     )
-    const requiredSkillIdsRaw = selectedRequiredSkillIds.join(',')
     const requiredCourseCategoryIdsRaw = selectedRequiredCourseCategoryIds.join(',')
     const applicationDeadline = normalizeDateInputValue(String(formData.get('application_deadline') ?? '').trim())
     const listingApplyMode = normalizeApplyMode(String(formData.get('apply_mode') ?? 'native'))
@@ -712,20 +732,51 @@ export default async function EmployerDashboardPage({
     const selectedMajorIds = Array.from(new Set(filterUuidList(parseJsonStringArray(formData.get('major_ids')))))
     const selectedMajorNames = selectedMajorIds.map((id) => majorNamesById.get(id)).filter((value): value is string => Boolean(value))
     const resolvedMajors = selectedMajorNames.length > 0 ? selectedMajorNames : parseCommaList(majorsRaw)
-    const normalizedRequiredSkills = sanitizeSkillLabels(parseCommaList(requiredSkillsRaw)).valid
-    const resolvedRequiredSkillLabels = new Set(normalizedRequiredSkills)
-    for (const id of selectedRequiredSkillIds) {
+    const normalizedRequiredSkills = sanitizeSkillLabels([
+      ...parseCommaList(requiredSkillsRaw),
+      ...selectedRequiredCustomSkills,
+    ]).valid
+    const normalizedPreferredSkills = sanitizeSkillLabels([
+      ...parseCommaList(preferredSkillsRaw),
+      ...selectedPreferredCustomSkills,
+    ]).valid
+    const [requiredSkillResolution, preferredSkillResolution] = await Promise.all([
+      resolveSkillSelections({
+        supabase: supabaseAction,
+        ownerType: 'employer',
+        ownerId: currentUser.id,
+        canonicalSkillIds: selectedRequiredSkillIds,
+        rawLabels: normalizedRequiredSkills,
+      }),
+      resolveSkillSelections({
+        supabase: supabaseAction,
+        ownerType: 'employer',
+        ownerId: currentUser.id,
+        canonicalSkillIds: selectedPreferredSkillIds,
+        rawLabels: normalizedPreferredSkills,
+      }),
+    ])
+    const canonicalRequiredSkillIds = requiredSkillResolution.canonicalSkillIds
+    const canonicalPreferredSkillIds = preferredSkillResolution.canonicalSkillIds
+    const customRequiredSkillIds = requiredSkillResolution.customSkillIds
+    const customPreferredSkillIds = preferredSkillResolution.customSkillIds
+    const resolvedRequiredSkillLabels = new Set([
+      ...requiredSkillResolution.canonicalLabels,
+      ...requiredSkillResolution.customLabels,
+    ])
+    const resolvedPreferredSkillLabels = new Set([
+      ...preferredSkillResolution.canonicalLabels,
+      ...preferredSkillResolution.customLabels,
+    ])
+    for (const id of canonicalRequiredSkillIds) {
       const label = skillLabelsById.get(id)
       if (label) resolvedRequiredSkillLabels.add(label)
     }
-    const normalizedPreferredSkills = sanitizeSkillLabels(parseCommaList(preferredSkillsRaw)).valid
-    const resolvedPreferredSkillLabels = new Set(normalizedPreferredSkills)
-    for (const id of selectedPreferredSkillIds) {
+    for (const id of canonicalPreferredSkillIds) {
       const label = skillLabelsById.get(id)
       if (label) resolvedPreferredSkillLabels.add(label)
     }
-    const canonicalRequiredSkillIds = Array.from(new Set([...selectedRequiredSkillIds]))
-    const canonicalPreferredSkillIds = Array.from(new Set([...selectedPreferredSkillIds]))
+    const requiredSkillIdsRaw = canonicalRequiredSkillIds.join(',')
 
     if (isPublishing) {
       const publishValidation = validateListingForPublish({
@@ -929,6 +980,67 @@ export default async function EmployerDashboardPage({
       )
     }
     if (persistedInternshipId) {
+      const { error: clearSkillRequirementsError } = await supabaseAction
+        .from('internship_skill_requirements')
+        .delete()
+        .eq('internship_id', persistedInternshipId)
+
+      if (clearSkillRequirementsError) {
+        logPublishFailure('clear_skill_requirements_failed', clearSkillRequirementsError.message)
+        redirect(
+          buildCreateErrorRedirect({
+            message: clearSkillRequirementsError.message,
+            reason: 'clear_skill_requirements_failed',
+          })
+        )
+      }
+
+      const nextSkillRequirements = [
+        ...canonicalRequiredSkillIds.map((skillId) => ({
+          internship_id: persistedInternshipId,
+          canonical_skill_id: skillId,
+          custom_skill_id: null,
+          importance: 'required',
+          source: 'canonical',
+        })),
+        ...customRequiredSkillIds.map((skillId) => ({
+          internship_id: persistedInternshipId,
+          canonical_skill_id: null,
+          custom_skill_id: skillId,
+          importance: 'required',
+          source: 'custom',
+        })),
+        ...canonicalPreferredSkillIds.map((skillId) => ({
+          internship_id: persistedInternshipId,
+          canonical_skill_id: skillId,
+          custom_skill_id: null,
+          importance: 'preferred',
+          source: 'canonical',
+        })),
+        ...customPreferredSkillIds.map((skillId) => ({
+          internship_id: persistedInternshipId,
+          canonical_skill_id: null,
+          custom_skill_id: skillId,
+          importance: 'preferred',
+          source: 'custom',
+        })),
+      ]
+
+      if (nextSkillRequirements.length > 0) {
+        const { error: insertSkillRequirementsError } = await supabaseAction
+          .from('internship_skill_requirements')
+          .insert(nextSkillRequirements)
+        if (insertSkillRequirementsError) {
+          logPublishFailure('insert_skill_requirements_failed', insertSkillRequirementsError.message)
+          redirect(
+            buildCreateErrorRedirect({
+              message: insertSkillRequirementsError.message,
+              reason: 'insert_skill_requirements_failed',
+            })
+          )
+        }
+      }
+
       const { error: clearSkillsError } = await supabaseAction
         .from('internship_required_skill_items')
         .delete()
@@ -1542,33 +1654,31 @@ export default async function EmployerDashboardPage({
   return (
     <main className="min-h-screen bg-white">
       <ListingDraftCleanup userId={user.id} clearedDraftId={String(resolvedSearchParams?.draft_cleared ?? '')} />
-      <section className="mx-auto max-w-5xl px-6 py-10">
+      <section className="mx-auto max-w-6xl px-6 py-10">
         {createOnly ? (
           <div className="mb-3">
             <BackWithFallbackButton fallbackHref="/dashboard/employer" />
           </div>
         ) : null}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        {createOnly ? (
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900">{createOnly ? (isEditingListing ? 'Edit internship' : 'Create new internship') : 'Employer dashboard'}</h1>
-            <p className="mt-1 text-slate-600">
-              {createOnly ? 'Share the core fields students scan first: work mode, pay, hours, timeline, and fit summary.' : 'Create internships and track what you have posted.'}
+            <h1 className="text-2xl font-semibold text-slate-900">{isEditingListing ? 'Edit internship' : 'Create new internship'}</h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Share the core fields students scan first: work mode, pay, hours, timeline, and fit summary.
             </p>
           </div>
-        </div>
-
-        {!createOnly ? (
-          <div className="mt-4">
-            <EmployerWorkspaceNav
-              activeTab="listings"
-              selectedInternshipId={activeInternshipId || undefined}
-              internships={internships.map((internship) => ({
-                id: internship.id,
-                title: internship.title || 'Untitled listing',
-              }))}
-            />
-          </div>
-        ) : null}
+        ) : (
+          <EmployerDashboardHeader
+            title="Employer dashboard"
+            description="Create internships and track what you have posted."
+            activeTab="listings"
+            selectedInternshipId={activeInternshipId || undefined}
+            internships={internships.map((internship) => ({
+              id: internship.id,
+              title: internship.title || 'Untitled listing',
+            }))}
+          />
+        )}
 
         {!createOnly ? (
           <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${employerDefaultsConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
@@ -1592,23 +1702,6 @@ export default async function EmployerDashboardPage({
           <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {publishedOwnerMismatchMessage}
           </div>
-        ) : null}
-
-        {!createOnly ? (
-        <div className="mt-5 grid gap-2 sm:max-w-md sm:grid-cols-2">
-          <Link
-            href={`/dashboard/employer/applicants${activeInternshipId ? `?internship_id=${encodeURIComponent(activeInternshipId)}` : ''}`}
-            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            View applicants
-          </Link>
-          <Link
-            href={`/dashboard/employer/analytics${activeInternshipId ? `?internship_id=${encodeURIComponent(activeInternshipId)}` : ''}`}
-            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Analytics
-          </Link>
-        </div>
         ) : null}
 
         {!createOnly && launchConciergeEnabled && !showConciergeForm ? (
@@ -1905,8 +1998,8 @@ export default async function EmployerDashboardPage({
                   : '',
                 screeningQuestion: '',
                 resumeRequired: editingInternship?.resume_required !== false,
-                requiredSkillLabels: initialRequiredSkillLabels,
-                preferredSkillLabels: Array.isArray(editingInternship?.preferred_skills) ? editingInternship.preferred_skills : [],
+                requiredSkillLabels: editingRequiredSkillLabels,
+                preferredSkillLabels: editingPreferredSkillLabels,
                 majorLabels: initialMajorLabels,
                 courseworkCategoryLabels: initialRequiredCourseCategoryLabels,
               }}

@@ -3,11 +3,11 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
-import { supabaseBrowser } from '@/lib/supabase/client'
 import TurnstileWidget from '@/components/security/TurnstileWidget'
 import OAuthButtons from '@/components/auth/OAuthButtons'
 import PressRevealPasswordField from '@/components/forms/PressRevealPasswordField'
 import { resolveClientAppOrigin } from '@/lib/url/origin'
+import { normalizeSignupEmail } from '@/lib/auth/signup'
 
 const FIELD =
   'mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100'
@@ -36,6 +36,7 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
   const [turnstileKey, setTurnstileKey] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [devErrorDetails, setDevErrorDetails] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
   const roleStep2Path = '/signup/student/details'
@@ -43,6 +44,7 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
 
   async function createAccount() {
     setError(null)
+    setDevErrorDetails(null)
     setSuccess(null)
 
     if (!email.trim() || !password) {
@@ -81,40 +83,34 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
       return setError(friendlyCaptchaError)
     }
 
-    const supabase = supabaseBrowser()
     const appOrigin = resolveClientAppOrigin(process.env.NEXT_PUBLIC_APP_URL, window.location.origin)
-    const callbackNextPath = requestedNextPath ?? roleStep2Path
-
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        emailRedirectTo: `${appOrigin}/auth/callback?next=${encodeURIComponent(callbackNextPath)}`,
-        data: {
-          role_hint: 'student',
-        },
-      },
+    const response = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: normalizeSignupEmail(email),
+        password,
+        roleHint: 'student',
+        nextPath: verifyNextPath,
+        authMethod: 'password',
+        appOrigin,
+      }),
     })
 
-    if (signUpError) {
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; verifyRequiredPath?: string; error?: string; devDetails?: Record<string, unknown> }
+      | null
+    if (!response.ok || !payload?.ok || !payload.verifyRequiredPath) {
       setLoading(false)
-      const message = signUpError.message.toLowerCase()
-      if (message.includes('rate limit') || message.includes('email rate limit exceeded')) {
-        return setError('Email rate limit reached. Please wait a moment before trying again, or use an existing account.')
+      setError(payload?.error ?? 'Could not create your account. Please try again.')
+      if (process.env.NODE_ENV !== 'production' && payload?.devDetails) {
+        setDevErrorDetails(JSON.stringify(payload.devDetails))
       }
-      return setError(signUpError.message)
+      return
     }
 
-    const userId = data.user?.id
-    if (!userId) {
-      setLoading(false)
-      return setError('Signup succeeded but no user was returned.')
-    }
-
-    const normalizedEmail = email.trim().toLowerCase()
-    const verifyRequiredPath = `/verify-required?next=${encodeURIComponent(verifyNextPath)}&action=signup_profile_completion&email=${encodeURIComponent(normalizedEmail)}`
     setLoading(false)
-    window.location.href = verifyRequiredPath
+    window.location.href = payload.verifyRequiredPath
   }
 
   return (
@@ -177,6 +173,22 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
 
           {queryError ? <p className="mt-4 text-sm text-amber-700">{queryError}</p> : null}
           {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
+          {process.env.NODE_ENV !== 'production' && devErrorDetails ? (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(devErrorDetails)
+                  setSuccess('Error details copied.')
+                } catch {
+                  setError('Could not copy error details.')
+                }
+              }}
+              className="mt-2 inline-flex rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+            >
+              Copy error details
+            </button>
+          ) : null}
           {success ? <p className="mt-4 text-sm text-emerald-700">{success}</p> : null}
 
           <TurnstileWidget

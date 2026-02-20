@@ -201,7 +201,7 @@ export default async function JobDetailPage({
   }
 
   const listingSelectRich =
-        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, ats_stage_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, ats_stage_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count, internship_required_skill_items(skill_id), internship_preferred_skill_items(skill_id), internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, custom_skill:custom_skills(name)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_items(coursework_item_id), internship_coursework_category_links(category_id, category:coursework_categories(name))'
   const listingSelectBase =
     'id, title, company_name, employer_id, employer_verification_tier, location, location_city, location_state, location_lat, location_lng, experience_level, target_student_year, desired_coursework_strength, majors, target_graduation_years, short_summary, description, responsibilities, qualifications, hours_per_week, role_category, work_mode, term, start_date, apply_mode, ats_stage_mode, external_apply_url, required_skills, preferred_skills, recommended_coursework, application_deadline, application_cap, applications_count'
 
@@ -216,6 +216,12 @@ export default async function JobDetailPage({
     | (typeof richListing & {
         internship_required_skill_items?: Array<{ skill_id: string | null }> | null
         internship_preferred_skill_items?: Array<{ skill_id: string | null }> | null
+        internship_skill_requirements?: Array<{
+          importance?: string | null
+          canonical_skill_id?: string | null
+          custom_skill_id?: string | null
+          custom_skill?: { name?: string | null } | null
+        }> | null
         internship_required_course_categories?: Array<{ category_id: string | null; category?: { name?: string | null; slug?: string | null } | null }> | null
         internship_coursework_items?: Array<{ coursework_item_id: string | null }> | null
         internship_coursework_category_links?: Array<{ category_id: string | null; category?: { name?: string | null } | null }> | null
@@ -240,6 +246,7 @@ export default async function JobDetailPage({
           ...baseListing,
           internship_required_skill_items: [],
           internship_preferred_skill_items: [],
+          internship_skill_requirements: [],
           internship_required_course_categories: [],
           internship_coursework_items: [],
           internship_coursework_category_links: [],
@@ -250,8 +257,17 @@ export default async function JobDetailPage({
   let matchBreakdown:
     | {
         scorePercent: number
-        reasons: string[]
-        gaps: string[]
+        categories: Array<{
+          key: string
+          label: string
+          weightPoints: number
+          achievedFraction: number
+          earnedPoints: number
+          summary: string
+          reasons: Array<{ text: string; points: number }>
+          gaps: Array<{ text: string }>
+          status: 'ok' | 'missing_data' | 'blocked'
+        }>
         signalContributions?: Array<{
           signalKey: string
           pointsAwarded: number
@@ -286,7 +302,11 @@ export default async function JobDetailPage({
               .maybeSingle()
           ).data
         : profileResult.data
-    const [{ data: studentSkillRows }, courseworkFeatures] = await Promise.all([
+    const [{ data: studentProfileSkillRows }, { data: studentSkillRows }, courseworkFeatures] = await Promise.all([
+      supabase
+        .from('student_profile_skills')
+        .select('canonical_skill_id, custom_skill_id, canonical_skill:skills(label), custom_skill:custom_skills(name)')
+        .eq('student_id', user.id),
       supabase.from('student_skill_items').select('skill_id, skill:skills(label)').eq('student_id', user.id),
       getStudentCourseworkFeatures({
         supabase,
@@ -299,15 +319,33 @@ export default async function JobDetailPage({
       }),
     ])
 
-    const canonicalSkillIds = (studentSkillRows ?? [])
+    const canonicalSkillIdsFromProfile = (studentProfileSkillRows ?? [])
+      .map((row) => row.canonical_skill_id)
+      .filter((value): value is string => typeof value === 'string')
+    const canonicalSkillIdsFromLegacy = (studentSkillRows ?? [])
       .map((row) => row.skill_id)
       .filter((value): value is string => typeof value === 'string')
-    const canonicalSkillLabels = (studentSkillRows ?? [])
+    const canonicalSkillLabelsFromProfile = (studentProfileSkillRows ?? [])
+      .map((row) => {
+        const skill = row.canonical_skill as { label?: string | null } | null
+        return typeof skill?.label === 'string' ? skill.label : ''
+      })
+      .filter((value): value is string => value.length > 0)
+    const customSkillLabels = (studentProfileSkillRows ?? [])
+      .map((row) => {
+        const custom = row.custom_skill as { name?: string | null } | null
+        return typeof custom?.name === 'string' ? custom.name : ''
+      })
+      .filter((value): value is string => value.length > 0)
+    const canonicalSkillLabelsFromLegacy = (studentSkillRows ?? [])
       .map((row) => {
         const skill = row.skill as { label?: string | null } | null
         return typeof skill?.label === 'string' ? skill.label : ''
       })
       .filter((value): value is string => value.length > 0)
+    const canonicalSkillIds = canonicalSkillIdsFromProfile.length > 0 ? canonicalSkillIdsFromProfile : canonicalSkillIdsFromLegacy
+    const canonicalSkillLabels =
+      canonicalSkillLabelsFromProfile.length > 0 ? canonicalSkillLabelsFromProfile : canonicalSkillLabelsFromLegacy
     const canonicalCourseworkItemIds = courseworkFeatures.legacyItemIds
     const canonicalCourseworkCategoryIds = courseworkFeatures.legacyCategoryIds
     const coursework = courseworkFeatures.textCoursework
@@ -324,7 +362,7 @@ export default async function JobDetailPage({
         : profilePreferredLocation
           ? [profilePreferredLocation]
           : []
-    const combinedProfileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels]))
+    const combinedProfileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels, ...customSkillLabels]))
     const minimumCompleteness = getMinimumProfileCompleteness(profile)
     missingMatchFields = minimumCompleteness.missing
     missingSkillSignals = combinedProfileSkills.length === 0
@@ -339,6 +377,21 @@ export default async function JobDetailPage({
       internship_coursework_category_links: listing.internship_coursework_category_links,
       internship_coursework_items: listing.internship_coursework_items,
     })
+
+    const listingRequiredCustomSkills = (listing.internship_skill_requirements ?? [])
+      .filter((item) => item.importance === 'required' && typeof item.custom_skill_id === 'string')
+      .map((item) => {
+        const custom = item.custom_skill as { name?: string | null } | null
+        return typeof custom?.name === 'string' ? custom.name : ''
+      })
+      .filter((value): value is string => value.length > 0)
+    const listingPreferredCustomSkills = (listing.internship_skill_requirements ?? [])
+      .filter((item) => item.importance === 'preferred' && typeof item.custom_skill_id === 'string')
+      .map((item) => {
+        const custom = item.custom_skill as { name?: string | null } | null
+        return typeof custom?.name === 'string' ? custom.name : ''
+      })
+      .filter((value): value is string => value.length > 0)
 
     const match = evaluateInternshipMatch(
       {
@@ -368,6 +421,8 @@ export default async function JobDetailPage({
         preferred_skill_ids: (listing.internship_preferred_skill_items ?? [])
           .map((item) => item.skill_id)
           .filter((value): value is string => typeof value === 'string'),
+        required_custom_skills: listingRequiredCustomSkills,
+        preferred_custom_skills: listingPreferredCustomSkills,
         coursework_item_ids: (listing.internship_coursework_items ?? [])
           .map((item) => item.coursework_item_id)
           .filter((value): value is string => typeof value === 'string'),
@@ -389,6 +444,7 @@ export default async function JobDetailPage({
         year: profile?.year ?? null,
         experience_level: profile?.experience_level ?? null,
         skills: combinedProfileSkills,
+        custom_skills: customSkillLabels,
         coursework,
         skill_ids: canonicalSkillIds,
         canonical_coursework_category_ids: courseworkFeatures.canonicalCategoryIds,
@@ -430,9 +486,18 @@ export default async function JobDetailPage({
     }
 
     matchBreakdown = {
-      scorePercent: match.score,
-      reasons: match.reasons,
-      gaps: match.gaps,
+      scorePercent: typeof match.breakdown?.total_score === 'number' ? match.breakdown.total_score : match.score,
+      categories: (match.breakdown?.categories ?? []).map((item) => ({
+        key: item.key,
+        label: item.label,
+        weightPoints: item.weight_points,
+        achievedFraction: item.achieved_fraction,
+        earnedPoints: item.earned_points,
+        summary: item.summary,
+        reasons: item.reasons,
+        gaps: item.gaps,
+        status: item.status,
+      })),
       signalContributions: match.breakdown?.perSignalContributions.map((item) => ({
         signalKey: item.signalKey,
         pointsAwarded: item.pointsAwarded,
@@ -587,9 +652,13 @@ export default async function JobDetailPage({
           : 'border-blue-200 bg-blue-50 text-blue-800'
   const scoreCircleValue = insufficientMatchData
     ? '—'
-    : (matchBreakdown?.scorePercent ?? 0) <= 0
+      : (matchBreakdown?.scorePercent ?? 0) <= 0
       ? 'Low'
       : String(Math.round(matchBreakdown?.scorePercent ?? 0))
+  const scoredCategories = (matchBreakdown?.categories ?? []).filter((category) => category.earnedPoints > 0)
+  const gapCategories = (matchBreakdown?.categories ?? []).filter(
+    (category) => category.gaps.length > 0 || category.earnedPoints <= 0
+  )
   const deadlineDate = listing.application_deadline ? new Date(listing.application_deadline) : null
   const nowMs = new Date().getTime()
   const daysToDeadline =
@@ -844,8 +913,9 @@ export default async function JobDetailPage({
                 <div className="mt-4 grid gap-4 md:grid-cols-[160px_1fr]">
                   <div className={`rounded-xl border p-4 ${scoreToneClasses}`}>
                     <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Match score</div>
-                    <div className="mt-1 text-3xl font-semibold text-slate-900">{matchBreakdown.scorePercent}</div>
+                    <div className="mt-1 text-3xl font-semibold text-slate-900">{matchBreakdown.scorePercent.toFixed(1)}</div>
                     <div className="text-xs text-slate-500">out of 100</div>
+                    <div className="mt-1 text-[11px] text-slate-500">Based on 5 categories (100% total)</div>
                   </div>
 
                   <div className="space-y-4">
@@ -854,11 +924,22 @@ export default async function JobDetailPage({
                         <Star className="h-3.5 w-3.5" />
                         Reasons
                       </div>
-                      {matchBreakdown.reasons.length > 0 ? (
+                      {scoredCategories.length > 0 ? (
                         <ul className="mt-2 space-y-2">
-                          {matchBreakdown.reasons.map((reason) => (
-                            <li key={reason} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                              {reason}
+                          {scoredCategories.map((category) => (
+                            <li key={`reason:${category.key}`} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
+                                <span>{category.label} - {Math.round(category.weightPoints)}%</span>
+                                <span>{Math.round(category.achievedFraction * 100)}% • {category.earnedPoints.toFixed(1)}/{category.weightPoints}</span>
+                              </div>
+                              <div className="mt-1 text-xs text-emerald-800">{category.summary}</div>
+                              {category.reasons.length > 0 ? (
+                                <ul className="mt-1 list-disc space-y-1 pl-4 text-xs">
+                                  {category.reasons.slice(0, 3).map((reason) => (
+                                    <li key={`${category.key}:${reason.text}`}>{reason.text}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
                             </li>
                           ))}
                         </ul>
@@ -872,13 +953,18 @@ export default async function JobDetailPage({
                         <ShieldCheck className="h-3.5 w-3.5" />
                         Gaps
                       </div>
-                      {matchBreakdown.gaps.length > 0 ? (
+                      {gapCategories.length > 0 ? (
                         <ul className="mt-2 space-y-2">
-                          {matchBreakdown.gaps.map((gap) => {
-                            const cta = gapCta(gap)
+                          {gapCategories.map((category) => {
+                            const primaryGap = category.gaps[0]?.text ?? `${category.label} not enough data yet`
+                            const cta = gapCta(primaryGap)
                             return (
-                              <li key={gap} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
-                                <div className="text-amber-900">{gap}</div>
+                              <li key={`gap:${category.key}`} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-amber-900">
+                                  <span>{category.label} - {Math.round(category.weightPoints)}%</span>
+                                  <span>{category.earnedPoints.toFixed(1)}/{category.weightPoints}</span>
+                                </div>
+                                <div className="mt-1 text-amber-900">{primaryGap}</div>
                                 {cta ? (
                                   <Link href={cta.href} className="mt-1 inline-flex text-xs font-medium text-blue-700 hover:underline">
                                     {cta.label}

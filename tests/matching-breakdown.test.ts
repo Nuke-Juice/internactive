@@ -17,6 +17,14 @@ test('explain breakdown includes expected signals and raw contributions sum to r
   const contributionTotal = (match.breakdown?.perSignalContributions ?? []).reduce((sum, row) => sum + row.pointsAwarded, 0)
   assert.equal(Number(contributionTotal.toFixed(3)), Number((match.breakdown?.totalScoreRaw ?? 0).toFixed(3)))
   assert.equal(match.score, Math.round((match.breakdown?.normalizedScore ?? 0) * 100))
+
+  const categoryTotal = (match.breakdown?.categories ?? []).reduce((sum, row) => sum + row.earned_points, 0)
+  assert.equal(Number(categoryTotal.toFixed(1)), Number((match.breakdown?.total_score ?? 0).toFixed(1)))
+  assert.equal(match.score, Math.round(match.breakdown?.total_score ?? 0))
+  assert.equal(
+    (match.breakdown?.categories ?? []).reduce((sum, row) => sum + row.weight_points, 0),
+    100
+  )
 })
 
 test('preview ranking score matches direct production score for same student/internship', () => {

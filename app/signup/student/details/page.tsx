@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
+import { normalizeCatalogLabel, normalizeCatalogToken } from '@/lib/catalog/normalization'
 import { hasUniversitySpecificCourses } from '@/lib/coursework/universityCourseCatalog'
 import { normalizeCourseworkClient } from '@/lib/coursework/normalizeCourseworkClient'
 import { normalizeSkillsClient } from '@/lib/skills/normalizeSkillsClient'
@@ -763,6 +764,7 @@ export default function StudentSignupDetailsPage() {
     let courseworkItemIds: string[] = []
     let mappedCategoryIdsFromText: string[] = []
     let normalizedSkillIds: string[] = []
+    let unknownNormalizedSkillLabels: string[] = []
 
     try {
       const normalized = await normalizeCourseworkClient(verifiedCourseworkList)
@@ -776,6 +778,7 @@ export default function StudentSignupDetailsPage() {
         }),
       ])
       normalizedSkillIds = normalizedSkills.skillIds
+      unknownNormalizedSkillLabels = normalizedSkills.unknown
       if (response.ok) {
         const payload = (await response.json()) as { categoryIds?: string[] }
         mappedCategoryIdsFromText = Array.isArray(payload.categoryIds)
@@ -878,6 +881,66 @@ export default function StudentSignupDetailsPage() {
         }))
       )
       if (insertSkillItemsError) return setError(toUserFacingErrorMessage(insertSkillItemsError.message))
+    }
+
+    const normalizedUnknownSkillLabels = Array.from(
+      new Set(
+        unknownNormalizedSkillLabels
+          .map((label) => normalizeCatalogLabel(label))
+          .filter(Boolean)
+      )
+    )
+    const { error: clearProfileSkillsError } = await supabase
+      .from('student_profile_skills')
+      .delete()
+      .eq('student_id', user.id)
+    if (clearProfileSkillsError) return setError(toUserFacingErrorMessage(clearProfileSkillsError.message))
+
+    let customSkillIds: string[] = []
+    if (normalizedUnknownSkillLabels.length > 0) {
+      const upsertPayload = normalizedUnknownSkillLabels.map((label) => ({
+        owner_type: 'student',
+        owner_id: user.id,
+        name: label,
+        normalized_name: normalizeCatalogToken(label),
+      }))
+      const { error: upsertCustomSkillsError } = await supabase
+        .from('custom_skills')
+        .upsert(upsertPayload, { onConflict: 'owner_type,owner_id,normalized_name' })
+      if (upsertCustomSkillsError) return setError(toUserFacingErrorMessage(upsertCustomSkillsError.message))
+
+      const normalizedNames = upsertPayload.map((row) => row.normalized_name)
+      const { data: customSkillRows, error: customSkillRowsError } = await supabase
+        .from('custom_skills')
+        .select('id, normalized_name')
+        .eq('owner_type', 'student')
+        .eq('owner_id', user.id)
+        .in('normalized_name', normalizedNames)
+      if (customSkillRowsError) return setError(toUserFacingErrorMessage(customSkillRowsError.message))
+      customSkillIds = (customSkillRows ?? [])
+        .map((row) => (typeof row.id === 'string' ? row.id : ''))
+        .filter(Boolean)
+    }
+
+    const nextProfileSkills = [
+      ...normalizedSkillIds.map((skillId) => ({
+        student_id: user.id,
+        canonical_skill_id: skillId,
+        custom_skill_id: null,
+        source: 'canonical',
+      })),
+      ...customSkillIds.map((skillId) => ({
+        student_id: user.id,
+        canonical_skill_id: null,
+        custom_skill_id: skillId,
+        source: 'custom',
+      })),
+    ]
+    if (nextProfileSkills.length > 0) {
+      const { error: insertProfileSkillsError } = await supabase
+        .from('student_profile_skills')
+        .insert(nextProfileSkills)
+      if (insertProfileSkillsError) return setError(toUserFacingErrorMessage(insertProfileSkillsError.message))
     }
 
     const { error: clearCourseworkItemsError } = await supabase

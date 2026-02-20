@@ -2,6 +2,9 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
+import EmployerWorkspaceNav from '@/components/employer/EmployerWorkspaceNav'
+
+type SearchParams = Promise<{ internship_id?: string }>
 
 type NotificationRow = {
   id: string
@@ -20,6 +23,7 @@ type ApplicationRollupRow = {
 
 type InternshipRow = {
   id: string
+  title: string | null
 }
 
 function formatTimestamp(value: string | null | undefined) {
@@ -35,12 +39,14 @@ function internshipTitle(value: ApplicationRollupRow['internship']) {
   return first?.title?.trim() || 'Internship'
 }
 
-export default async function EmployerMessagesPage() {
+export default async function EmployerMessagesPage({ searchParams }: { searchParams?: SearchParams }) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined
+  const selectedInternshipId = String(resolvedSearchParams?.internship_id ?? '').trim()
   const { user } = await requireRole('employer', { requestedPath: '/dashboard/employer/messages' })
   const supabase = await supabaseServer()
 
   const [{ data: internshipsData }, { data: notificationsData }] = await Promise.all([
-    supabase.from('internships').select('id').eq('employer_id', user.id).limit(200),
+    supabase.from('internships').select('id, title').eq('employer_id', user.id).limit(200),
     supabase
       .from('notifications')
       .select('id, type, title, body, href, created_at')
@@ -49,13 +55,17 @@ export default async function EmployerMessagesPage() {
       .limit(30),
   ])
 
-  const internshipIds = ((internshipsData ?? []) as InternshipRow[]).map((row) => row.id)
+  const internships = (internshipsData ?? []) as InternshipRow[]
+  const internshipIds = internships.map((row) => row.id)
+  const activeInternshipId =
+    selectedInternshipId && internshipIds.includes(selectedInternshipId) ? selectedInternshipId : (internshipIds[0] ?? '')
+  const scopedInternshipIds = activeInternshipId ? [activeInternshipId] : internshipIds
   const { data: applicationsData } =
-    internshipIds.length > 0
+    scopedInternshipIds.length > 0
       ? await supabase
           .from('applications')
           .select('internship_id, created_at, internship:internships(title)')
-          .in('internship_id', internshipIds)
+          .in('internship_id', scopedInternshipIds)
           .order('created_at', { ascending: false })
           .limit(50)
       : { data: [] as ApplicationRollupRow[] }
@@ -83,7 +93,13 @@ export default async function EmployerMessagesPage() {
           <p className="mt-1 text-sm text-slate-600">Communication and updates are grouped here so the applicant inbox can stay focused on ATS processing.</p>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <EmployerWorkspaceNav
+          activeTab="messages"
+          selectedInternshipId={activeInternshipId || undefined}
+          internships={internships.map((row) => ({ id: row.id, title: row.title?.trim() || 'Internship' }))}
+        />
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <section className="rounded-xl border border-slate-200 bg-white p-4">
             <h2 className="text-sm font-semibold text-slate-900">Notifications</h2>
             <p className="mt-1 text-xs text-slate-600">Application and ATS updates from your listings.</p>

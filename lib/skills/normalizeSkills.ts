@@ -34,9 +34,10 @@ export async function normalizeSkills(input: string[]): Promise<NormalizeSkillsR
 
   const supabase = await supabaseServer()
 
-  const [{ data: aliasRows }, { data: skillRows }] = await Promise.all([
+  const [{ data: aliasRows }, { data: canonicalAliasRows }, { data: skillRows }] = await Promise.all([
     supabase.from('skill_aliases').select('alias, skill_id').in('alias', aliasCandidates),
-    supabase.from('skills').select('id, slug').in('slug', slugCandidates),
+    supabase.from('canonical_skill_aliases').select('alias, canonical_skill_id').in('alias', aliasCandidates),
+    supabase.from('skills').select('id, slug, normalized_name').in('slug', slugCandidates),
   ])
 
   const aliasToSkillId = new Map<string, string>()
@@ -45,11 +46,20 @@ export async function normalizeSkills(input: string[]): Promise<NormalizeSkillsR
       aliasToSkillId.set(row.alias, row.skill_id)
     }
   }
+  for (const row of canonicalAliasRows ?? []) {
+    if (typeof row.alias === 'string' && typeof row.canonical_skill_id === 'string') {
+      aliasToSkillId.set(row.alias, row.canonical_skill_id)
+    }
+  }
 
   const slugToSkillId = new Map<string, string>()
+  const normalizedToSkillId = new Map<string, string>()
   for (const row of skillRows ?? []) {
     if (typeof row.slug === 'string' && typeof row.id === 'string') {
       slugToSkillId.set(row.slug, row.id)
+    }
+    if (typeof row.normalized_name === 'string' && typeof row.id === 'string') {
+      normalizedToSkillId.set(row.normalized_name, row.id)
     }
   }
 
@@ -72,6 +82,10 @@ export async function normalizeSkills(input: string[]): Promise<NormalizeSkillsR
     if (!skillId && item.slug) {
       const fromSlug = slugToSkillId.get(item.slug)
       if (fromSlug) skillId = fromSlug
+    }
+    if (!skillId) {
+      const fromNormalized = normalizedToSkillId.get(item.candidates[1] ?? '')
+      if (fromNormalized) skillId = fromNormalized
     }
 
     if (skillId) {

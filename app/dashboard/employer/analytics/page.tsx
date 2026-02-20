@@ -1,8 +1,9 @@
-import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
 import AnalyticsCharts from './_components/AnalyticsCharts'
+import EmployerDashboardHeader from '@/components/employer/EmployerDashboardHeader'
+
+type SearchParams = Promise<{ internship_id?: string }>
 
 type InternshipRow = {
   id: string
@@ -40,7 +41,9 @@ function toDayKey(value: string) {
   return value.slice(0, 10)
 }
 
-export default async function EmployerAnalyticsPage() {
+export default async function EmployerAnalyticsPage({ searchParams }: { searchParams?: SearchParams }) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined
+  const selectedInternshipId = String(resolvedSearchParams?.internship_id ?? '').trim()
   const { user } = await requireRole('employer', { requestedPath: '/dashboard/employer/analytics' })
   const supabase = await supabaseServer()
 
@@ -51,21 +54,24 @@ export default async function EmployerAnalyticsPage() {
 
   const internships = (internshipRowsData ?? []) as InternshipRow[]
   const internshipIds = internships.map((row) => row.id)
+  const activeInternshipId =
+    selectedInternshipId && internshipIds.includes(selectedInternshipId) ? selectedInternshipId : (internshipIds[0] ?? '')
+  const scopedInternshipIds = activeInternshipId ? [activeInternshipId] : internshipIds
   const activeListingsCount = internships.filter((row) => row.status === 'published' || row.is_active).length
   const draftListingsCount = internships.filter((row) => row.status !== 'published' && !row.is_active).length
 
   const [{ data: eventRowsData, error: eventError }, { data: applicationRowsData }] = await Promise.all([
-    internshipIds.length > 0
+    scopedInternshipIds.length > 0
       ? supabase
           .from('internship_events')
           .select('internship_id, event_type, created_at')
-          .in('internship_id', internshipIds)
+          .in('internship_id', scopedInternshipIds)
       : { data: [] as InternshipEventRow[], error: null },
-    internshipIds.length > 0
+    scopedInternshipIds.length > 0
       ? supabase
           .from('applications')
           .select('internship_id, created_at')
-          .in('internship_id', internshipIds)
+          .in('internship_id', scopedInternshipIds)
       : { data: [] as ApplicationRow[] },
   ])
 
@@ -165,22 +171,26 @@ export default async function EmployerAnalyticsPage() {
     const conversion = viewsValue > 0 ? Math.round((applicationsValue / viewsValue) * 1000) / 10 : 0
     return { label: point.label, value: conversion }
   })
+  const previousPeriodViews = viewsSeries.slice(0, 15).reduce((sum, point) => sum + point.value, 0)
+  const currentPeriodViews = viewsSeries.slice(15).reduce((sum, point) => sum + point.value, 0)
+  const previousPeriodApplications = applicationsSeries.slice(0, 15).reduce((sum, point) => sum + point.value, 0)
+  const currentPeriodApplications = applicationsSeries.slice(15).reduce((sum, point) => sum + point.value, 0)
+  const previousPeriodConversion = previousPeriodViews > 0 ? (previousPeriodApplications / previousPeriodViews) * 100 : 0
+  const currentPeriodConversion = currentPeriodViews > 0 ? (currentPeriodApplications / currentPeriodViews) * 100 : 0
 
   return (
     <main className="min-h-screen bg-white">
       <section className="mx-auto max-w-6xl px-6 py-10">
-        <div className="mb-3">
-          <Link
-            href="/dashboard/employer"
-            aria-label="Go back"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
-        </div>
-
-        <h1 className="text-2xl font-semibold text-slate-900">Analytics</h1>
-        <p className="mt-1 text-slate-600">Track listing views, applications, and conversion trends.</p>
+        <EmployerDashboardHeader
+          title="Analytics"
+          description="Track listing views, applications, and conversion trends."
+          activeTab="analytics"
+          selectedInternshipId={activeInternshipId || undefined}
+          internships={internships.map((row) => ({
+            id: row.id,
+            title: row.title?.trim() || 'Internship',
+          }))}
+        />
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -228,6 +238,16 @@ export default async function EmployerAnalyticsPage() {
           conversionSeries={conversionSeries}
           topByViews={topByViews}
           topByApplications={topByApplications}
+          kpi={{
+            rangeLabel: 'Last 30 days',
+            viewsTotal: views30,
+            applicationsTotal: applications30,
+            conversionTotal: conversion30,
+            viewsPrevious: previousPeriodViews,
+            applicationsPrevious: previousPeriodApplications,
+            conversionPrevious: previousPeriodConversion,
+            conversionCurrent: currentPeriodConversion,
+          }}
         />
       </section>
     </main>

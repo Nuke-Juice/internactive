@@ -375,6 +375,7 @@ export default async function JobsView({
   let profileCoursework: string[] = []
   let profileSkills: string[] = []
   let profileSkillIds: string[] = []
+  let profileCustomSkills: string[] = []
   let profileCourseworkItemIds: string[] = []
   let profileCourseworkCategoryIds: string[] = []
   let profileCanonicalCourseworkCategoryIds: string[] = []
@@ -425,7 +426,11 @@ export default async function JobsView({
               .maybeSingle()
           ).data
         : profileResult.data
-    const [{ data: studentSkillRows }, courseworkFeatures] = await Promise.all([
+    const [{ data: studentProfileSkillRows }, { data: studentSkillRows }, courseworkFeatures] = await Promise.all([
+      supabase
+        .from('student_profile_skills')
+        .select('canonical_skill_id, custom_skill_id, canonical_skill:skills(label), custom_skill:custom_skills(name)')
+        .eq('student_id', user.id),
       supabase.from('student_skill_items').select('skill_id, skill:skills(label)').eq('student_id', user.id),
       getStudentCourseworkFeatures({
         supabase,
@@ -450,14 +455,28 @@ export default async function JobsView({
           .map((item) => item.trim())
           .filter(Boolean)
       : []
-    const canonicalSkillLabels = (studentSkillRows ?? [])
+    const canonicalSkillLabelsFromProfile = (studentProfileSkillRows ?? [])
+      .map((row) => {
+        const skill = row.canonical_skill as { label?: string | null } | null
+        return typeof skill?.label === 'string' ? skill.label : ''
+      })
+      .filter((value): value is string => value.length > 0)
+    const customSkillLabels = (studentProfileSkillRows ?? [])
+      .map((row) => {
+        const skill = row.custom_skill as { name?: string | null } | null
+        return typeof skill?.name === 'string' ? skill.name : ''
+      })
+      .filter((value): value is string => value.length > 0)
+    const canonicalSkillLabelsFromLegacy = (studentSkillRows ?? [])
       .map((row) => {
         const skill = row.skill as { label?: string | null } | null
         return typeof skill?.label === 'string' ? skill.label : ''
       })
       .filter((value): value is string => value.length > 0)
+    const canonicalSkillLabels =
+      canonicalSkillLabelsFromProfile.length > 0 ? canonicalSkillLabelsFromProfile : canonicalSkillLabelsFromLegacy
     preferenceSignals = parseStudentPreferenceSignals(profile?.interests ?? null)
-    profileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels]))
+    profileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels, ...customSkillLabels]))
     const profilePreferredLocation = fallbackPreferredLocation(profile?.preferred_city, profile?.preferred_state)
     profilePreferredLocations =
       preferenceSignals.preferredLocations.length > 0
@@ -480,9 +499,18 @@ export default async function JobsView({
           : null
       ),
     }
-    profileSkillIds = (studentSkillRows ?? [])
-      .map((row) => row.skill_id)
+    profileSkillIds = (studentProfileSkillRows ?? [])
+      .map((row) => row.canonical_skill_id)
       .filter((value): value is string => typeof value === 'string')
+    if (profileSkillIds.length === 0) {
+      profileSkillIds = (studentSkillRows ?? [])
+        .map((row) => row.skill_id)
+        .filter((value): value is string => typeof value === 'string')
+    }
+    profileCustomSkills = customSkillLabels
+    if (profileCustomSkills.length > 0) {
+      profileSkills = Array.from(new Set([...profileSkills, ...profileCustomSkills]))
+    }
     profileCourseworkItemIds = courseworkFeatures.legacyItemIds
     profileCourseworkCategoryIds = courseworkFeatures.legacyCategoryIds
     profileCanonicalCourseworkCategoryIds = courseworkFeatures.canonicalCategoryIds
@@ -552,6 +580,8 @@ export default async function JobsView({
         recommended_coursework: listing.recommended_coursework,
         required_skill_ids: listing.required_skill_ids,
         preferred_skill_ids: listing.preferred_skill_ids,
+        required_custom_skills: listing.required_custom_skills,
+        preferred_custom_skills: listing.preferred_custom_skills,
         required_course_category_ids: listing.required_course_category_ids,
         required_course_category_names: listing.required_course_category_names,
         coursework_item_ids: listing.coursework_item_ids,
@@ -566,6 +596,7 @@ export default async function JobsView({
         experience_level: profileExperienceLevel,
         skills: profileSkills,
         skill_ids: profileSkillIds,
+        custom_skills: profileCustomSkills,
         canonical_coursework_category_ids: profileCanonicalCourseworkCategoryIds,
         canonical_coursework_category_names: profileCanonicalCourseworkCategoryNames,
         canonical_coursework_level_bands: profileCanonicalCourseLevelBands,

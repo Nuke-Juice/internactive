@@ -26,6 +26,8 @@ export type InternshipMatchInput = {
   recommended_coursework?: string[] | string | null
   required_skill_ids?: string[] | null
   preferred_skill_ids?: string[] | null
+  required_custom_skills?: string[] | null
+  preferred_custom_skills?: string[] | null
   coursework_item_ids?: string[] | null
   coursework_category_ids?: string[] | null
   coursework_category_names?: string[] | null
@@ -37,6 +39,7 @@ export type StudentMatchProfile = {
   experience_level?: string | null
   skills?: string[]
   skill_ids?: string[]
+  custom_skills?: string[]
   canonical_coursework_category_ids?: string[]
   canonical_coursework_category_names?: string[]
   canonical_coursework_level_bands?: string[]
@@ -146,13 +149,29 @@ export type MatchSignalContribution = {
   evidence: string[]
 }
 
+export type MatchCategoryKey = 'skills' | 'coursework' | 'major' | 'availability' | 'location'
+
+export type MatchCategoryBreakdownItem = {
+  key: MatchCategoryKey
+  label: string
+  weight_points: number
+  achieved_fraction: number
+  earned_points: number
+  summary: string
+  reasons: Array<{ text: string; points: number }>
+  gaps: Array<{ text: string }>
+  status: 'ok' | 'missing_data' | 'blocked'
+}
+
 export type InternshipMatchBreakdown = {
+  total_score: number
   totalScoreRaw: number
   maxScoreRaw: number
   normalizedScore: number
   score100: number
   perSignalContributions: MatchSignalContribution[]
   reasons: MatchReason[]
+  categories: MatchCategoryBreakdownItem[]
 }
 
 export type InternshipMatchResult = {
@@ -170,6 +189,57 @@ export type InternshipMatchResult = {
 
 export type EvaluateMatchOptions = {
   explain?: boolean
+}
+
+type ReasonWithPoints = {
+  text: string
+  points: number
+  reasonKey: string
+  evidence: string[]
+}
+
+const MATCH_CATEGORY_WEIGHTS: Record<MatchCategoryKey, number> = {
+  skills: 25,
+  coursework: 25,
+  major: 20,
+  availability: 15,
+  location: 15,
+}
+
+const MATCH_CATEGORY_DEFINITIONS: Record<
+  MatchCategoryKey,
+  { label: string; signalWeights: Array<{ key: MatchSignalKey; weight: number }> }
+> = {
+  skills: {
+    label: 'Skills',
+    signalWeights: [
+      { key: 'skillsRequired', weight: 4 },
+      { key: 'skillsPreferred', weight: 2 },
+    ],
+  },
+  coursework: {
+    label: 'Coursework',
+    signalWeights: [{ key: 'courseworkAlignment', weight: 1 }],
+  },
+  major: {
+    label: 'Major/category alignment',
+    signalWeights: [
+      { key: 'majorCategoryAlignment', weight: 3 },
+      { key: 'experienceAlignment', weight: 1.5 },
+    ],
+  },
+  availability: {
+    label: 'Availability',
+    signalWeights: [
+      { key: 'availability', weight: 2 },
+      { key: 'termAlignment', weight: 1 },
+      { key: 'startDateFit', weight: 1 },
+    ],
+  },
+  location: {
+    label: 'Location/work mode fit',
+    signalWeights: [{ key: 'preferenceAlignment', weight: 1 }],
+  },
 }
 
 function normalizeText(value: string) {
@@ -271,6 +341,8 @@ function seasonFromTerm(term: string) {
 function inferSkills(internship: InternshipMatchInput) {
   const requiredIds = Array.from(new Set((internship.required_skill_ids ?? []).filter(Boolean)))
   const preferredIds = Array.from(new Set((internship.preferred_skill_ids ?? []).filter(Boolean)))
+  const requiredCustom = normalizeSkillListForMatching(parseList(internship.required_custom_skills))
+  const preferredCustom = normalizeSkillListForMatching(parseList(internship.preferred_custom_skills))
   const required = normalizeSkillListForMatching(parseList(internship.required_skills))
   const preferred = normalizeSkillListForMatching(parseList(internship.preferred_skills))
 
@@ -281,11 +353,16 @@ function inferSkills(internship: InternshipMatchInput) {
   const requiredFromDescription = requiredMatch ? normalizeSkillListForMatching(parseList(requiredMatch[1])) : []
   const preferredFromDescription = preferredMatch ? normalizeSkillListForMatching(parseList(preferredMatch[1])) : []
 
+  const requiredCustomSet = new Set(requiredCustom)
+  const preferredCustomSet = new Set(preferredCustom)
+
   return {
     requiredIds,
     preferredIds,
-    required: [...new Set([...required, ...requiredFromDescription])],
-    preferred: [...new Set([...preferred, ...preferredFromDescription])],
+    requiredCustom,
+    preferredCustom,
+    required: [...new Set([...required, ...requiredFromDescription])].filter((token) => !requiredCustomSet.has(token)),
+    preferred: [...new Set([...preferred, ...preferredFromDescription])].filter((token) => !preferredCustomSet.has(token)),
   }
 }
 
@@ -469,9 +546,121 @@ function gapSeverity(gap: string) {
   return 10
 }
 
+function normalizeSignalFraction(raw: number) {
+  if (!Number.isFinite(raw)) return 0
+  if (raw <= 0) return 0
+  if (raw >= 1) return 1
+  return raw
+}
+
+function mapReasonKeyToCategory(reasonKey: string): MatchCategoryKey {
+  if (reasonKey.startsWith('skills.')) return 'skills'
+  if (reasonKey.startsWith('coursework.')) return 'coursework'
+  if (reasonKey.startsWith('major.')) return 'major'
+  if (reasonKey.startsWith('availability.') || reasonKey.startsWith('term.') || reasonKey.startsWith('start_date.')) return 'availability'
+  if (reasonKey.startsWith('preferences.')) return 'location'
+  if (reasonKey.startsWith('experience.')) return 'major'
+  return 'skills'
+}
+
+function mapGapToCategory(gap: string): MatchCategoryKey {
+  const normalized = gap.toLowerCase()
+  if (normalized.includes('coursework')) return 'coursework'
+  if (normalized.includes('major')) return 'major'
+  if (normalized.includes('work mode') || normalized.includes('location mismatch') || normalized.includes('remote-only')) return 'location'
+  if (normalized.includes('hours') || normalized.includes('term mismatch') || normalized.includes('start')) return 'availability'
+  if (normalized.includes('skills')) return 'skills'
+  if (normalized.includes('experience')) return 'major'
+  return 'skills'
+}
+
+function categorySummaryFromSignals(params: {
+  key: MatchCategoryKey
+  contributions: Record<MatchSignalKey, MatchSignalContribution>
+}) {
+  const { key, contributions } = params
+  if (key === 'skills') {
+    const requiredEvidence = contributions.skillsRequired.evidence[0] ?? ''
+    const preferredEvidence = contributions.skillsPreferred.evidence[0] ?? ''
+    if (requiredEvidence) return requiredEvidence
+    if (preferredEvidence) return preferredEvidence
+    return 'Not enough skill data yet'
+  }
+  if (key === 'coursework') {
+    return contributions.courseworkAlignment.evidence[0] ?? 'Not enough coursework data yet'
+  }
+  if (key === 'major') {
+    return contributions.majorCategoryAlignment.evidence[0] ?? contributions.experienceAlignment.evidence[0] ?? 'No major/category overlap yet'
+  }
+  if (key === 'availability') {
+    return contributions.availability.evidence[0] ?? contributions.termAlignment.evidence[0] ?? contributions.startDateFit.evidence[0] ?? 'Not enough availability data yet'
+  }
+  return contributions.preferenceAlignment.evidence[0] ?? 'Not enough location/work mode preference data yet'
+}
+
+function buildCategoryBreakdown(params: {
+  signalContributions: Record<MatchSignalKey, MatchSignalContribution>
+  reasonsWithPoints: ReasonWithPoints[]
+  gaps: string[]
+}) {
+  const categoryReasons = new Map<MatchCategoryKey, Array<{ text: string; points: number }>>()
+  for (const reason of params.reasonsWithPoints) {
+    const category = mapReasonKeyToCategory(reason.reasonKey)
+    const existing = categoryReasons.get(category) ?? []
+    existing.push({ text: reason.text.replace(/\s*\(\+\d+(\.\d+)?\)\s*$/i, ''), points: Number(reason.points.toFixed(1)) })
+    categoryReasons.set(category, existing)
+  }
+
+  const categoryGaps = new Map<MatchCategoryKey, Array<{ text: string }>>()
+  for (const gap of params.gaps) {
+    const category = mapGapToCategory(gap)
+    const existing = categoryGaps.get(category) ?? []
+    existing.push({ text: gap })
+    categoryGaps.set(category, existing)
+  }
+
+  const categories: MatchCategoryBreakdownItem[] = (Object.keys(MATCH_CATEGORY_DEFINITIONS) as MatchCategoryKey[]).map((key) => {
+    const definition = MATCH_CATEGORY_DEFINITIONS[key]
+    const weightedRaw = definition.signalWeights.reduce((sum, item) => {
+      const contribution = params.signalContributions[item.key]
+      return sum + normalizeSignalFraction(contribution.rawMatchValue) * item.weight
+    }, 0)
+    const weightTotal = definition.signalWeights.reduce((sum, item) => sum + item.weight, 0)
+    const achievedFraction = weightTotal > 0 ? clamp01(weightedRaw / weightTotal) : 0
+    const weightPoints = MATCH_CATEGORY_WEIGHTS[key]
+    const earnedPoints = Number((weightPoints * achievedFraction).toFixed(1))
+    const reasons = (categoryReasons.get(key) ?? []).sort((a, b) => b.points - a.points).slice(0, 3)
+    const gaps = (categoryGaps.get(key) ?? []).slice(0, 3)
+    const hasEvidence = definition.signalWeights.some((item) => {
+      const row = params.signalContributions[item.key]
+      return row.evidence.length > 0 || row.pointsAwarded !== 0
+    })
+    const status: MatchCategoryBreakdownItem['status'] =
+      gaps.length > 0 ? 'blocked' : hasEvidence ? 'ok' : 'missing_data'
+
+    return {
+      key,
+      label: definition.label,
+      weight_points: weightPoints,
+      achieved_fraction: Number(achievedFraction.toFixed(4)),
+      earned_points: earnedPoints,
+      summary: categorySummaryFromSignals({ key, contributions: params.signalContributions }),
+      reasons,
+      gaps,
+      status,
+    }
+  })
+
+  const adjustedTotal = Number(categories.reduce((sum, category) => sum + category.earned_points, 0).toFixed(1))
+  return {
+    categories,
+    totalScore: adjustedTotal,
+  }
+}
+
 function finalizeMatchResult(params: {
   internshipId: string
-  reasonsWithPoints: Array<{ text: string; points: number; reasonKey: string; evidence: string[] }>
+  reasonsWithPoints: ReasonWithPoints[]
   gaps: string[]
   eligible: boolean
   explain: boolean
@@ -481,10 +670,15 @@ function finalizeMatchResult(params: {
 }) {
   const totalScoreRaw = MATCH_SIGNAL_KEYS.reduce((sum, signalKey) => sum + params.signalContributions[signalKey].pointsAwarded, 0)
   const maxScoreRaw = getMatchMaxScore(params.weights)
-  const normalizedScore = maxScoreRaw > 0 ? clamp01(totalScoreRaw / maxScoreRaw) : 0
 
   const sortedReasons = [...params.reasonsWithPoints].sort((a, b) => b.points - a.points)
-  const score100 = Math.max(0, Math.min(100, Math.round(normalizedScore * 100)))
+  const categoryBreakdown = buildCategoryBreakdown({
+    signalContributions: params.signalContributions,
+    reasonsWithPoints: params.reasonsWithPoints,
+    gaps: params.gaps,
+  })
+  const score100 = Math.max(0, Math.min(100, Math.round(categoryBreakdown.totalScore)))
+  const normalizedScore = Number((score100 / 100).toFixed(4))
 
   const dedupedGaps = Array.from(new Set(params.gaps.map(mapGap).filter(Boolean)))
     .sort((a, b) => gapSeverity(b) - gapSeverity(a))
@@ -498,7 +692,7 @@ function finalizeMatchResult(params: {
     eligible: params.eligible,
     matchingVersion: MATCHING_VERSION,
     maxScore: 100,
-    normalizedScore: Number(normalizedScore.toFixed(4)),
+    normalizedScore,
     courseworkSignalPathUsed: params.courseworkSignalPathUsed ?? 'none',
   }
 
@@ -510,9 +704,10 @@ function finalizeMatchResult(params: {
     }))
 
     result.breakdown = {
+      total_score: Number(categoryBreakdown.totalScore.toFixed(1)),
       totalScoreRaw: Number(totalScoreRaw.toFixed(3)),
       maxScoreRaw: Number(maxScoreRaw.toFixed(3)),
-      normalizedScore: Number(normalizedScore.toFixed(4)),
+      normalizedScore,
       score100,
       perSignalContributions: MATCH_SIGNAL_KEYS.map((signalKey) => ({
         ...params.signalContributions[signalKey],
@@ -520,6 +715,7 @@ function finalizeMatchResult(params: {
         rawMatchValue: Number(params.signalContributions[signalKey].rawMatchValue.toFixed(4)),
       })),
       reasons: breakdownReasons,
+      categories: categoryBreakdown.categories,
     }
   }
 
@@ -648,6 +844,7 @@ export function evaluateInternshipMatch(
 
   const studentSkills = normalizeSkillListForMatching([
     ...(profile.skills ?? []),
+    ...(profile.custom_skills ?? []),
     ...(profile.coursework ?? []),
     ...studentMajors,
   ])
@@ -658,7 +855,7 @@ export function evaluateInternshipMatch(
   const studentCourseworkIds = Array.from(new Set((profile.coursework_item_ids ?? []).filter(Boolean)))
   const studentCourseworkCategoryIds = Array.from(new Set((profile.coursework_category_ids ?? []).filter(Boolean)))
 
-  const { requiredIds, preferredIds, required, preferred } = inferSkills(internship)
+  const { requiredIds, preferredIds, required, preferred, requiredCustom, preferredCustom } = inferSkills(internship)
 
   if (requiredIds.length > 0 && studentSkillIds.length > 0) {
     const requiredHits = overlapCount(requiredIds, studentSkillIds)
@@ -712,6 +909,9 @@ export function evaluateInternshipMatch(
       gaps.push(`Missing required skills: ${missingRequired.join(', ')}`)
     }
   }
+  if (requiredCustom.length > 0) {
+    gaps.push(`Other required skills (custom, non-scored): ${requiredCustom.slice(0, 4).join(', ')}`)
+  }
 
   if (preferredIds.length > 0 && studentSkillIds.length > 0) {
     const preferredHits = overlapCount(preferredIds, studentSkillIds)
@@ -753,6 +953,14 @@ export function evaluateInternshipMatch(
         evidence: [`matched=${preferredHits}`, `preferred=${preferred.length}`],
       })
     }
+  }
+  if (preferredCustom.length > 0) {
+    reasonsWithPoints.push({
+      reasonKey: 'skills.preferred.custom_non_scored',
+      text: `Other skills (custom): ${preferredCustom.slice(0, 4).join(', ')}`,
+      points: 0,
+      evidence: ['custom_skills_non_scored'],
+    })
   }
 
   let courseworkSignalPathUsed: 'canonical' | 'legacy' | 'text' | 'none' = 'none'

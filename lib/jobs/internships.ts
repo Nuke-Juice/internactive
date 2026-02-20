@@ -71,6 +71,22 @@ export type Internship = {
         }> | null
       }>
     | null
+  internship_skill_requirements:
+    | Array<{
+        importance: string | null
+        canonical_skill_id: string | null
+        custom_skill_id: string | null
+        custom_skill: {
+          id: string
+          name: string
+          normalized_name: string
+        } | Array<{
+          id: string
+          name: string
+          normalized_name: string
+        }> | null
+      }>
+    | null
   internship_coursework_items:
     | Array<{
         coursework_item_id: string
@@ -115,6 +131,8 @@ export type Internship = {
     | null
   required_skill_ids: string[]
   preferred_skill_ids: string[]
+  required_custom_skills: string[]
+  preferred_custom_skills: string[]
   required_course_category_ids: string[]
   required_course_category_names: string[]
   coursework_item_ids: string[]
@@ -184,6 +202,7 @@ const INTERNSHIP_SELECT_RICH_COLUMNS = [
   'target_graduation_years',
   'internship_required_skill_items(skill_id, skill:skills(id, slug, label, category))',
   'internship_preferred_skill_items(skill_id, skill:skills(id, slug, label, category))',
+  'internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, custom_skill:custom_skills(id, name, normalized_name))',
   'internship_required_course_categories(category_id, category:canonical_course_categories(id, name, slug))',
   'internship_coursework_items(coursework_item_id, coursework:coursework_items(id, name, normalized_name))',
   'internship_coursework_category_links(category_id, category:coursework_categories(id, name, normalized_name))',
@@ -362,6 +381,8 @@ type RawInternshipRow = Omit<
   | 'preferred_skill_ids'
   | 'required_course_category_ids'
   | 'required_course_category_names'
+  | 'required_custom_skills'
+  | 'preferred_custom_skills'
   | 'coursework_item_ids'
   | 'coursework_category_ids'
   | 'coursework_category_names'
@@ -380,6 +401,20 @@ function mapInternshipRows(rows: RawInternshipRow[]) {
     preferred_skill_ids: (row.internship_preferred_skill_items ?? [])
       .map((item) => item.skill_id)
       .filter((item): item is string => typeof item === 'string'),
+    required_custom_skills: (row.internship_skill_requirements ?? [])
+      .filter((item) => item.importance === 'required' && typeof item.custom_skill_id === 'string')
+      .map((item) => {
+        const custom = Array.isArray(item.custom_skill) ? item.custom_skill[0] : item.custom_skill
+        return typeof custom?.name === 'string' ? custom.name : ''
+      })
+      .filter((item): item is string => Boolean(item)),
+    preferred_custom_skills: (row.internship_skill_requirements ?? [])
+      .filter((item) => item.importance === 'preferred' && typeof item.custom_skill_id === 'string')
+      .map((item) => {
+        const custom = Array.isArray(item.custom_skill) ? item.custom_skill[0] : item.custom_skill
+        return typeof custom?.name === 'string' ? custom.name : ''
+      })
+      .filter((item): item is string => Boolean(item)),
     ...(() => {
       const normalizedCoursework = normalizeListingCoursework({
         internship_required_course_categories: row.internship_required_course_categories,

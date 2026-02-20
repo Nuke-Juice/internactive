@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
 
 type TabKey = 'listings' | 'applicants' | 'messages' | 'analytics'
 
@@ -38,8 +39,29 @@ function withInternshipContext(href: string, internshipId?: string) {
 export default function EmployerWorkspaceNav(props: Props) {
   const router = useRouter()
   const selectedInternshipId = props.selectedInternshipId || ''
+  const [searchValue, setSearchValue] = useState('')
 
   const activeTabHref = TABS.find((item) => item.key === props.activeTab)?.href ?? '/dashboard/employer'
+  const selectedTitle = useMemo(
+    () => props.internships.find((option) => option.id === selectedInternshipId)?.title ?? '',
+    [props.internships, selectedInternshipId]
+  )
+
+  useEffect(() => {
+    setSearchValue(selectedTitle)
+  }, [selectedTitle])
+
+  function applyListingSelection(rawValue: string) {
+    const value = rawValue.trim()
+    if (!value) {
+      router.push(activeTabHref)
+      return
+    }
+    const matchByTitle = props.internships.find((option) => option.title.toLowerCase() === value.toLowerCase())
+    const internshipId = matchByTitle?.id
+    if (!internshipId) return
+    router.push(`${activeTabHref}?internship_id=${encodeURIComponent(internshipId)}`)
+  }
 
   return (
     <div className="sticky top-0 z-10 rounded-xl border border-slate-200 bg-white/95 p-3 backdrop-blur">
@@ -52,24 +74,37 @@ export default function EmployerWorkspaceNav(props: Props) {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Current listing</label>
-          <select
-            value={selectedInternshipId}
-            onChange={(event) => {
-              const internshipId = event.target.value
-              const nextUrl = internshipId ? `${activeTabHref}?internship_id=${encodeURIComponent(internshipId)}` : activeTabHref
-              router.push(nextUrl)
+          <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Listing search</label>
+          <input
+            list="employer-listings"
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            onBlur={() => applyListingSelection(searchValue)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              applyListingSelection(searchValue)
             }}
-            className="min-w-[220px] rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700"
-          >
-            {props.includeAllOption ? <option value="">All listings</option> : null}
-            {props.internships.length === 0 ? <option value="">No listings</option> : null}
+            placeholder={props.internships.length > 0 ? 'Type listing title' : 'No listings'}
+            className="min-w-[240px] rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700"
+          />
+          <datalist id="employer-listings">
             {props.internships.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.title}
-              </option>
+              <option key={option.id} value={option.title} />
             ))}
-          </select>
+          </datalist>
+          {props.includeAllOption ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchValue('')
+                router.push(activeTabHref)
+              }}
+              className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              All listings
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

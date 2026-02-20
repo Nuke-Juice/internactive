@@ -6,8 +6,8 @@ import {
   resolveEffectiveAtsConfig,
   type EmployerAtsDefaults,
 } from '@/lib/apply/effectiveAts'
+import EmployerDashboardHeader from '@/components/employer/EmployerDashboardHeader'
 import EmployerApplicantsInboxClient from '@/components/employer/inbox/EmployerApplicantsInboxClient'
-import EmployerWorkspaceNav from '@/components/employer/EmployerWorkspaceNav'
 
 type SearchParams = Promise<{ internship_id?: string }>
 
@@ -229,12 +229,9 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
   return (
     <main className="min-h-screen bg-white">
       <section className="mx-auto max-w-6xl px-6 py-10">
-        <div className="mb-4">
-          <h1 className="text-2xl font-semibold text-slate-900">Applicant inbox</h1>
-          <p className="mt-1 text-sm text-slate-600">Review quick applies and invite top candidates into your ATS workflow.</p>
-        </div>
-
-        <EmployerWorkspaceNav
+        <EmployerDashboardHeader
+          title="Applicant inbox"
+          description="Review quick applies and invite top candidates into your ATS workflow."
           activeTab="applicants"
           selectedInternshipId={activeInternshipId || undefined}
           includeAllOption
