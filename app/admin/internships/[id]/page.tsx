@@ -27,7 +27,7 @@ import { requireVerifiedEmail } from '@/lib/auth/emailVerification'
 import { validateListingForPublish } from '@/lib/listings/validateListingForPublish'
 import { computeInternshipMatchCoverage } from '@/lib/admin/internshipMatchCoverage'
 import InternshipLocationFields from '@/components/forms/InternshipLocationFields'
-import CatalogMultiSelect from '../_components/CatalogMultiSelect'
+import CatalogMultiSelect from '@/components/forms/CatalogMultiSelect'
 
 type Params = Promise<{ id: string }>
 type SearchParams = Promise<{ error?: string; success?: string }>

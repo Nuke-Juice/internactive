@@ -1,8 +1,9 @@
 import 'server-only'
 
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeCatalogLabel, normalizeCatalogToken, slugifyCatalogLabel } from '@/lib/catalog/normalization'
 
-type SupabaseLike = any
+type SupabaseLike = SupabaseClient
 
 export type ResolvedSkillSelections = {
   canonicalSkillIds: string[]
@@ -196,30 +197,115 @@ export async function searchCanonicalSkills(params: {
   const cleanQuery = normalizeCatalogLabel(params.query)
   const compact = normalizeCatalogToken(cleanQuery)
   const limit = Math.min(Math.max(Math.trunc(params.limit ?? 20), 5), 50)
+  const baseLimit = Math.max(limit * 3, 60)
+  const queryLower = cleanQuery.toLowerCase()
 
   const queryBuilder = params.supabase
     .from('skills')
-    .select('id, label, category, is_active')
+    .select('id, label, category, slug, normalized_name, is_active, popularity_weight')
     .eq('is_active', true)
 
-  const { data, error } =
-    compact.length >= 2
-      ? await queryBuilder
-          .or(`label.ilike.%${cleanQuery}%,slug.ilike.%${cleanQuery}%,normalized_name.ilike.%${compact}%`)
-          .limit(limit)
-      : await queryBuilder.order('label', { ascending: true }).limit(limit)
-  if (error) {
-    throw new Error(error.message)
+  const [{ data: directRows, error: directError }, { data: canonicalAliasRows, error: canonicalAliasError }, { data: legacyAliasRows, error: legacyAliasError }] =
+    await Promise.all([
+      compact.length >= 2
+        ? queryBuilder
+            .or(`label.ilike.%${cleanQuery}%,slug.ilike.%${cleanQuery}%,normalized_name.ilike.%${compact}%`)
+            .limit(baseLimit)
+        : queryBuilder.order('popularity_weight', { ascending: false }).order('label', { ascending: true }).limit(baseLimit),
+      compact.length >= 2
+        ? params.supabase
+            .from('canonical_skill_aliases')
+            .select('alias, canonical_skill_id')
+            .ilike('alias', `%${cleanQuery}%`)
+            .limit(baseLimit)
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+      compact.length >= 2
+        ? params.supabase
+            .from('skill_aliases')
+            .select('alias, skill_id')
+            .ilike('alias', `%${cleanQuery}%`)
+            .limit(baseLimit)
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    ])
+
+  if (directError) throw new Error(directError.message)
+  if (canonicalAliasError) throw new Error(canonicalAliasError.message)
+  if (legacyAliasError) throw new Error(legacyAliasError.message)
+
+  const aliasBySkillId = new Map<string, string[]>()
+  for (const row of canonicalAliasRows ?? []) {
+    const alias = typeof row.alias === 'string' ? row.alias.trim() : ''
+    const skillId = typeof row.canonical_skill_id === 'string' ? row.canonical_skill_id : ''
+    if (!alias || !skillId) continue
+    if (!aliasBySkillId.has(skillId)) aliasBySkillId.set(skillId, [])
+    aliasBySkillId.get(skillId)?.push(alias)
+  }
+  for (const row of legacyAliasRows ?? []) {
+    const alias = typeof row.alias === 'string' ? row.alias.trim() : ''
+    const skillId = typeof row.skill_id === 'string' ? row.skill_id : ''
+    if (!alias || !skillId) continue
+    if (!aliasBySkillId.has(skillId)) aliasBySkillId.set(skillId, [])
+    aliasBySkillId.get(skillId)?.push(alias)
   }
 
-  const options: SkillSearchOption[] = (data ?? [])
-    .map((row: Record<string, unknown>) => ({
-      id: typeof row.id === 'string' ? row.id : '',
-      label: typeof row.label === 'string' ? row.label.trim() : '',
-      category: typeof row.category === 'string' && row.category.trim().length > 0 ? row.category.trim() : null,
-    }))
-    .filter((row: SkillSearchOption) => row.id && row.label)
-    .sort((a: SkillSearchOption, b: SkillSearchOption) => a.label.localeCompare(b.label))
+  const directById = new Map<string, Record<string, unknown>>()
+  for (const row of directRows ?? []) {
+    const id = typeof row.id === 'string' ? row.id : ''
+    if (!id) continue
+    directById.set(id, row)
+  }
 
-  return options
+  const aliasSkillIds = Array.from(aliasBySkillId.keys()).filter((id) => !directById.has(id))
+  if (aliasSkillIds.length > 0) {
+    const { data: aliasSkillRows, error: aliasSkillRowsError } = await params.supabase
+      .from('skills')
+      .select('id, label, category, slug, normalized_name, is_active, popularity_weight')
+      .eq('is_active', true)
+      .in('id', aliasSkillIds)
+      .limit(baseLimit)
+    if (aliasSkillRowsError) throw new Error(aliasSkillRowsError.message)
+    for (const row of aliasSkillRows ?? []) {
+      const id = typeof row.id === 'string' ? row.id : ''
+      if (!id) continue
+      directById.set(id, row)
+    }
+  }
+
+  type RankedOption = SkillSearchOption & { score: number; popularity: number }
+  const ranked: RankedOption[] = []
+
+  for (const row of directById.values()) {
+    const id = typeof row.id === 'string' ? row.id : ''
+    const label = typeof row.label === 'string' ? row.label.trim() : ''
+    if (!id || !label) continue
+    const category = typeof row.category === 'string' && row.category.trim().length > 0 ? row.category.trim() : null
+    const slug = typeof row.slug === 'string' ? row.slug : ''
+    const normalized = typeof row.normalized_name === 'string' ? row.normalized_name : normalizeCatalogToken(label)
+    const popularity = typeof row.popularity_weight === 'number' ? row.popularity_weight : 0
+    const aliases = aliasBySkillId.get(id) ?? []
+    const labelLower = label.toLowerCase()
+
+    let score = 0
+    if (!compact) {
+      score = popularity * 100
+    } else {
+      if (labelLower.startsWith(queryLower)) score += 180
+      if (normalizeCatalogToken(label).startsWith(compact)) score += 160
+      if (slug.startsWith(compact)) score += 130
+      if (labelLower.includes(queryLower)) score += 80
+      if (normalized.includes(compact)) score += 60
+      const aliasPrefix = aliases.some((alias) => normalizeCatalogToken(alias).startsWith(compact))
+      const aliasContains = aliases.some((alias) => normalizeCatalogToken(alias).includes(compact))
+      if (aliasPrefix) score += 140
+      else if (aliasContains) score += 70
+      score += Math.min(60, Math.max(0, popularity))
+    }
+
+    ranked.push({ id, label, category, score, popularity })
+  }
+
+  return ranked
+    .sort((a, b) => b.score - a.score || b.popularity - a.popularity || a.label.localeCompare(b.label))
+    .slice(0, limit)
+    .map(({ id, label, category }) => ({ id, label, category }))
 }

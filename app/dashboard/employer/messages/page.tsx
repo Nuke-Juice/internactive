@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
-import EmployerWorkspaceNav from '@/components/employer/EmployerWorkspaceNav'
+import EmployerDashboardHeader from '@/components/employer/EmployerDashboardHeader'
 
 type SearchParams = Promise<{ internship_id?: string }>
 
@@ -89,12 +89,11 @@ export default async function EmployerMessagesPage({ searchParams }: { searchPar
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">Messages</h1>
-          <p className="mt-1 text-sm text-slate-600">Communication and updates are grouped here so the applicant inbox can stay focused on ATS processing.</p>
         </div>
 
-        <EmployerWorkspaceNav
-          activeTab="messages"
+        <EmployerDashboardHeader
+          title="Messages"
+          description="Communication and updates are grouped here so the applicant inbox can stay focused on ATS processing."
           selectedInternshipId={activeInternshipId || undefined}
           internships={internships.map((row) => ({ id: row.id, title: row.title?.trim() || 'Internship' }))}
         />

@@ -2,7 +2,9 @@
 
 import { useMemo } from 'react'
 import CatalogMultiSelect from '@/components/forms/CatalogMultiSelect'
+import SkillsMultiSelect from '@/components/forms/SkillsMultiSelect'
 import { normalizeCatalogToken } from '@/lib/catalog/normalization'
+import { suggestSkillsForListing } from '@/lib/skills/suggestedSkills'
 import type { CatalogOption } from './types'
 
 type Props = {
@@ -13,7 +15,13 @@ type Props = {
   preferredSkillLabels: string[]
   majorLabels: string[]
   courseworkCategoryLabels: string[]
+  title: string
+  category: string
   resumeRequired: boolean
+  onRequiredSkillsChange: (labels: string[]) => void
+  onPreferredSkillsChange: (labels: string[]) => void
+  onMajorLabelsChange: (labels: string[]) => void
+  onCourseworkCategoryLabelsChange: (labels: string[]) => void
   onResumeRequiredChange: (value: boolean) => void
 }
 
@@ -55,9 +63,21 @@ export default function ListingStepRequirements(props: Props) {
     return [...props.courseworkCategoryCatalog, ...suggested]
   }, [props.courseworkCategoryCatalog])
 
+  const suggestedRequiredSkills = useMemo(
+    () =>
+      suggestSkillsForListing({
+        title: props.title,
+        category: props.category,
+        courseworkCategoryLabels: props.courseworkCategoryLabels,
+        selectedSkillLabels: props.requiredSkillLabels,
+        catalogLabels: props.skillCatalog.map((item) => item.name),
+      }),
+    [props.category, props.courseworkCategoryLabels, props.requiredSkillLabels, props.skillCatalog, props.title]
+  )
+
   return (
     <div className="space-y-4">
-      <CatalogMultiSelect
+      <SkillsMultiSelect
         key={`required-skills:${props.requiredSkillLabels.join('|')}`}
         label="Required skills"
         fieldName="required_skills"
@@ -66,11 +86,11 @@ export default function ListingStepRequirements(props: Props) {
         inputId="employer-required-skills-input"
         options={props.skillCatalog}
         initialLabels={props.requiredSkillLabels}
-        allowCustom
-        searchEndpoint="/api/skills/search"
+        suggestedLabels={suggestedRequiredSkills}
+        onSelectionChange={props.onRequiredSkillsChange}
       />
 
-      <CatalogMultiSelect
+      <SkillsMultiSelect
         key={`preferred-skills:${props.preferredSkillLabels.join('|')}`}
         label="Preferred skills"
         fieldName="preferred_skills"
@@ -79,8 +99,7 @@ export default function ListingStepRequirements(props: Props) {
         inputId="employer-preferred-skills-input"
         options={props.skillCatalog}
         initialLabels={props.preferredSkillLabels}
-        allowCustom
-        searchEndpoint="/api/skills/search"
+        onSelectionChange={props.onPreferredSkillsChange}
       />
 
       <p className="-mt-1 text-xs text-slate-500">Used to improve matching + ranking for students.</p>
@@ -95,6 +114,7 @@ export default function ListingStepRequirements(props: Props) {
         options={props.majorCatalog}
         initialLabels={props.majorLabels}
         allowCustom={false}
+        onSelectionChange={props.onMajorLabelsChange}
       />
 
       <CatalogMultiSelect
@@ -107,6 +127,7 @@ export default function ListingStepRequirements(props: Props) {
         options={courseworkOptions}
         initialLabels={props.courseworkCategoryLabels}
         allowCustom
+        onSelectionChange={props.onCourseworkCategoryLabelsChange}
       />
 
       <div>

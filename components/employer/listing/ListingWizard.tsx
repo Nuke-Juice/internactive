@@ -1171,7 +1171,13 @@ export default function ListingWizard(props: Props) {
                   preferredSkillLabels={preferredSkillLabels}
                   majorLabels={majorLabels}
                   courseworkCategoryLabels={courseworkCategoryLabels}
+                  title={state.title}
+                  category={state.category}
                   resumeRequired={state.resumeRequired}
+                  onRequiredSkillsChange={setRequiredSkillLabels}
+                  onPreferredSkillsChange={setPreferredSkillLabels}
+                  onMajorLabelsChange={setMajorLabels}
+                  onCourseworkCategoryLabelsChange={setCourseworkCategoryLabels}
                   onResumeRequiredChange={(value) => setState((prev) => ({ ...prev, resumeRequired: value }))}
                 />
               </div>

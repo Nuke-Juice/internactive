@@ -48,6 +48,7 @@ import ListingDraftCleanup from '@/components/employer/listing/ListingDraftClean
 import ListingWizard from '@/components/employer/listing/ListingWizard'
 import CreateInternshipCta from '@/app/dashboard/employer/_components/CreateInternshipCta'
 import ActiveInternshipsList, { type ActiveInternshipListItem } from '@/app/dashboard/employer/_components/ActiveInternshipsList'
+import DismissibleAtsSetupBanner from '@/app/dashboard/employer/_components/DismissibleAtsSetupBanner'
 import EmployerDashboardHeader from '@/components/employer/EmployerDashboardHeader'
 
 function isLaunchConciergeEnabled() {
@@ -1671,7 +1672,6 @@ export default async function EmployerDashboardPage({
           <EmployerDashboardHeader
             title="Employer dashboard"
             description="Create internships and track what you have posted."
-            activeTab="listings"
             selectedInternshipId={activeInternshipId || undefined}
             internships={internships.map((internship) => ({
               id: internship.id,
@@ -1681,21 +1681,11 @@ export default async function EmployerDashboardPage({
         )}
 
         {!createOnly ? (
-          <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${employerDefaultsConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}`}>
-            <div className="font-medium">
-              {employerDefaultsConfigured
-                ? `ATS configured${employerDefaultAtsHost ? `: ${employerDefaultAtsHost}` : ''}`
-                : 'Set up ATS defaults'}
-            </div>
-            <div className="mt-1 text-xs">
-              {employerDefaultsConfigured
-                ? 'Listings can inherit these defaults automatically. Override per listing only when needed.'
-                : 'Configure ATS once and inherit it across listings.'}
-            </div>
-            <Link href="/dashboard/employer/settings" className="mt-2 inline-flex rounded-md border border-current/25 bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-white/80">
-              {employerDefaultsConfigured ? 'Edit ATS defaults' : 'Set up ATS'}
-            </Link>
-          </div>
+          <DismissibleAtsSetupBanner
+            userId={user.id}
+            employerDefaultsConfigured={employerDefaultsConfigured}
+            employerDefaultAtsHost={employerDefaultAtsHost}
+          />
         ) : null}
 
         {!createOnly && publishedOwnerMismatchMessage ? (

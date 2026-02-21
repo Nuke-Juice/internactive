@@ -96,6 +96,10 @@ function parseScreeningQuestion(value: string | null | undefined) {
   return prompt.length > 0 ? prompt : null
 }
 
+function normalizeSkillChipToken(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
 function scoreLabel(score: number | null, insufficientData: boolean, noSkillSignals: boolean) {
   if (insufficientData) {
     return {
@@ -316,6 +320,8 @@ export default async function JobDetailPage({
   let missingSkillSignals = false
   let commuteMinutes: number | null = null
   let maxCommuteMinutes: number | null = null
+  let requiredCustomSkillTokens = new Set<string>()
+  let preferredCustomSkillTokens = new Set<string>()
   if (user && userRole === 'student' && listing) {
     const fullProfileSelect =
       'school, major_id, major:canonical_majors(id, slug, name), majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, location_lat, location_lng'
@@ -426,6 +432,8 @@ export default async function JobDetailPage({
         return typeof custom?.name === 'string' ? custom.name : ''
       })
       .filter((value): value is string => value.length > 0)
+    requiredCustomSkillTokens = new Set(listingRequiredCustomSkills.map(normalizeSkillChipToken))
+    preferredCustomSkillTokens = new Set(listingPreferredCustomSkills.map(normalizeSkillChipToken))
 
     const match = evaluateInternshipMatch(
       {
@@ -889,6 +897,11 @@ export default async function JobDetailPage({
                       className="inline-flex items-center rounded-full border border-blue-300 bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800"
                     >
                       {skill}
+                      {requiredCustomSkillTokens.has(normalizeSkillChipToken(skill)) ? (
+                        <span className="ml-1 rounded bg-blue-200 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-blue-900">
+                          Custom
+                        </span>
+                      ) : null}
                     </span>
                   ))}
                 </div>
@@ -905,6 +918,11 @@ export default async function JobDetailPage({
                       className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"
                     >
                       {skill}
+                      {preferredCustomSkillTokens.has(normalizeSkillChipToken(skill)) ? (
+                        <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-800">
+                          Custom
+                        </span>
+                      ) : null}
                     </span>
                   ))}
                 </div>

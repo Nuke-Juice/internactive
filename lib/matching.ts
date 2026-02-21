@@ -910,7 +910,41 @@ export function evaluateInternshipMatch(
     }
   }
   if (requiredCustom.length > 0) {
-    gaps.push(`Other required skills (custom, non-scored): ${requiredCustom.slice(0, 4).join(', ')}`)
+    const customRequiredHits = overlapCount(requiredCustom, studentSkills)
+    const customRequiredRatio = ratio(customRequiredHits, requiredCustom.length)
+    const customRequiredCap = weights.skillsRequired * 0.2
+    const customRequiredPoints = customRequiredCap * customRequiredRatio
+    const currentRequiredPoints = signalContributions.skillsRequired.pointsAwarded
+    const mergedRequiredPoints = Math.min(weights.skillsRequired, currentRequiredPoints + customRequiredPoints)
+    const mergedRequiredRaw = weights.skillsRequired > 0 ? mergedRequiredPoints / weights.skillsRequired : 0
+    const currentRequiredEvidence = signalContributions.skillsRequired.evidence
+
+    signalContributions.skillsRequired = {
+      signalKey: 'skillsRequired',
+      weight: weights.skillsRequired,
+      rawMatchValue: mergedRequiredRaw,
+      pointsAwarded: mergedRequiredPoints,
+      evidence: [
+        ...currentRequiredEvidence,
+        `${customRequiredHits}/${requiredCustom.length} custom required skill tokens matched`,
+      ],
+    }
+
+    if (customRequiredHits > 0) {
+      reasonsWithPoints.push({
+        reasonKey: 'skills.required.custom_overlap',
+        text: describeReason('Required skills', customRequiredPoints, `${customRequiredHits}/${requiredCustom.length} custom matched`),
+        points: customRequiredPoints,
+        evidence: [`matched=${customRequiredHits}`, `required_custom=${requiredCustom.length}`],
+      })
+    }
+    if (customRequiredHits < requiredCustom.length) {
+      const studentSkillSet = new Set(studentSkills.map((skill) => normalizeSkillForMatching(skill)))
+      const missingRequiredCustom = requiredCustom.filter((skill) => !studentSkillSet.has(normalizeSkillForMatching(skill)))
+      if (missingRequiredCustom.length > 0) {
+        gaps.push(`Missing required skills: ${missingRequiredCustom.slice(0, 4).join(', ')}`)
+      }
+    }
   }
 
   if (preferredIds.length > 0 && studentSkillIds.length > 0) {
@@ -955,12 +989,32 @@ export function evaluateInternshipMatch(
     }
   }
   if (preferredCustom.length > 0) {
-    reasonsWithPoints.push({
-      reasonKey: 'skills.preferred.custom_non_scored',
-      text: `Other skills (custom): ${preferredCustom.slice(0, 4).join(', ')}`,
-      points: 0,
-      evidence: ['custom_skills_non_scored'],
-    })
+    const customPreferredHits = overlapCount(preferredCustom, studentSkills)
+    const customPreferredRatio = ratio(customPreferredHits, preferredCustom.length)
+    const customPreferredCap = weights.skillsPreferred * 0.2
+    const customPreferredPoints = customPreferredCap * customPreferredRatio
+    const currentPreferredPoints = signalContributions.skillsPreferred.pointsAwarded
+    const mergedPreferredPoints = Math.min(weights.skillsPreferred, currentPreferredPoints + customPreferredPoints)
+    const mergedPreferredRaw = weights.skillsPreferred > 0 ? mergedPreferredPoints / weights.skillsPreferred : 0
+    const currentPreferredEvidence = signalContributions.skillsPreferred.evidence
+    signalContributions.skillsPreferred = {
+      signalKey: 'skillsPreferred',
+      weight: weights.skillsPreferred,
+      rawMatchValue: mergedPreferredRaw,
+      pointsAwarded: mergedPreferredPoints,
+      evidence: [
+        ...currentPreferredEvidence,
+        `${customPreferredHits}/${preferredCustom.length} custom preferred skill tokens matched`,
+      ],
+    }
+    if (customPreferredHits > 0) {
+      reasonsWithPoints.push({
+        reasonKey: 'skills.preferred.custom_overlap',
+        text: describeReason('Preferred skills', customPreferredPoints, `${customPreferredHits}/${preferredCustom.length} custom matched`),
+        points: customPreferredPoints,
+        evidence: [`matched=${customPreferredHits}`, `preferred_custom=${preferredCustom.length}`],
+      })
+    }
   }
 
   let courseworkSignalPathUsed: 'canonical' | 'legacy' | 'text' | 'none' = 'none'

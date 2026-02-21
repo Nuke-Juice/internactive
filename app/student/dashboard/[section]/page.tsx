@@ -5,6 +5,7 @@ import { requireRole } from '@/lib/auth/requireRole'
 import { getMinimumProfileCompleteness, getMinimumProfileFieldLabel } from '@/lib/profileCompleteness'
 import { getStudentEntitlements, maybeExpireTrial } from '@/lib/student/entitlements'
 import PremiumLockedOverlay from '@/components/student/PremiumLockedOverlay'
+import AppNav from '@/components/navigation/AppNav'
 import { supabaseServer } from '@/lib/supabase/server'
 
 type DashboardSectionSlug =
@@ -235,6 +236,10 @@ export default async function StudentDashboardSectionPage({
               <Icon className="h-5 w-5" />
             </div>
           </div>
+        </div>
+
+        <div className="mt-6">
+          <AppNav role="student" variant="workspaceTabs" />
         </div>
 
         <article className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

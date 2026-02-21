@@ -232,7 +232,6 @@ export default async function EmployerApplicantsPage({ searchParams }: { searchP
         <EmployerDashboardHeader
           title="Applicant inbox"
           description="Review quick applies and invite top candidates into your ATS workflow."
-          activeTab="applicants"
           selectedInternshipId={activeInternshipId || undefined}
           includeAllOption
           internships={internships.map((row) => ({

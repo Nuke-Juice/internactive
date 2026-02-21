@@ -23,10 +23,24 @@ import { sanitizeSkillLabels } from '@/lib/skills/sanitizeSkillLabels'
 import { requireVerifiedEmail } from '@/lib/auth/emailVerification'
 import { MATCH_SIGNALS, computeInternshipMatchCoverage } from '@/lib/admin/internshipMatchCoverage'
 import InternshipLocationFields from '@/components/forms/InternshipLocationFields'
-import CatalogMultiSelect from './_components/CatalogMultiSelect'
+import CatalogMultiSelect from '@/components/forms/CatalogMultiSelect'
 import TemplatePicker from './_components/TemplatePicker'
 import EmployerSelectWithCreate from './_components/EmployerSelectWithCreate'
 import CoverageBadgePopover from './_components/CoverageBadgePopover'
+import {
+  EMAIL_REGEX,
+  formatDate,
+  formatList,
+  normalizeCompanyName,
+  normalizeExperience,
+  normalizePage,
+  normalizeSource,
+  parseFormStringArray,
+  parseJsonStringArray,
+  parseList,
+  parseNullableInteger,
+  parseNullableNumber,
+} from './_modules/sharedFormUtils'
 
 const PAGE_SIZE = 20
 
@@ -60,11 +74,6 @@ type InternshipAdminRow = {
   remote_allowed: boolean | null
 }
 
-function formatDate(value: string | null) {
-  if (!value) return 'No deadline'
-  return value
-}
-
 type EmployerOption = {
   user_id: string
   company_name: string | null
@@ -80,52 +89,8 @@ type CatalogSkillItem = { id: string; label: string | null }
 type CatalogCourseworkItem = { id: string; name: string | null }
 type CourseworkCategoryItem = { id: string; name: string | null }
 
-function normalizePage(value: string | undefined) {
-  const parsed = Number.parseInt(value ?? '1', 10)
-  if (!Number.isFinite(parsed) || parsed < 1) return 1
-  return parsed
-}
-
-function normalizeSource(value: string | undefined) {
-  if (value === 'concierge' || value === 'partner') return value
-  return 'employer_self'
-}
-
 function isValidCategory(value: string | null): value is InternshipCategory {
   return typeof value === 'string' && (INTERNSHIP_CATEGORIES as readonly string[]).includes(value)
-}
-
-function normalizeExperience(value: string | undefined) {
-  if (value === 'entry' || value === 'mid' || value === 'senior') return value
-  return 'entry'
-}
-
-function parseNullableNumber(raw: FormDataEntryValue | null) {
-  const text = String(raw ?? '').trim()
-  if (!text) return null
-  const parsed = Number(text)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-function parseNullableInteger(raw: FormDataEntryValue | null) {
-  const value = parseNullableNumber(raw)
-  if (value === null) return null
-  return Math.round(value)
-}
-
-function parseList(raw: FormDataEntryValue | null) {
-  return String(raw ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .flatMap((line) => line.split(','))
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function formatList(value: string[] | string | null | undefined) {
-  if (Array.isArray(value)) return value.join('\n')
-  if (typeof value === 'string') return value
-  return ''
 }
 
 function buildPageHref(params: { q?: string; page: number; template?: string }) {
@@ -140,10 +105,6 @@ function buildPageHref(params: { q?: string; page: number; template?: string }) 
 function toSyntheticEmployerEmail(companyName: string) {
   const slug = slugifyCatalogLabel(companyName) || 'employer'
   return `concierge+${slug}-${crypto.randomUUID().slice(0, 8)}@example.invalid`
-}
-
-function normalizeCompanyName(value: string | null | undefined) {
-  return (value ?? '').trim().toLowerCase()
 }
 
 function buildLocation(city: string, state: string, remoteAllowed: boolean) {
@@ -181,27 +142,6 @@ function validatePublishInput(params: {
     return 'Select a verified city and state combination'
   }
   return null
-}
-
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-function parseJsonStringArray(raw: FormDataEntryValue | null) {
-  const text = String(raw ?? '').trim()
-  if (!text) return []
-  try {
-    const parsed = JSON.parse(text) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
-  } catch {
-    return []
-  }
-}
-
-function parseFormStringArray(formData: FormData, key: string) {
-  return formData
-    .getAll(key)
-    .map((item) => String(item).trim())
-    .filter(Boolean)
 }
 
 export default async function AdminInternshipsPage({ searchParams }: { searchParams?: SearchParams }) {

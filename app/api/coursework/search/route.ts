@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server'
 import { getUniversityCourseCatalog } from '@/lib/coursework/universityCourseCatalog'
 import { supabaseServer } from '@/lib/supabase/server'
+import { jsonError, jsonOk } from '@/src/server/api/respond'
 
 const MAX_RESULTS = 10
 const DB_FETCH_LIMIT = 80
@@ -177,7 +177,7 @@ export async function GET(request: Request) {
   } = await supabase.auth.getUser()
 
   if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return jsonError('Unauthorized', 401)
   }
 
   const { searchParams } = new URL(request.url)
@@ -186,7 +186,7 @@ export async function GET(request: Request) {
   const university = normalizeWhitespace(searchParams.get('university') ?? '')
   const searchAll = searchParams.get('searchAll') === '1'
 
-  if (query.length < 2 || safeQuery.length < 2) return NextResponse.json({ results: [] })
+  if (query.length < 2 || safeQuery.length < 2) return jsonOk({ results: [] })
 
   const db = supabase
     .from('canonical_courses')
@@ -247,5 +247,5 @@ export async function GET(request: Request) {
   const deduped = dedupeByCourseKey([...scopedResults, ...dbResults], safeQuery)
   const merged = mergeAndSortResults(deduped, safeQuery)
 
-  return NextResponse.json({ results: merged })
+  return jsonOk({ results: merged })
 }

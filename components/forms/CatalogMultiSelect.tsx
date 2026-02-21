@@ -27,6 +27,10 @@ type Props = {
   required?: boolean
   searchEndpoint?: string
   searchDebounceMs?: number
+  customActionLabel?: string
+  suggestedLabels?: string[]
+  suggestedTitle?: string
+  onSelectionChange?: (labels: string[]) => void
 }
 
 function sameToken(left: string, right: string) {
@@ -50,6 +54,10 @@ export default function CatalogMultiSelect({
   required = false,
   searchEndpoint,
   searchDebounceMs = 180,
+  customActionLabel = 'Add custom',
+  suggestedLabels = [],
+  suggestedTitle = 'Suggested skills',
+  onSelectionChange,
 }: Props) {
   const optionsByToken = useMemo(() => {
     const map = new Map<string, CatalogOption>()
@@ -108,7 +116,25 @@ export default function CatalogMultiSelect({
     }
   }, [query, searchDebounceMs, searchEndpoint])
 
-  const searchOptions = searchEndpoint ? remoteOptions : options
+  const searchOptions = useMemo(() => {
+    if (!searchEndpoint) return options
+    const merged: CatalogOption[] = []
+    const seenIds = new Set<string>()
+    const seenTokens = new Set<string>()
+    for (const option of remoteOptions) {
+      const token = normalizeCatalogToken(option.name)
+      merged.push(option)
+      seenIds.add(option.id)
+      if (token) seenTokens.add(token)
+    }
+    for (const option of options) {
+      const token = normalizeCatalogToken(option.name)
+      if (seenIds.has(option.id)) continue
+      if (token && seenTokens.has(token)) continue
+      merged.push(option)
+    }
+    return merged
+  }, [options, remoteOptions, searchEndpoint])
 
   const filteredOptions = useMemo(() => {
     const queryToken = normalizeCatalogToken(query)
@@ -170,11 +196,34 @@ export default function CatalogMultiSelect({
     setSelected((prev) => prev.filter((item) => !sameToken(item.label, labelValue)))
   }
 
+  useEffect(() => {
+    if (!onSelectionChange) return
+    onSelectionChange(selected.map((item) => item.label))
+  }, [onSelectionChange, selected])
+
   return (
     <div>
       <label className="text-sm font-medium text-slate-700" htmlFor={inputId}>
         {label}
       </label>
+      {suggestedLabels.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-500">{suggestedTitle}</span>
+          {suggestedLabels.map((suggestion) => (
+            <button
+              key={`${inputId}:suggested:${suggestion}`}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault()
+                addFromText(suggestion)
+              }}
+              className="rounded-full border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800"
+            >
+              + {suggestion}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="relative mt-1 rounded-md border border-slate-300 bg-white p-2">
         <div className="flex flex-wrap gap-2">
           {selected.map((item) => (
@@ -249,7 +298,7 @@ export default function CatalogMultiSelect({
                 }}
                 className="mt-1 block w-full border-t border-slate-100 px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
-                Add custom: {normalizeCatalogLabel(query)}
+                {customActionLabel}: {normalizeCatalogLabel(query)}
               </button>
             ) : null}
           </div>

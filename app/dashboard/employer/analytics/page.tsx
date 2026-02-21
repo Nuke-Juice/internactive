@@ -184,7 +184,6 @@ export default async function EmployerAnalyticsPage({ searchParams }: { searchPa
         <EmployerDashboardHeader
           title="Analytics"
           description="Track listing views, applications, and conversion trends."
-          activeTab="analytics"
           selectedInternshipId={activeInternshipId || undefined}
           internships={internships.map((row) => ({
             id: row.id,

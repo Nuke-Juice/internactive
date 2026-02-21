@@ -1,10 +1,10 @@
 'use client'
 
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
-
-type TabKey = 'listings' | 'applicants' | 'messages' | 'analytics'
+import { usePathname, useRouter } from 'next/navigation'
+import { BarChart3, Briefcase, FileText, ShieldCheck, Users } from 'lucide-react'
+import AppNav, { type AppNavItem } from '@/components/navigation/AppNav'
+import { matchPath } from '@/src/navigation/matchPath'
 
 type InternshipOption = {
   id: string
@@ -12,23 +12,19 @@ type InternshipOption = {
 }
 
 type Props = {
-  activeTab: TabKey
+  activeTab?: 'listings' | 'applicants' | 'messages' | 'analytics' | 'settings'
   selectedInternshipId?: string
   internships: InternshipOption[]
   includeAllOption?: boolean
 }
 
-const TABS: Array<{ key: TabKey; label: string; href: string }> = [
-  { key: 'listings', label: 'Listings', href: '/dashboard/employer' },
-  { key: 'applicants', label: 'Applicants', href: '/dashboard/employer/applicants' },
-  { key: 'analytics', label: 'Analytics', href: '/dashboard/employer/analytics' },
+const TABS: AppNavItem[] = [
+  { id: 'employer-listings', label: 'Listings', href: '/dashboard/employer', icon: Briefcase, order: 10, match: 'prefix', activeOn: ['/dashboard/employer/new'] },
+  { id: 'employer-inbox', label: 'Inbox', href: '/dashboard/employer/applicants', icon: Users, order: 20, match: 'prefix' },
+  { id: 'employer-messages', label: 'Messages', href: '/dashboard/employer/messages', icon: Users, order: 30, match: 'prefix' },
+  { id: 'employer-analytics', label: 'Analytics', href: '/dashboard/employer/analytics', icon: BarChart3, order: 40, match: 'prefix' },
+  { id: 'employer-settings', label: 'Settings', href: '/dashboard/employer/settings', icon: ShieldCheck, order: 50, match: 'prefix' },
 ]
-
-function tabClass(active: boolean) {
-  return `inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-xs font-medium ${
-    active ? 'border-blue-300 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-  }`
-}
 
 function withInternshipContext(href: string, internshipId?: string) {
   if (!internshipId) return href
@@ -36,16 +32,24 @@ function withInternshipContext(href: string, internshipId?: string) {
   return `${href}?${params.toString()}`
 }
 
-export default function EmployerWorkspaceNav(props: Props) {
+export default function EmployerWorkspaceNav({ selectedInternshipId: incomingInternshipId, internships, includeAllOption = false }: Props) {
   const router = useRouter()
-  const selectedInternshipId = props.selectedInternshipId || ''
+  const pathname = usePathname()
+  const selectedInternshipId = incomingInternshipId || ''
   const [searchValue, setSearchValue] = useState('')
 
-  const activeTabHref = TABS.find((item) => item.key === props.activeTab)?.href ?? '/dashboard/employer'
   const selectedTitle = useMemo(
-    () => props.internships.find((option) => option.id === selectedInternshipId)?.title ?? '',
-    [props.internships, selectedInternshipId]
+    () => internships.find((option) => option.id === selectedInternshipId)?.title ?? '',
+    [internships, selectedInternshipId]
   )
+
+  const itemsWithContext = useMemo(
+    () => TABS.map((tab) => ({ ...tab, href: withInternshipContext(tab.href, selectedInternshipId) })),
+    [selectedInternshipId]
+  )
+
+  const activeTabId = matchPath(pathname ?? '/dashboard/employer', TABS)
+  const activeTabHref = TABS.find((tab) => tab.id === activeTabId)?.href ?? '/dashboard/employer'
 
   useEffect(() => {
     setSearchValue(selectedTitle)
@@ -57,7 +61,7 @@ export default function EmployerWorkspaceNav(props: Props) {
       router.push(activeTabHref)
       return
     }
-    const matchByTitle = props.internships.find((option) => option.title.toLowerCase() === value.toLowerCase())
+    const matchByTitle = internships.find((option) => option.title.toLowerCase() === value.toLowerCase())
     const internshipId = matchByTitle?.id
     if (!internshipId) return
     router.push(`${activeTabHref}?internship_id=${encodeURIComponent(internshipId)}`)
@@ -65,16 +69,11 @@ export default function EmployerWorkspaceNav(props: Props) {
 
   return (
     <div className="sticky top-0 z-10 rounded-xl border border-slate-200 bg-white/95 p-3 backdrop-blur">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          {TABS.map((tab) => (
-            <Link key={tab.key} href={withInternshipContext(tab.href, selectedInternshipId)} className={tabClass(tab.key === props.activeTab)}>
-              {tab.label}
-            </Link>
-          ))}
-        </div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <AppNav variant="workspaceTabs" role="employer" items={itemsWithContext} />
+
         <div className="flex items-center gap-2">
-          <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Listing search</label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Listing search</label>
           <input
             list="employer-listings"
             value={searchValue}
@@ -85,22 +84,25 @@ export default function EmployerWorkspaceNav(props: Props) {
               event.preventDefault()
               applyListingSelection(searchValue)
             }}
-            placeholder={props.internships.length > 0 ? 'Type listing title' : 'No listings'}
-            className="min-w-[240px] rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700"
+            placeholder={internships.length > 0 ? 'Type listing title' : 'No listings'}
+            className="min-w-[240px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
           />
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-500">
+            <FileText className="h-4 w-4" />
+          </span>
           <datalist id="employer-listings">
-            {props.internships.map((option) => (
+            {internships.map((option) => (
               <option key={option.id} value={option.title} />
             ))}
           </datalist>
-          {props.includeAllOption ? (
+          {includeAllOption ? (
             <button
               type="button"
               onClick={() => {
                 setSearchValue('')
                 router.push(activeTabHref)
               }}
-              className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               All listings
             </button>

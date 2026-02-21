@@ -5,6 +5,7 @@ import { getMinimumProfileCompleteness, getMinimumProfileFieldLabel } from '@/li
 import { getStudentEntitlements, maybeExpireTrial } from '@/lib/student/entitlements'
 import PremiumLockedOverlay from '@/components/student/PremiumLockedOverlay'
 import DashboardCardLink from '@/components/student/DashboardCardLink'
+import AppNav from '@/components/navigation/AppNav'
 import { supabaseServer } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 
@@ -299,6 +300,10 @@ export default async function StudentDashboardPage() {
               Plan: <span className="font-semibold text-slate-900">{normalizePlanBadge(entitlements)}</span>
             </div>
           </div>
+        </div>
+
+        <div className="mt-6">
+          <AppNav role="student" variant="workspaceTabs" />
         </div>
 
         <div className="mt-6 grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">

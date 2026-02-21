@@ -8,7 +8,6 @@ type InternshipOption = {
 type Props = {
   title: string
   description: string
-  activeTab: 'listings' | 'applicants' | 'analytics'
   internships: InternshipOption[]
   selectedInternshipId?: string
   includeAllOption?: boolean
@@ -22,7 +21,6 @@ export default function EmployerDashboardHeader(props: Props) {
         <p className="mt-1 text-sm text-slate-600">{props.description}</p>
       </div>
       <EmployerWorkspaceNav
-        activeTab={props.activeTab}
         selectedInternshipId={props.selectedInternshipId}
         internships={props.internships}
         includeAllOption={props.includeAllOption}

@@ -3,11 +3,13 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { type FormEvent, useEffect, useState } from 'react'
-import { Bell, FileText, LayoutDashboard, LogIn, Mail, Menu, ShieldCheck, User, X } from 'lucide-react'
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Bell, FileText, LogIn, Mail, Menu, ShieldCheck, User, X } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { isAdminRole, type UserRole } from '@/lib/auth/roles'
 import { useToast } from '@/components/feedback/ToastProvider'
+import AppNav, { type AppNavItem } from '@/components/navigation/AppNav'
+import { matchPath } from '@/src/navigation/matchPath'
 
 type SiteHeaderProps = {
   isAuthenticated: boolean
@@ -69,7 +71,6 @@ export default function SiteHeader({
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const router = useRouter()
-  const [resendingVerification, setResendingVerification] = useState(false)
   const [resendCooldown, setResendCooldown] = useState(0)
   const [menuSearchQuery, setMenuSearchQuery] = useState('')
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([])
@@ -77,23 +78,77 @@ export default function SiteHeader({
   const [searchSuggestionsLoading, setSearchSuggestionsLoading] = useState(false)
   const [headerAvatarUrl, setHeaderAvatarUrl] = useState<string | null>(avatarUrl)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [clientIsAuthenticated, setClientIsAuthenticated] = useState(isAuthenticated)
+  const authStateRef = useRef(isAuthenticated)
   const { showToast } = useToast()
+  const effectiveIsAuthenticated = clientIsAuthenticated
 
-  const homeActive = pathname === '/' || pathname.startsWith('/jobs')
-  const notificationsActive = pathname.startsWith('/notifications')
-  const inboxActive = pathname.startsWith('/inbox')
-  const profileActive = pathname.startsWith('/account')
-  const profilePageActive = pathname.startsWith('/profile')
-  const adminActive = pathname.startsWith('/admin')
-  const applicationsActive = pathname.startsWith('/applications')
-  const employerDashboardActive = pathname.startsWith('/dashboard/employer')
-  const studentDashboardActive = pathname.startsWith('/student/dashboard') || pathname.startsWith('/dashboard/student')
-  const employersActive = pathname.startsWith('/signup/employer') || pathname.startsWith('/for-employers')
-  const loginActive = pathname.startsWith('/login')
-  const employerUpgradeActive = pathname.startsWith('/upgrade')
-  const studentUpgradeActive = pathname.startsWith('/student/upgrade')
+  const homeActive =
+    matchPath(pathname ?? '/', [{ id: 'home', href: '/', match: 'exact', activeOn: ['/jobs'] }]) === 'home'
+  const notificationsActive =
+    matchPath(pathname ?? '/', [{ id: 'notifications', href: '/notifications', match: 'prefix' }]) === 'notifications'
+  const inboxActive = matchPath(pathname ?? '/', [{ id: 'inbox', href: '/inbox', match: 'prefix' }]) === 'inbox'
+  const profileActive = matchPath(pathname ?? '/', [{ id: 'account', href: '/account', match: 'prefix' }]) === 'account'
+  const profilePageActive = matchPath(pathname ?? '/', [{ id: 'profile', href: '/profile', match: 'prefix' }]) === 'profile'
+  const adminActive = matchPath(pathname ?? '/', [{ id: 'admin', href: '/admin', match: 'prefix' }]) === 'admin'
+  const applicationsActive =
+    matchPath(pathname ?? '/', [{ id: 'applications', href: '/applications', match: 'prefix' }]) === 'applications'
+  const employersActive =
+    matchPath(pathname ?? '/', [{ id: 'for-employers', href: '/for-employers', match: 'prefix', activeOn: ['/signup/employer'] }]) ===
+    'for-employers'
+  const loginActive = matchPath(pathname ?? '/', [{ id: 'login', href: '/login', match: 'prefix' }]) === 'login'
   const isAdmin = isAdminRole(role)
-  const showVerificationBanner = isAuthenticated && !isEmailVerified
+  const showVerificationBanner = effectiveIsAuthenticated && !isEmailVerified
+
+  const headerNavItems = useMemo<AppNavItem[]>(() => {
+    if (!effectiveIsAuthenticated) {
+      return [
+        {
+          id: 'for-employers',
+          label: 'For Employers',
+          href: '/for-employers',
+          match: 'prefix',
+          activeOn: ['/signup/employer'],
+          order: 10,
+        },
+      ]
+    }
+
+    if (isAdmin) {
+      return [{ id: 'admin-dashboard', label: 'Dashboard', href: '/admin', match: 'prefix', order: 10 }]
+    }
+
+    if (role === 'employer') {
+      return [
+        { id: 'employer-dashboard', label: 'Dashboard', href: '/dashboard/employer', match: 'prefix', order: 10 },
+        { id: 'employer-upgrade', label: 'Upgrade', href: '/upgrade', match: 'prefix', order: 20, icon: ShieldCheck },
+      ]
+    }
+
+    if (role === 'student') {
+      return [
+        {
+          id: 'student-dashboard',
+          label: 'Dashboard',
+          href: '/student/dashboard',
+          match: 'prefix',
+          activeOn: ['/dashboard/student'],
+          order: 10,
+        },
+        { id: 'student-upgrade', label: 'Upgrade', href: '/student/upgrade', match: 'prefix', order: 20, icon: ShieldCheck },
+        {
+          id: 'for-employers',
+          label: 'For Employers',
+          href: '/for-employers',
+          match: 'prefix',
+          activeOn: ['/signup/employer'],
+          order: 30,
+        },
+      ]
+    }
+
+    return []
+  }, [effectiveIsAuthenticated, isAdmin, role])
   useEffect(() => {
     if (resendCooldown <= 0) return
     const timer = setTimeout(() => {
@@ -112,25 +167,51 @@ export default function SiteHeader({
   }, [avatarUrl])
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      setHeaderAvatarUrl(null)
-      return
-    }
+    setClientIsAuthenticated(isAuthenticated)
+    authStateRef.current = isAuthenticated
+  }, [isAuthenticated])
 
+  useEffect(() => {
     const supabase = supabaseBrowser()
+    let cancelled = false
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (cancelled) return
+      const sessionUser = data.session?.user ?? null
+      const nextAuthenticated = Boolean(sessionUser)
+      if (authStateRef.current !== nextAuthenticated) {
+        authStateRef.current = nextAuthenticated
+        setClientIsAuthenticated(nextAuthenticated)
+        router.refresh()
+      }
+      const metadata = (sessionUser?.user_metadata ?? {}) as { avatar_url?: string }
+      if (typeof metadata.avatar_url === 'string' && metadata.avatar_url.trim().length > 0) {
+        setHeaderAvatarUrl(metadata.avatar_url)
+      } else if (!nextAuthenticated) {
+        setHeaderAvatarUrl(null)
+      }
+    })
+
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextAuthenticated = Boolean(session?.user)
+      if (authStateRef.current !== nextAuthenticated) {
+        authStateRef.current = nextAuthenticated
+        setClientIsAuthenticated(nextAuthenticated)
+        router.refresh()
+      }
       const metadata = (session?.user?.user_metadata ?? {}) as { avatar_url?: string }
       if (typeof metadata.avatar_url === 'string' && metadata.avatar_url.trim().length > 0) {
         setHeaderAvatarUrl(metadata.avatar_url)
-      } else {
+      } else if (!nextAuthenticated) {
         setHeaderAvatarUrl(null)
       }
     })
 
     return () => {
+      cancelled = true
       subscription.subscription.unsubscribe()
     }
-  }, [isAuthenticated])
+  }, [router])
 
   useEffect(() => {
     let cancelled = false
@@ -267,9 +348,8 @@ export default function SiteHeader({
     router.push(next ? `/?${next}#internships` : '/#internships')
   }
 
-  async function resendVerification(nextPath: string) {
+  const resendVerification = useCallback(async (nextPath: string) => {
     if (!email || resendCooldown > 0) return
-    setResendingVerification(true)
 
     try {
       const response = await fetch('/api/auth/resend-verification', {
@@ -294,10 +374,8 @@ export default function SiteHeader({
       }
     } catch {
       showToast({ kind: 'error', message: 'Could not resend verification email.', key: 'resend-verification-network' })
-    } finally {
-      setResendingVerification(false)
     }
-  }
+  }, [email, resendCooldown, showToast])
 
   useEffect(() => {
     if (!showVerificationBanner) return
@@ -316,7 +394,7 @@ export default function SiteHeader({
         await resendVerification(pathname || '/')
       },
     })
-  }, [email, pathname, showToast, showVerificationBanner])
+  }, [email, pathname, resendVerification, showToast, showVerificationBanner])
 
   useEffect(() => {
     setMobileMenuOpen(false)
@@ -341,7 +419,7 @@ export default function SiteHeader({
               <Link href="/" className={`hidden md:inline ${textLinkClasses(homeActive)}`}>
                 Home
               </Link>
-              {!isAuthenticated ? (
+              {!effectiveIsAuthenticated ? (
                 <Link href="/signup/employer" className={`hidden md:inline ${textLinkClasses(employersActive)}`}>
                   For Employers
                 </Link>
@@ -402,46 +480,22 @@ export default function SiteHeader({
                 </div>
               </form>
 
-              {isAuthenticated && role === 'employer' ? (
-                <Link href="/dashboard/employer" className={navClasses(employerDashboardActive)}>
-                  <LayoutDashboard className="h-4 w-4" />
-                  Dashboard
-                </Link>
-              ) : null}
-              {isAuthenticated && role === 'student' ? (
-                <Link href="/student/dashboard" className={navClasses(studentDashboardActive)}>
-                  <LayoutDashboard className="h-4 w-4" />
-                  Dashboard
-                </Link>
-              ) : null}
+              {headerNavItems.length > 0 ? <AppNav variant="top" items={headerNavItems} /> : null}
 
-              {!isAuthenticated ? (
+              {!effectiveIsAuthenticated ? (
                 <Link href="/login" className={primaryButtonClasses(loginActive)}>
                   <LogIn className="h-4 w-4" />
                   Log in
                 </Link>
               ) : null}
 
-              {isAuthenticated && role === 'employer' ? (
-                <Link href="/upgrade" className={navClasses(employerUpgradeActive)}>
-                  <ShieldCheck className="h-4 w-4 text-amber-500" />
-                  Upgrade
-                </Link>
-              ) : null}
-              {isAuthenticated && role === 'student' ? (
-                <Link href="/student/upgrade" className={navClasses(studentUpgradeActive)}>
-                  <ShieldCheck className="h-4 w-4 text-amber-500" />
-                  Upgrade
-                </Link>
-              ) : null}
-
               <div className="flex items-center gap-2">
-                {isAuthenticated && role === 'student' ? (
+                {effectiveIsAuthenticated && role === 'student' ? (
                   <Link href="/applications" className={iconNavClasses(applicationsActive)} aria-label="Applications" title="Applications">
                     <FileText className="h-5 w-5" />
                   </Link>
                 ) : null}
-                {isAuthenticated && role === 'student' ? (
+                {effectiveIsAuthenticated && role === 'student' ? (
                   <div className="relative">
                     <Link href="/inbox" className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
                       <Mail className="h-5 w-5" />
@@ -466,7 +520,7 @@ export default function SiteHeader({
                 </div>
               </div>
 
-              {isAuthenticated ? (
+              {effectiveIsAuthenticated ? (
                 <div className="relative">
                   <Link
                     href="/profile"
@@ -493,7 +547,7 @@ export default function SiteHeader({
                 </div>
               ) : null}
 
-              {isAuthenticated && isAdmin ? (
+              {effectiveIsAuthenticated && isAdmin ? (
                 <span className="hidden items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 md:inline-flex">
                   Admin
                 </span>
@@ -501,12 +555,12 @@ export default function SiteHeader({
             </nav>
 
             <div className="flex items-center gap-2 md:hidden">
-              {isAuthenticated && role === 'student' ? (
+              {effectiveIsAuthenticated && role === 'student' ? (
                 <Link href="/applications" className={iconNavClasses(applicationsActive)} aria-label="Applications" title="Applications">
                   <FileText className="h-5 w-5" />
                 </Link>
               ) : null}
-              {isAuthenticated && role === 'student' ? (
+              {effectiveIsAuthenticated && role === 'student' ? (
                 <div className="relative">
                   <Link href="/inbox" className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
                     <Mail className="h-5 w-5" />
@@ -555,7 +609,7 @@ export default function SiteHeader({
                 <Link href="/" className={navClasses(homeActive)}>
                   Home
                 </Link>
-                {!isAuthenticated ? (
+                {!effectiveIsAuthenticated ? (
                   <Link href="/login" className={primaryButtonClasses(loginActive)}>
                     <LogIn className="h-4 w-4" />
                     Log in
@@ -565,42 +619,10 @@ export default function SiteHeader({
                     Profile
                   </Link>
                 )}
-                {isAuthenticated && role === 'employer' ? (
-                  <>
-                    <Link href="/dashboard/employer" className={navClasses(employerDashboardActive)}>
-                      <LayoutDashboard className="h-4 w-4" />
-                      Dashboard
-                    </Link>
-                    <Link href="/upgrade" className={navClasses(employerUpgradeActive)}>
-                      <ShieldCheck className="h-4 w-4 text-amber-500" />
-                      Upgrade
-                    </Link>
-                  </>
-                ) : null}
-                {isAuthenticated && role === 'student' ? (
-                  <>
-                    <Link href="/student/dashboard" className={navClasses(studentDashboardActive)}>
-                      <LayoutDashboard className="h-4 w-4" />
-                      Dashboard
-                    </Link>
-                    <Link href="/student/upgrade" className={navClasses(studentUpgradeActive)}>
-                      <ShieldCheck className="h-4 w-4 text-amber-500" />
-                      Upgrade
-                    </Link>
-                  </>
-                ) : null}
-                {!isAuthenticated ? (
-                  <Link href="/signup/employer" className={navClasses(employersActive)}>
-                    For Employers
-                  </Link>
-                ) : isAdmin ? (
-                  <Link href="/admin" className={navClasses(adminActive)}>
-                    Admin Dashboard
-                  </Link>
-                ) : role === 'student' ? (
-                  <Link href="/for-employers" className={navClasses(employersActive)}>
-                    For Employers
-                  </Link>
+                {headerNavItems.length > 0 ? (
+                  <div className="col-span-2">
+                    <AppNav variant="top" items={headerNavItems} className="flex flex-wrap gap-2" />
+                  </div>
                 ) : null}
               </div>
             </div>

@@ -16,7 +16,7 @@ values
   ('construction', 'Construction'),
   ('hospitality', 'Hospitality'),
   ('professional', 'Professional')
-on conflict (slug) do update set name = excluded.name, updated_at = now();
+on conflict do nothing;
 
 with incoming(slug, label, category_name, normalized_name) as (
   values
