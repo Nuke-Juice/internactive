@@ -6,15 +6,15 @@ import { fetchInternships, fetchInternshipsByIds, formatMajors, type Internship 
 import { parseSponsoredInternshipIds, splitSponsoredListings } from '@/lib/jobs/sponsored'
 import { normalizeStateCode } from '@/lib/locations/usLocationCatalog'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
+import { normalizeSeason } from '@/lib/availability/normalizeSeason'
 import {
-  MINIMUM_PROFILE_FIELDS,
-  getMinimumProfileCompleteness,
-  getMinimumProfileFieldLabel,
-} from '@/lib/profileCompleteness'
+  formatCompleteness,
+} from '@/src/profile/profileCompleteness'
+import { getStudentProfileCompleteness } from '@/src/profile/getStudentProfileCompleteness'
 import { supabaseServer } from '@/lib/supabase/server'
 import { INTERNSHIP_CATEGORIES } from '@/lib/internships/categories'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
-import ProfileCompletionBanner from '@/components/jobs/ProfileCompletionBanner'
+import ProfileSetupBanner from '@/components/profile/ProfileSetupBanner'
 import FiltersPanel from '@/app/jobs/_components/FiltersPanel'
 import JobCard from '@/app/jobs/_components/JobCard'
 import JobCardSkeleton from '@/app/jobs/_components/JobCardSkeleton'
@@ -117,15 +117,6 @@ function parseCityState(value: string | null | undefined) {
 function isStudentProfileSchemaDrift(message: string | null | undefined) {
   const normalized = (message ?? '').toLowerCase()
   return normalized.includes('schema cache') || (normalized.includes('column') && normalized.includes('student_profiles'))
-}
-
-function seasonFromMonth(value: string | null | undefined) {
-  const normalized = (value ?? '').trim().toLowerCase()
-  if (normalized.startsWith('jun') || normalized.startsWith('jul') || normalized.startsWith('aug')) return 'summer'
-  if (normalized.startsWith('sep') || normalized.startsWith('oct') || normalized.startsWith('nov')) return 'fall'
-  if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
-  if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
-  return ''
 }
 
 function fallbackPreferredLocation(city: string | null | undefined, state: string | null | undefined) {
@@ -250,29 +241,30 @@ function getActiveFilterDescriptors(filters: JobsFilterState) {
   return candidates.filter((item) => Boolean(filters[item.key]))
 }
 
-export function JobsViewSkeleton({ showHero = false }: { showHero?: boolean }) {
+export function JobsViewSkeleton() {
   return (
     <>
-      {showHero ? (
-        <section className="border-b border-blue-100 bg-gradient-to-b from-blue-50 to-slate-50">
-          <div className="mx-auto max-w-6xl px-6 py-10">
-            <div className="mx-auto max-w-3xl text-center">
-              <div className="mx-auto h-7 w-72 max-w-full animate-pulse rounded-md bg-blue-100" />
-              <div className="mx-auto mt-3 h-4 w-96 max-w-full animate-pulse rounded-md bg-slate-200" />
-              <div className="mx-auto mt-6 h-10 w-44 animate-pulse rounded-md bg-blue-200" />
-            </div>
-          </div>
-        </section>
-      ) : null}
+      <section className="mx-auto max-w-6xl px-6 py-4">
+        <div className="mt-2 animate-pulse rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2">
+          <div className="h-4 w-40 rounded bg-blue-100" />
+          <div className="mt-1 h-3 w-56 rounded bg-blue-100" />
+        </div>
 
-      <section className="mx-auto max-w-6xl px-6 py-8">
-        <div className="mt-6 grid gap-6 lg:grid-cols-[280px_1fr]">
-          <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="h-4 w-20 animate-pulse rounded bg-slate-200" />
-            <div className="mt-3 space-y-2">
-              <div className="h-8 animate-pulse rounded bg-slate-100" />
-              <div className="h-8 animate-pulse rounded bg-slate-100" />
-              <div className="h-8 animate-pulse rounded bg-slate-100" />
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="h-7 w-44 animate-pulse rounded bg-slate-200" />
+          <div className="flex items-center gap-2">
+            <div className="h-7 w-24 animate-pulse rounded-md bg-slate-200" />
+            <div className="h-7 w-20 animate-pulse rounded-md bg-slate-200" />
+            <div className="h-4 w-16 animate-pulse rounded bg-slate-200" />
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-4 lg:grid-cols-[220px_1fr]">
+          <aside className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+            <div className="h-9 w-full animate-pulse rounded-md bg-slate-100" />
+            <div className="mt-2 space-y-2">
+              <div className="h-8 animate-pulse rounded-md bg-slate-100" />
+              <div className="h-8 animate-pulse rounded-md bg-slate-100" />
             </div>
           </aside>
 
@@ -289,11 +281,9 @@ export function JobsViewSkeleton({ showHero = false }: { showHero?: boolean }) {
 
 export default async function JobsView({
   searchParams,
-  showHero = false,
   basePath = '/jobs',
   anchorId = 'internships',
 }: JobsViewProps) {
-  const showBrowseHeroButton = basePath !== '/'
   const resolvedSearchParams = ((searchParams ? await Promise.resolve(searchParams) : {}) ?? {}) as JobsQuery
   const requestedSortRaw = resolvedSearchParams.sort
   const searchQuery = (resolvedSearchParams.q ?? '').trim()
@@ -394,8 +384,8 @@ export default async function JobsView({
   const commuteMinutesById = new Map<string, number>()
   const employerAvatarById = new Map<string, string | null>()
   let role: 'student' | 'employer' | undefined
-  let minimumProfileCompletionPercent = 0
-  let minimumProfileMissingLabels: string[] = []
+  let profileCompletionPercent = 0
+  let profileCompletionMissingLabels: string[] = []
 
   if (user) {
     const { data: userRow } = await supabase
@@ -518,35 +508,15 @@ export default async function JobsView({
     profileCanonicalCourseLevelBands = courseworkFeatures.canonicalCourseLevelBands
 
     if (role === 'student') {
-      let completionProfile = profile as
-        | {
-            university_id?: string | number | null
-            school?: string | null
-            major_id?: string | null
-            major?: unknown
-            majors?: string[] | string | null
-            year?: string | null
-            coursework?: string[] | string | null
-            experience_level?: string | null
-            availability_start_month?: string | null
-            availability_hours_per_week?: number | string | null
-          }
-        | null
-
-      if (!completionProfile) {
-        const minimalCompletionResult = await supabase
-          .from('student_profiles')
-          .select('university_id, school, major_id, majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week')
-          .eq('user_id', user.id)
-          .maybeSingle()
-        completionProfile = minimalCompletionResult.data ?? null
-      }
-
-      const minimumCompleteness = getMinimumProfileCompleteness(completionProfile ?? null)
-      minimumProfileMissingLabels = minimumCompleteness.missing.map((field) => getMinimumProfileFieldLabel(field))
-      minimumProfileCompletionPercent = Math.round(
-        ((MINIMUM_PROFILE_FIELDS.length - minimumProfileMissingLabels.length) / MINIMUM_PROFILE_FIELDS.length) * 100
-      )
+      const completion = await getStudentProfileCompleteness({
+        supabase,
+        userId: user.id,
+        preloaded: {
+          resumePath: typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path : null,
+        },
+      })
+      profileCompletionPercent = formatCompleteness(completion.percent)
+      profileCompletionMissingLabels = completion.missing.map((item) => item.label)
     }
 
   }
@@ -558,8 +528,8 @@ export default async function JobsView({
 
   let filteredInternships = filteredCandidates
   let rankedMatches: ReturnType<typeof rankInternships> = []
-
-  if (activeSortMode === 'best_match') {
+  const matchByInternshipId = new Map<string, ReturnType<typeof rankInternships>[number]['match']>()
+  if (isStudent && activeSortMode === 'best_match') {
     rankedMatches = rankInternships(
       filteredCandidates.map((listing) => ({
         id: listing.id,
@@ -609,14 +579,22 @@ export default async function JobsView({
           preferenceSignals.preferredTerms.length > 0
             ? preferenceSignals.preferredTerms
             : profileAvailabilityStartMonth
-              ? [seasonFromMonth(profileAvailabilityStartMonth)]
+              ? (() => {
+                  const season = normalizeSeason(profileAvailabilityStartMonth)
+                  return season ? [season] : []
+                })()
               : [],
         preferred_locations: profilePreferredLocations,
         preferred_work_modes: preferenceSignals.preferredWorkModes,
         remote_only: preferenceSignals.remoteOnly,
       }
     )
+    for (const row of rankedMatches) {
+      matchByInternshipId.set(row.internship.id, row.match)
+    }
+  }
 
+  if (activeSortMode === 'best_match') {
     const listingById = new Map(filteredCandidates.map((listing) => [listing.id, listing]))
     filteredInternships = rankedMatches
       .map((item) => {
@@ -831,8 +809,7 @@ export default async function JobsView({
   })()
 
   const sortedByLabel = SORT_CONFIG[activeSortMode].label
-  const listingsTitle = filteredInternships.length === 0 ? 'Browse internships' : 'Internships hiring now'
-  const compactSignedInHero = showHero && Boolean(user)
+  const listingsTitle = isStudent && Boolean(user) ? 'Internships for you' : 'Internships'
   const exposureDay = new Date().toISOString().slice(0, 10)
   const exposureUser = user?.id ?? 'anon'
 
@@ -861,62 +838,22 @@ export default async function JobsView({
 
   return (
     <>
-      {showHero ? (
-        <section className="border-b border-blue-100 bg-gradient-to-b from-blue-50 to-slate-50">
-          <div className={`mx-auto max-w-6xl px-6 ${compactSignedInHero ? 'py-5' : 'py-10'}`}>
-            <div className="mx-auto max-w-3xl text-center">
-              <h1 className={`font-semibold tracking-tight text-slate-900 ${compactSignedInHero ? 'text-2xl sm:text-3xl' : 'text-3xl sm:text-4xl'}`}>
-                {user
-                  ? 'Internships made for you'
-                  : 'Create profile to get specialized internships matched to you.'}
-              </h1>
-              <p className={`${compactSignedInHero ? 'mt-1.5' : 'mt-3'} text-sm text-slate-600 sm:text-base`}>
-                {user
-                  ? 'Filter fast and start with roles you can actually apply to this term.'
-                  : 'Browse first, then create your profile for better match ranking.'}
-              </p>
-              <div className={`${compactSignedInHero ? 'mt-3' : 'mt-6'} flex flex-wrap items-center justify-center gap-2`}>
-                {showBrowseHeroButton && (
-                  <Link
-                    href={`#${anchorId}`}
-                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-                  >
-                    Browse internships
-                  </Link>
-                )}
-                {!user && (
-                  <Link
-                    href="/signup/student"
-                    className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-                  >
-                    Create profile
-                  </Link>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      <section id={anchorId} className="mx-auto max-w-6xl scroll-mt-24 px-6 py-8">
-        {basePath === '/' && isStudent && user && minimumProfileMissingLabels.length > 0 ? (
-          <ProfileCompletionBanner
+      <section id={anchorId} className="mx-auto max-w-6xl scroll-mt-24 px-6 py-4">
+        {isStudent && user && profileCompletionPercent < 100 ? (
+          <ProfileSetupBanner
+            completionPercent={profileCompletionPercent}
+            missingItems={profileCompletionMissingLabels}
             userId={user.id}
-            completionPercent={minimumProfileCompletionPercent}
-            missingFieldLabels={minimumProfileMissingLabels}
           />
         ) : null}
 
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-semibold text-slate-900">{listingsTitle}</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Quick filters up front, deeper refinements on demand.
-            </p>
           </div>
-          <div className="text-right text-xs font-medium text-slate-500">
+          <div className="text-xs font-medium text-slate-500 sm:text-right">
             {isStudent ? (
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex items-center gap-2 sm:justify-end">
                 <Link
                   href={bestMatchHref}
                   prefetch={false}
@@ -941,7 +878,7 @@ export default async function JobsView({
                 </Link>
               </div>
             ) : null}
-            <div className="mt-1 flex items-center justify-end gap-1">
+            <div className="mt-1 flex items-center gap-1 sm:justify-end">
               <span>Sorted by: {sortedByLabel}</span>
               {activeSortMode === 'best_match' ? (
                 <span
@@ -960,27 +897,10 @@ export default async function JobsView({
               </div>
             ) : null}
             <div className="mt-1">{filteredInternships.length} results</div>
-            <div className="mt-2 flex items-center justify-end gap-2">
-              <Link
-                href={previousPageHref}
-                prefetch={false}
-                className={`inline-flex items-center rounded-md border px-2.5 py-1 ${page <= 1 ? 'pointer-events-none border-slate-200 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
-              >
-                Prev
-              </Link>
-              <span className="text-xs text-slate-500">Page {page}</span>
-              <Link
-                href={nextPageHref}
-                prefetch={false}
-                className={`inline-flex items-center rounded-md border px-2.5 py-1 ${!hasMoreResults ? 'pointer-events-none border-slate-200 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
-              >
-                Next
-              </Link>
-            </div>
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="mt-3 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
           <aside className="lg:sticky lg:top-24 lg:self-start">
             <FiltersPanel
               categories={categoryTiles}
@@ -1016,6 +936,7 @@ export default async function JobsView({
                         key={`sponsored-${listing.id}`}
                         listing={{
                           ...listing,
+                          matchScore: matchByInternshipId.get(listing.id)?.score ?? null,
                           experience_level: listing.target_student_year ?? listing.experience_level,
                           majorsText: formatMajors(listing.majors),
                           commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
@@ -1099,6 +1020,7 @@ export default async function JobsView({
                             key={listing.id}
                             listing={{
                               ...listing,
+                              matchScore: matchByInternshipId.get(listing.id)?.score ?? null,
                               experience_level: listing.target_student_year ?? listing.experience_level,
                               majorsText: formatMajors(listing.majors),
                               commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
@@ -1126,6 +1048,7 @@ export default async function JobsView({
                     key={listing.id}
                     listing={{
                       ...listing,
+                      matchScore: matchByInternshipId.get(listing.id)?.score ?? null,
                       experience_level: listing.target_student_year ?? listing.experience_level,
                       majorsText: formatMajors(listing.majors),
                       commuteMinutes: commuteMinutesById.get(listing.id) ?? null,
@@ -1142,6 +1065,26 @@ export default async function JobsView({
                 )
               })
             )}
+
+            {filteredInternships.length > 0 ? (
+              <div className="flex items-center gap-2 pt-1 sm:justify-end">
+                <Link
+                  href={previousPageHref}
+                  prefetch={false}
+                  className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs ${page <= 1 ? 'pointer-events-none border-slate-200 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  Prev
+                </Link>
+                <span className="text-xs text-slate-500">Page {page}</span>
+                <Link
+                  href={nextPageHref}
+                  prefetch={false}
+                  className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs ${!hasMoreResults ? 'pointer-events-none border-slate-200 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  Next
+                </Link>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>

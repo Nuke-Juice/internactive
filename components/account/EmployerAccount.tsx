@@ -51,8 +51,10 @@ type Props = {
   initialProfile: EmployerProfileRow | null
   initialPublicProfile: EmployerPublicProfileRow | null
   planId: EmployerPlanId
+  subscriptionStatus: string | null
   isVerifiedEmployer: boolean
   isEmailVerified: boolean
+  onManageSubscription: () => Promise<void>
 }
 
 const FIELD =
@@ -97,6 +99,20 @@ function toFoundedDateValue(year: string) {
   return `${trimmed}-01-01`
 }
 
+function planLabel(planId: EmployerPlanId) {
+  if (planId === 'pro') return 'Pro'
+  if (planId === 'starter') return 'Starter'
+  return 'Free'
+}
+
+function subscriptionStatusLabel(status: string | null) {
+  if (!status) return 'Not subscribed'
+  return status
+    .split('_')
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ')
+}
+
 export default function EmployerAccount({
   userId,
   userEmail,
@@ -105,8 +121,10 @@ export default function EmployerAccount({
   initialProfile,
   initialPublicProfile,
   planId,
+  subscriptionStatus,
   isVerifiedEmployer,
   isEmailVerified,
+  onManageSubscription,
 }: Props) {
   const canCustomizeHeader = planId === 'starter' || planId === 'pro'
   const headerFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -505,6 +523,25 @@ export default function EmployerAccount({
                 <div className="mt-1 text-sm font-medium text-slate-900">
                   {[locationCity.trim(), locationState.trim(), locationZip.trim()].filter(Boolean).join(', ') || 'Not set'}
                 </div>
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-slate-500">Subscription</div>
+                  <div className="mt-1 text-sm font-medium text-slate-900">
+                    {planLabel(planId)} plan
+                    <span className="ml-2 text-slate-500">({subscriptionStatusLabel(subscriptionStatus)})</span>
+                  </div>
+                </div>
+                <form action={onManageSubscription}>
+                  <button
+                    type="submit"
+                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                  >
+                    Manage subscription
+                  </button>
+                </form>
               </div>
             </div>
           </div>

@@ -135,10 +135,10 @@ test('matching uses canonical requirements first and reports missing canonical c
   )
 
   assert.equal(noCanonicalStudent.courseworkSignalPathUsed, 'canonical')
-  assert.ok(noCanonicalStudent.gaps.some((gap) => gap.toLowerCase().includes('canonical coursework signals')))
+  assert.ok(noCanonicalStudent.gaps.some((gap) => gap.toLowerCase().includes('add courses to improve matching')))
   assert.equal(canonicalStudent.courseworkSignalPathUsed, 'canonical')
   assert.ok(canonicalStudent.score > noCanonicalStudent.score)
-  assert.ok(canonicalStudent.reasons.some((reason) => reason.toLowerCase().includes('required coursework categories')))
+  assert.ok(canonicalStudent.reasons.some((reason) => reason.toLowerCase().includes('inferred categories match')))
 })
 
 test('legacy coursework listings still score via legacy path', () => {
@@ -157,4 +157,71 @@ test('legacy coursework listings still score via legacy path', () => {
 
   assert.equal(legacyMatch.courseworkSignalPathUsed, 'legacy')
   assert.ok(legacyMatch.score > 0)
+})
+
+test('subject-prefix coursework derivation infers accounting and finance categories from student courses', async () => {
+  const supabase = createSupabaseStub({
+    student_courses: [
+      {
+        student_profile_id: 'student-2',
+        course: { category_id: null, subject_code: 'ACCTG', course_number: '2100', level: null, category: null },
+      },
+      {
+        student_profile_id: 'student-2',
+        course: { category_id: null, subject_code: 'FINAN', course_number: '2020', level: null, category: null },
+      },
+    ],
+    canonical_course_categories: [{ id: 'cat-business-core', name: 'Business Core', slug: 'finance-accounting' }],
+    student_coursework_category_links: [],
+    student_coursework_items: [],
+    student_profiles: [{ coursework: ['ACCTG 2100', 'FINAN 2020'], coursework_unverified: [] }],
+  })
+
+  const features = await getStudentCourseworkFeatures({
+    supabase: supabase,
+    studentId: 'student-2',
+  })
+
+  assert.ok(features.canonicalCategoryIds.includes('cat-business-core'))
+  assert.ok(features.canonicalCategoryNames.includes('Business Core'))
+
+  const match = evaluateInternshipMatch(
+    {
+      id: 'listing-business-core',
+      majors: ['finance'],
+      required_course_category_ids: ['cat-business-core'],
+      required_course_category_names: ['Business Core'],
+    },
+    {
+      majors: ['finance'],
+      canonical_coursework_category_ids: features.canonicalCategoryIds,
+      canonical_coursework_category_names: features.canonicalCategoryNames,
+    }
+  )
+  assert.ok(match.reasons.some((reason) => reason.toLowerCase().includes('inferred categories match')))
+})
+
+test('empty student coursework stays neutral in category status and prompts to add courses', () => {
+  const match = evaluateInternshipMatch(
+    {
+      id: 'listing-empty-student',
+      majors: ['finance'],
+      required_course_category_ids: ['cat-business-core'],
+      required_course_category_names: ['Business Core'],
+    },
+    {
+      majors: ['finance'],
+      canonical_coursework_category_ids: [],
+      canonical_coursework_category_names: [],
+      coursework_category_ids: [],
+      coursework_item_ids: [],
+      coursework: [],
+    },
+    undefined,
+    { explain: true }
+  )
+
+  const courseworkCategory = match.breakdown?.categories.find((category) => category.key === 'coursework')
+  assert.equal(courseworkCategory?.status, 'unknown')
+  assert.ok(match.gaps.some((gap) => gap.toLowerCase().includes('add courses to improve matching')))
 })

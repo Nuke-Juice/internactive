@@ -38,7 +38,7 @@ test('preferred work mode mismatch applies soft penalty and stays eligible', () 
   assert.ok(result.gaps.some((gap) => gap.toLowerCase().includes('work mode mismatch')))
 })
 
-test('term mismatch applies soft penalty and stays eligible', () => {
+test('late start applies penalty and stays eligible', () => {
   const result = evaluateInternshipMatch(
     {
       id: 'i1',
@@ -51,7 +51,7 @@ test('term mismatch applies soft penalty and stays eligible', () => {
     }
   )
   assert.equal(result.eligible, true)
-  assert.ok(result.gaps.some((gap) => gap.toLowerCase().includes('term mismatch')))
+  assert.ok(result.gaps.some((gap) => gap.toLowerCase().includes('late start')))
 })
 
 test('remote_only still excludes non-remote internships', () => {
@@ -69,7 +69,7 @@ test('remote_only still excludes non-remote internships', () => {
   assert.equal(result.eligible, false)
 })
 
-test('start date mismatch adds penalty gap', () => {
+test('start month mismatch adds late-start penalty gap', () => {
   const result = evaluateInternshipMatch(
     {
       id: 'i1',
@@ -82,7 +82,7 @@ test('start date mismatch adds penalty gap', () => {
     }
   )
   assert.equal(result.eligible, true)
-  assert.ok(result.gaps.some((gap) => gap.toLowerCase().includes("start before you're available")))
+  assert.ok(result.gaps.some((gap) => gap.toLowerCase().includes('late start')))
 })
 
 test('match snapshot stores 0-100 score', () => {

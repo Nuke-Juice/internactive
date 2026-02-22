@@ -79,6 +79,6 @@ test('coursework category overlap is primary signal and reasons use categories',
   )
 
   assert.ok(withCategoryOverlap.score > noCategoryOverlap.score)
-  assert.ok(withCategoryOverlap.reasons.some((reason) => reason.toLowerCase().includes('coursework categories')))
+  assert.ok(withCategoryOverlap.reasons.some((reason) => reason.toLowerCase().includes('inferred categories match')))
   assert.ok(withCategoryOverlap.reasons.some((reason) => reason.toLowerCase().includes('corporate finance / valuation')))
 })

@@ -6,6 +6,7 @@ import ConfirmSignOutButton from '@/components/auth/ConfirmSignOutButton'
 import HistoryBackButton from '@/components/navigation/HistoryBackButton'
 import { ensureUserRole } from '@/lib/auth/ensureUserRole'
 import { buildVerifyRequiredHref } from '@/lib/auth/emailVerification'
+import { createBillingPortalSessionAction } from '@/lib/billing/actions'
 import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import { isAdminRole, isAppRole, isUserRole, type AppRole, type UserRole } from '@/lib/auth/roles'
 import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
@@ -451,7 +452,7 @@ export default async function AccountPage() {
     }
   }
 
-  const { planId, isVerifiedEmployer } = await getEmployerVerificationStatus({ supabase, userId: user.id })
+  const { planId, isVerifiedEmployer, status } = await getEmployerVerificationStatus({ supabase, userId: user.id })
   const isEmailVerified = Boolean(user.email_confirmed_at)
   const metadata = (user.user_metadata ?? {}) as { first_name?: string; last_name?: string; full_name?: string }
   const fullNameTokens =
@@ -479,8 +480,10 @@ export default async function AccountPage() {
           initialProfile={profileWithFallback}
           initialPublicProfile={publicProfileWithFallback}
           planId={planId}
+          subscriptionStatus={status}
           isVerifiedEmployer={isVerifiedEmployer}
           isEmailVerified={isEmailVerified}
+          onManageSubscription={createBillingPortalSessionAction}
         />
       </div>
     </main>

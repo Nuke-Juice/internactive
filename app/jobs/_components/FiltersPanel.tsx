@@ -276,7 +276,7 @@ export default function FiltersPanel({
 
   return (
     <>
-      <div className={`rounded-xl border border-slate-200 bg-white shadow-sm ${compact ? 'p-2.5' : 'p-3'}`}>
+      <div className={`rounded-xl border border-slate-200 bg-white shadow-sm ${compact ? 'p-2' : 'p-3'}`}>
         <div className={`flex items-center gap-2 ${compact ? 'flex-col items-stretch' : 'justify-between gap-3'}`}>
           <button
             type="button"
@@ -293,31 +293,33 @@ export default function FiltersPanel({
               </span>
             ) : null}
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              applyFilters({
-                sort: state.sort,
-                searchQuery: '',
-                category: '',
-                payMin: '',
-                remoteOnly: false,
-                experience: '',
-                hoursMin: '',
-                hoursMax: '',
-                locationCity: '',
-                locationState: '',
-                radius: '',
-              })
-            }
-            className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 ${
-              compact ? 'justify-center' : ''
-            }`}
-          >
-            Clear all
-          </button>
+          {!compact ? (
+            <button
+              type="button"
+              onClick={() =>
+                applyFilters({
+                  sort: state.sort,
+                  searchQuery: '',
+                  category: '',
+                  payMin: '',
+                  remoteOnly: false,
+                  experience: '',
+                  hoursMin: '',
+                  hoursMax: '',
+                  locationCity: '',
+                  locationState: '',
+                  radius: '',
+                })
+              }
+              className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 ${
+                compact ? 'justify-center' : ''
+              }`}
+            >
+              Clear all
+            </button>
+          ) : null}
         </div>
-        {noMatchesHint ? (
+        {noMatchesHint && !compact ? (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             <p className="font-semibold">No matches with current filters</p>
             <p className="mt-1">Try clearing: {noMatchesHint.labels.join(', ')}</p>
@@ -618,6 +620,28 @@ export default function FiltersPanel({
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      applyFilters({
+                        sort: state.sort,
+                        searchQuery: '',
+                        category: '',
+                        payMin: '',
+                        remoteOnly: false,
+                        experience: '',
+                        hoursMin: '',
+                        hoursMax: '',
+                        locationCity: '',
+                        locationState: '',
+                        radius: '',
+                      })
+                      setIsOpen(false)
+                    }}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Clear all
+                  </button>
                   <button
                     type="button"
                     onClick={() => setIsOpen(false)}

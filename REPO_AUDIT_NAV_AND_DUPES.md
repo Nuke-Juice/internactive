@@ -250,3 +250,116 @@ Confirmed guardrails:
 - Complete deep consolidation of `app/admin/internships/page.tsx` and `app/admin/internships/new/page.tsx` into shared page modules (form/query/actions split).
 - Optionally migrate secondary in-page tab systems (`components/admin/ListingsQueue.tsx`, `components/employer/inbox/EmployerApplicantsInboxClient.tsx`) onto shared tab primitives for full visual/API parity.
 - If desired, fold `SiteHeader` left-side role links entirely into config-driven rendering to remove the last small branch-specific conditionals.
+
+---
+
+## 11) Subscription CTA Visibility + Profile Placement (Follow-up)
+
+### Upgrade CTA rendering points (employer)
+
+- `components/layout/SiteHeader.tsx`
+  - `Upgrade` top-nav item now renders only when employer `planId` is resolved and not `pro`.
+- `app/dashboard/employer/page.tsx`
+  - free/starter upgrade modal is now gated by `plan.id !== 'pro'`.
+- `app/dashboard/employer/_components/CreateInternshipCta.tsx`
+  - at plan limit:
+    - free/starter: keeps `Upgrade` CTA behavior
+    - pro: removes `Upgrade` CTA and shows `Manage subscription` action instead
+
+### Canonical max-plan guard
+
+- Root layout now resolves employer plan via canonical billing status source:
+  - `app/layout.tsx` uses `getEmployerVerificationStatus(...)` and passes `employerPlanId` to header shell.
+- Guard rule used across header/dashboard CTA surfaces:
+  - max tier is `planId === 'pro'`
+  - when max tier, no employer `Upgrade` button is rendered.
+
+### Manage Subscription location
+
+- Employer account/profile area now includes a dedicated subscription panel:
+  - `app/account/page.tsx` passes `createBillingPortalSessionAction` into employer account UI.
+  - `components/account/EmployerAccount.tsx` renders:
+    - plan label
+    - subscription status label
+    - `Manage subscription` button (server action to Stripe portal)
+
+This keeps subscription management discoverable in profile/account while avoiding duplicate upgrade CTAs for Pro employers.
+
+---
+
+## 12) Verified Employer Badge Derivation Fix
+
+- Badge source moved off listing snapshot data for runtime views.
+- Canonical employer verification tier is now derived from current employer/subscription status and mapped onto listings at query/render time.
+
+Updated paths:
+
+- `lib/billing/subscriptions.ts`
+  - added canonical helpers:
+    - `resolveEmployerVerificationTier(...)`
+    - `getEmployerVerificationTier(...)`
+    - `getEmployerVerificationTiers(...)` (batched; avoids N+1)
+- `lib/jobs/internships.ts`
+  - `fetchInternships(...)` and `fetchInternshipsByIds(...)` now batch-resolve employer tiers and override `employer_verification_tier` in returned rows.
+  - response shape remains unchanged (`employer_verification_tier` key preserved).
+- `app/jobs/[id]/page.tsx`
+  - detail page now derives employer tier from employer status and applies it to listing payload before rendering badge.
+- `app/employers/[employerId]/page.tsx`
+  - employer public profile badge now derives directly from employer status, not historical listing rows.
+- `app/admin/listings-queue/page.tsx`
+  - queue verification tier/quality scoring now uses derived employer tiers rather than listing snapshot values.
+
+Outcome:
+
+- Listings created before an upgrade now show the same current employer verification badge behavior as newly created listings.
+
+Public exposure and RLS safety:
+
+- Added read-only security-definer RPC for public/student-safe tier resolution:
+  - `supabase/migrations/202602210002_public_employer_verification_tiers_rpc.sql`
+  - function: `public.get_employer_listing_verification_tiers(target_user_ids uuid[])`
+- Existing security-definer function remains used for single-employer derivation:
+  - `public.resolve_employer_listing_verification_tier(target_user_id uuid)`
+- No sensitive subscription/profile columns are exposed in payloads; only derived tier is returned and mapped back to existing `employer_verification_tier` response key.
+
+Header polish:
+
+- Top-nav "For Employers" button size now matches Sign in button height/typography baseline.
+- Updated:
+  - `components/navigation/AppNav.tsx` (`top` variant sizing)
+  - `components/layout/SiteHeader.tsx` (sign-in button sizing)
+
+---
+
+## 13) Availability / Term Matching Normalization
+
+Root cause addressed:
+
+- Availability term mismatch was caused by non-canonical season mapping and single-season term parsing.
+- Legacy month fallback incorrectly mapped `May` to `spring` in multiple flows.
+
+Changes:
+
+- Added canonical season normalization helpers:
+  - `lib/availability/normalizeSeason.ts`
+  - `lib/availability/seasonOverlap.ts`
+- Updated matcher to use canonical season sets and overlap-based scoring:
+  - `lib/matching.ts`
+  - listing term ranges now map to multiple seasons (for example `March 2026 - June 2026` => `spring + summer`)
+  - term alignment now uses partial overlap coverage instead of hard negative penalty
+  - missing term data no longer creates misleading mismatch penalties
+  - mismatch explanation now includes both sides:
+    - `Term mismatch: listing is ..., you selected ...`
+- Unified month fallback mapping (`May` => `summer`) in:
+  - `components/jobs/JobsView.tsx`
+  - `app/jobs/[id]/page.tsx`
+  - `lib/applicationMatchSnapshot.ts`
+  - `app/signup/student/details/page.tsx`
+  - `lib/admin/matchingPreview.ts`
+- Student profile UX nudge:
+  - `components/account/StudentAccount.tsx` now includes `Winter` season option and helper text:
+    - “Select all terms you are available to work.”
+
+Tests:
+
+- Added `tests/availability-season.test.ts` for canonical normalization + overlap + partial term scoring assertions.

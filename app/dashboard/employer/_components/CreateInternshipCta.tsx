@@ -8,9 +8,10 @@ type CreateInternshipCtaProps = {
   atLimit: boolean
   activeCount: number
   planLimit: number | null
+  canUpgrade: boolean
 }
 
-export default function CreateInternshipCta({ atLimit, activeCount, planLimit }: CreateInternshipCtaProps) {
+export default function CreateInternshipCta({ atLimit, activeCount, planLimit, canUpgrade }: CreateInternshipCtaProps) {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
 
   if (!atLimit) {
@@ -39,7 +40,7 @@ export default function CreateInternshipCta({ atLimit, activeCount, planLimit }:
       <CenteredModal
         open={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
-        title="Upgrade to post more internships"
+        title={canUpgrade ? 'Upgrade to post more internships' : 'Plan limit reached'}
         description={`Your plan allows ${limitLabel} active internship${plural}. You currently have ${activeCount} active.`}
         footer={
           <>
@@ -50,17 +51,28 @@ export default function CreateInternshipCta({ atLimit, activeCount, planLimit }:
             >
               Close
             </button>
-            <Link
-              href="/upgrade"
-              className="rounded-md border border-blue-700 bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Upgrade
-            </Link>
+            {canUpgrade ? (
+              <Link
+                href="/upgrade"
+                className="rounded-md border border-blue-700 bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Upgrade
+              </Link>
+            ) : (
+              <Link
+                href="/upgrade"
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Manage subscription
+              </Link>
+            )}
           </>
         }
       >
         <p className="text-sm text-slate-700">
-          Free plan allows 1 active internship. Deactivate an active listing or upgrade to post more.
+          {canUpgrade
+            ? 'Free plan allows 1 active internship. Deactivate an active listing or upgrade to post more.'
+            : 'You are on the highest employer plan. Deactivate an active listing or manage your subscription.'}
         </p>
       </CenteredModal>
     </>

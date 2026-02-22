@@ -7,6 +7,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Bell, FileText, LogIn, Mail, Menu, ShieldCheck, User, X } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { isAdminRole, type UserRole } from '@/lib/auth/roles'
+import type { EmployerPlanId } from '@/lib/billing/plan'
 import { useToast } from '@/components/feedback/ToastProvider'
 import AppNav, { type AppNavItem } from '@/components/navigation/AppNav'
 import { matchPath } from '@/src/navigation/matchPath'
@@ -21,6 +22,7 @@ type SiteHeaderProps = {
   finishProfileHref?: string | null
   showInboxNotificationDot?: boolean
   showNotificationsDot?: boolean
+  employerPlanId?: EmployerPlanId | null
 }
 
 type SearchSuggestion = {
@@ -40,10 +42,10 @@ function navClasses(isActive: boolean) {
 
 function primaryButtonClasses(isActive: boolean) {
   if (isActive) {
-    return 'inline-flex items-center gap-1.5 rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white shadow-sm'
+    return 'inline-flex h-10 items-center gap-1.5 rounded-md bg-blue-700 px-4 text-sm font-medium text-white shadow-sm'
   }
 
-  return 'inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 hover:shadow'
+  return 'inline-flex h-10 items-center gap-1.5 rounded-md bg-blue-600 px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 hover:shadow'
 }
 
 function iconNavClasses(isActive: boolean) {
@@ -67,6 +69,7 @@ export default function SiteHeader({
   showFinishProfilePrompt = false,
   showInboxNotificationDot = false,
   showNotificationsDot = false,
+  employerPlanId = null,
 }: SiteHeaderProps) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -119,10 +122,13 @@ export default function SiteHeader({
     }
 
     if (role === 'employer') {
-      return [
+      const employerItems: AppNavItem[] = [
         { id: 'employer-dashboard', label: 'Dashboard', href: '/dashboard/employer', match: 'prefix', order: 10 },
-        { id: 'employer-upgrade', label: 'Upgrade', href: '/upgrade', match: 'prefix', order: 20, icon: ShieldCheck },
       ]
+      if (employerPlanId && employerPlanId !== 'pro') {
+        employerItems.push({ id: 'employer-upgrade', label: 'Upgrade', href: '/upgrade', match: 'prefix', order: 20, icon: ShieldCheck })
+      }
+      return employerItems
     }
 
     if (role === 'student') {
@@ -148,7 +154,7 @@ export default function SiteHeader({
     }
 
     return []
-  }, [effectiveIsAuthenticated, isAdmin, role])
+  }, [effectiveIsAuthenticated, employerPlanId, isAdmin, role])
   useEffect(() => {
     if (resendCooldown <= 0) return
     const timer = setTimeout(() => {
@@ -419,19 +425,6 @@ export default function SiteHeader({
               <Link href="/" className={`hidden md:inline ${textLinkClasses(homeActive)}`}>
                 Home
               </Link>
-              {!effectiveIsAuthenticated ? (
-                <Link href="/signup/employer" className={`hidden md:inline ${textLinkClasses(employersActive)}`}>
-                  For Employers
-                </Link>
-              ) : isAdmin ? (
-                <Link href="/admin" className={`hidden md:inline ${textLinkClasses(adminActive)}`}>
-                  Admin Dashboard
-                </Link>
-              ) : role === 'student' ? (
-                <Link href="/for-employers" className={`hidden md:inline ${textLinkClasses(employersActive)}`}>
-                  For Employers
-                </Link>
-              ) : null}
             </div>
 
             <nav className="hidden items-center gap-2 md:flex">

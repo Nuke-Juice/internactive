@@ -2,6 +2,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowLeft } from 'lucide-react'
 import EmployerVerificationBadge from '@/components/badges/EmployerVerificationBadge'
+import { getEmployerVerificationTier } from '@/lib/billing/subscriptions'
 import { supabaseServer } from '@/lib/supabase/server'
 
 type Params = Promise<{ employerId: string }>
@@ -43,14 +44,7 @@ type EmployerInternshipRow = {
   experience_level: string | null
   target_student_year: string | null
   description: string | null
-  employer_verification_tier: string | null
   created_at: string | null
-}
-
-function strongestTier(rows: EmployerInternshipRow[]) {
-  if (rows.some((row) => row.employer_verification_tier === 'pro')) return 'pro'
-  if (rows.some((row) => row.employer_verification_tier === 'starter')) return 'starter'
-  return 'free'
 }
 
 function formatDate(value: string | null) {
@@ -94,7 +88,7 @@ export default async function PublicEmployerProfilePage({ params }: { params: Pa
   const [{ data }, { data: publicProfile }, { data: privateProfile }] = await Promise.all([
     supabase
       .from('internships')
-      .select('id, title, company_name, location, term, work_mode, experience_level, target_student_year, description, employer_verification_tier, created_at')
+      .select('id, title, company_name, location, term, work_mode, experience_level, target_student_year, description, created_at')
       .eq('employer_id', employerId)
       .eq('is_active', true)
       .order('created_at', { ascending: false })
@@ -153,7 +147,7 @@ export default async function PublicEmployerProfilePage({ params }: { params: Pa
     )
   }
 
-  const tier = strongestTier(internships)
+  const tier = await getEmployerVerificationTier({ supabase, userId: employerId })
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10">

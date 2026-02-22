@@ -18,8 +18,10 @@ type StudentCourseRow = {
 }
 
 export type StudentCourseworkFeatures = {
+  courseCount: number
   canonicalCategoryIds: string[]
   canonicalCategoryNames: string[]
+  legacySubjectPrefixCategories: string[]
   legacyCategoryIds: string[]
   legacyItemIds: string[]
   textCoursework: string | null
@@ -94,6 +96,7 @@ export async function getStudentCourseworkFeatures(params: {
   const directCanonicalCategoryIds = new Set<string>()
   const directCanonicalCategoryNames = new Set<string>()
   const inferredCategorySlugs = new Set<string>()
+  const inferredCategoryLabels = new Set<string>()
   const canonicalCourseLevelBands = new Set<CourseworkLevelBand>()
 
   for (const row of studentCourses) {
@@ -123,8 +126,24 @@ export async function getStudentCourseworkFeatures(params: {
 
       if (!courseHasCategory) {
         const inferred = inferCanonicalCategorySlugFromSubject(course.subject_code)
-        if (inferred) inferredCategorySlugs.add(inferred)
+        if (inferred) {
+          inferredCategorySlugs.add(inferred)
+          inferredCategoryLabels.add(inferred)
+        }
       }
+    }
+  }
+
+  const missingCategoryNamesById = Array.from(directCanonicalCategoryIds)
+  if (missingCategoryNamesById.length > 0) {
+    const { data: categoriesById } = await supabase
+      .from('canonical_course_categories')
+      .select('id, name')
+      .in('id', missingCategoryNamesById)
+
+    for (const category of categoriesById ?? []) {
+      const categoryName = normalizeLabel(category.name)
+      if (categoryName) directCanonicalCategoryNames.add(categoryName)
     }
   }
 
@@ -171,8 +190,10 @@ export async function getStudentCourseworkFeatures(params: {
   const canonicalCategoryNames = Array.from(directCanonicalCategoryNames)
 
   return {
+    courseCount: studentCourses.length,
     canonicalCategoryIds,
     canonicalCategoryNames,
+    legacySubjectPrefixCategories: Array.from(inferredCategoryLabels),
     legacyCategoryIds,
     legacyItemIds,
     textCoursework,

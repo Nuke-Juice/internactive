@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import EmployerVerificationBadge from '@/components/badges/EmployerVerificationBadge'
+import { getMatchScoreTone } from '@/components/jobs/getMatchScoreTone'
 import ApplyButton from './ApplyButton'
 
 type Listing = {
@@ -306,6 +307,7 @@ export default function JobCard({
   const capReached = applicationsCount >= applicationCap
   const nearCap = applicationsCount >= 50 && !capReached
   const companyInitial = (listing.company_name ?? 'C').trim().charAt(0).toUpperCase()
+  const matchScoreTone = getMatchScoreTone(listing.matchScore ?? null)
 
   return (
     <article className="group rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md sm:p-4">
@@ -340,9 +342,8 @@ export default function JobCard({
         </div>
         <div className="flex items-center gap-2">
           {isAuthenticated && userRole === 'student' && typeof listing.matchScore === 'number' ? (
-            <div className="inline-flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-full border-2 border-emerald-200 bg-emerald-50 text-emerald-700">
+            <div className={`inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 ${matchScoreTone}`}>
               <span className="text-sm font-semibold leading-none">{Math.round(listing.matchScore)}%</span>
-              <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide">match</span>
             </div>
           ) : showMatchPrompt ? (
             <span className="text-[11px] font-medium text-slate-500">Log in to see match score</span>

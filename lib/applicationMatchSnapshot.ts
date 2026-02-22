@@ -5,6 +5,7 @@ import {
   type StudentMatchProfile,
   type WorkMode,
 } from '@/lib/matching'
+import { normalizeSeason } from '@/lib/availability/normalizeSeason'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 
 type SnapshotInternship = {
@@ -82,15 +83,6 @@ function asWorkModes(value: string[] | string | null | undefined): WorkMode[] {
     .filter((item): item is WorkMode => item !== null)
 }
 
-function seasonFromMonth(value: string | null | undefined) {
-  const normalized = normalizeText(value ?? '')
-  if (normalized.startsWith('jun') || normalized.startsWith('jul') || normalized.startsWith('aug')) return 'summer'
-  if (normalized.startsWith('sep') || normalized.startsWith('oct') || normalized.startsWith('nov')) return 'fall'
-  if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
-  if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
-  return ''
-}
-
 export function buildApplicationMatchSnapshot(input: {
   internship: SnapshotInternship
   profile: SnapshotProfile
@@ -126,7 +118,7 @@ export function buildApplicationMatchSnapshot(input: {
       const explicit = asStringArray(input.profile?.preferred_terms ?? null)
       if (explicit.length > 0) return explicit
       if (preferenceSignals.preferredTerms.length > 0) return preferenceSignals.preferredTerms
-      const fallbackSeason = seasonFromMonth(input.profile?.availability_start_month ?? null)
+      const fallbackSeason = normalizeSeason(input.profile?.availability_start_month ?? null)
       return fallbackSeason ? [fallbackSeason] : []
     })(),
     majors: asStringArray(input.profile?.majors ?? null),

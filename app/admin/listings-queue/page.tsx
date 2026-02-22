@@ -5,6 +5,7 @@ import ListingsQueue from '@/components/admin/ListingsQueue'
 import { requireAnyRole } from '@/lib/auth/requireAnyRole'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
 import { computeListingQualityScore } from '@/lib/admin/listingQuality'
+import { getEmployerVerificationTiers } from '@/lib/billing/subscriptions'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
 
 type SearchParams = Promise<{ tab?: string; success?: string; error?: string }>
@@ -110,6 +111,10 @@ export default async function AdminListingsQueuePage({ searchParams }: { searchP
   const internships = (internshipRows ?? []) as InternshipRow[]
   const employers = (employerRows ?? []) as EmployerProfile[]
   const employerById = new Map(employers.map((row) => [row.user_id, row]))
+  const verificationTierByEmployer = await getEmployerVerificationTiers({
+    supabase: admin,
+    userIds: internships.map((row) => row.employer_id),
+  })
 
   const postCountByEmployer = new Map<string, number>()
   for (const row of internships) {
@@ -125,12 +130,13 @@ export default async function AdminListingsQueuePage({ searchParams }: { searchP
 
   const enriched = internships.map((row) => {
     const employer = employerById.get(row.employer_id)
+    const derivedTier = verificationTierByEmployer.get(row.employer_id) ?? row.employer_verification_tier ?? 'free'
     const normalizedDescription = (row.description ?? '').trim().toLowerCase()
     const quality = computeListingQualityScore({
       employerWebsite: employer?.website ?? null,
       employerOverview: employer?.overview ?? null,
       employerLogoUrl: employer?.avatar_url ?? null,
-      verificationTier: row.employer_verification_tier ?? null,
+      verificationTier: derivedTier,
       employerContactEmail: employer?.contact_email ?? null,
       payPresent: typeof row.pay_min === 'number' && typeof row.pay_max === 'number',
       hoursPresent: typeof row.hours_min === 'number' && typeof row.hours_max === 'number',
@@ -151,7 +157,7 @@ export default async function AdminListingsQueuePage({ searchParams }: { searchP
       id: row.id,
       title: row.title,
       companyName: employer?.company_name ?? row.company_name ?? 'Unknown company',
-      verificationTier: row.employer_verification_tier ?? 'free',
+      verificationTier: derivedTier,
       locationLabel: buildLocationLabel(row),
       hasPay: typeof row.pay_min === 'number' && typeof row.pay_max === 'number',
       hasHours: typeof row.hours_min === 'number' && typeof row.hours_max === 'number',

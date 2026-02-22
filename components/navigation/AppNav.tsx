@@ -63,8 +63,8 @@ function normalizeItems(items: AppNavItem[]) {
 
 function topItemClasses(active: boolean) {
   return active
-    ? 'inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-50 px-4 text-sm font-medium text-slate-700'
-    : 'inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50'
+    ? 'inline-flex h-10 items-center gap-1.5 rounded-md border border-slate-300 bg-slate-50 px-4 text-sm font-medium text-slate-700'
+    : 'inline-flex h-10 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50'
 }
 
 function workspaceItemClasses(active: boolean) {

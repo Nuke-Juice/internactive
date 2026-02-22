@@ -5,6 +5,7 @@ import RouteFeedbackToasts from '@/components/feedback/RouteFeedbackToasts'
 import { ToastProvider } from '@/components/feedback/ToastProvider'
 import SiteHeader from '@/components/layout/SiteHeader'
 import type { UserRole } from '@/lib/auth/roles'
+import type { EmployerPlanId } from '@/lib/billing/plan'
 
 type Props = {
   children: React.ReactNode
@@ -17,6 +18,7 @@ type Props = {
   finishProfileHref?: string | null
   showInboxNotificationDot?: boolean
   showNotificationsDot?: boolean
+  employerPlanId?: EmployerPlanId | null
 }
 
 export default function AppShellClient({
@@ -30,6 +32,7 @@ export default function AppShellClient({
   finishProfileHref = null,
   showInboxNotificationDot = false,
   showNotificationsDot = false,
+  employerPlanId = null,
 }: Props) {
   return (
     <ToastProvider>
@@ -45,6 +48,7 @@ export default function AppShellClient({
         finishProfileHref={finishProfileHref}
         showInboxNotificationDot={showInboxNotificationDot}
         showNotificationsDot={showNotificationsDot}
+        employerPlanId={employerPlanId}
       />
       {children}
     </ToastProvider>

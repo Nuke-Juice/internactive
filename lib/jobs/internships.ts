@@ -1,5 +1,6 @@
 import { supabaseServer } from '@/lib/supabase/server'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
+import { getEmployerVerificationTiers } from '@/lib/billing/subscriptions'
 
 export type Internship = {
   id: string
@@ -434,6 +435,36 @@ function mapInternshipRows(rows: RawInternshipRow[]) {
   }))
 }
 
+async function withDerivedEmployerVerificationTiers(params: {
+  supabase: Awaited<ReturnType<typeof supabaseServer>>
+  rows: Internship[]
+}) {
+  const employerIds = Array.from(
+    new Set(
+      params.rows
+        .map((row) => row.employer_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    )
+  )
+  if (employerIds.length === 0) return params.rows
+
+  const verificationTierByEmployer = await getEmployerVerificationTiers({
+    supabase: params.supabase,
+    userIds: employerIds,
+  })
+
+  return params.rows.map((row) => {
+    const employerId = row.employer_id
+    if (!employerId) return row
+    const tier = verificationTierByEmployer.get(employerId)
+    if (!tier) return row
+    return {
+      ...row,
+      employer_verification_tier: tier,
+    }
+  })
+}
+
 async function runSchemaTolerantInternshipQuery(params: {
   supabase: Awaited<ReturnType<typeof supabaseServer>>
   columns: readonly string[]
@@ -521,7 +552,10 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
       }
 
       rows = (legacyData ?? []) as unknown as RawInternshipRow[]
-      const mappedRows = mapInternshipRows(rows)
+      const mappedRows = await withDerivedEmployerVerificationTiers({
+        supabase,
+        rows: mapInternshipRows(rows),
+      })
       return {
         rows: mappedRows.slice(0, limit),
         hasMore: mappedRows.length > limit,
@@ -531,7 +565,10 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
     rows = (fallbackData ?? []) as unknown as RawInternshipRow[]
   }
 
-  const mappedRows = mapInternshipRows(rows)
+  const mappedRows = await withDerivedEmployerVerificationTiers({
+    supabase,
+    rows: mapInternshipRows(rows),
+  })
 
   return {
     rows: mappedRows.slice(0, limit),
@@ -553,7 +590,10 @@ export async function fetchInternshipsByIds(ids: string[]) {
     .or(`application_deadline.is.null,application_deadline.gte.${today}`)
 
   const rows = (data ?? []) as unknown as RawInternshipRow[]
-  const mapped = mapInternshipRows(rows)
+  const mapped = await withDerivedEmployerVerificationTiers({
+    supabase,
+    rows: mapInternshipRows(rows),
+  })
   const byId = new Map(mapped.map((row) => [row.id, row]))
   return uniqueIds.map((id) => byId.get(id)).filter((row): row is Internship => Boolean(row))
 }

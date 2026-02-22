@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import AppShellClient from '@/components/layout/AppShellClient'
 import { isUserRole, type UserRole } from '@/lib/auth/roles'
+import type { EmployerPlanId } from '@/lib/billing/plan'
+import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import { supabaseServer } from '@/lib/supabase/server'
 import './globals.css'
 
@@ -32,6 +34,7 @@ export default async function RootLayout({
   let isEmailVerified = true
   let showInboxNotificationDot = false
   let showNotificationsDot = false
+  let employerPlanId: EmployerPlanId | null = null
   if (user) {
     email = user.email ?? null
     const metadata = (user.user_metadata ?? {}) as { avatar_url?: string }
@@ -43,6 +46,9 @@ export default async function RootLayout({
     }
 
     if (role === 'employer') {
+      const verification = await getEmployerVerificationStatus({ supabase, userId: user.id })
+      employerPlanId = verification.planId
+
       const { data: internships } = await supabase
         .from('internships')
         .select('id')
@@ -76,6 +82,7 @@ export default async function RootLayout({
           finishProfileHref={null}
           showInboxNotificationDot={showInboxNotificationDot}
           showNotificationsDot={showNotificationsDot}
+          employerPlanId={employerPlanId}
         >
           {children}
         </AppShellClient>

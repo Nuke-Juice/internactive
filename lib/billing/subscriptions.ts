@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getEmployerPlan, type EmployerPlan, type EmployerPlanId } from './plan.ts'
 import { getOptionalPriceIdForPlan } from './prices'
+import type { EmployerVerificationTier } from '@/lib/internships/locationType'
 
 const VERIFIED_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing'])
 
@@ -48,6 +49,16 @@ export function getEmployerListingLimit(params: {
 }) {
   if (params.isBetaEmployer) return null
   return params.plan.maxActiveInternships
+}
+
+export function resolveEmployerVerificationTier(params: {
+  planId: EmployerPlanId
+  isVerifiedEmployer: boolean
+}): EmployerVerificationTier {
+  if (params.planId === 'pro' || params.planId === 'starter') {
+    return params.planId
+  }
+  return params.isVerifiedEmployer ? 'pro' : 'free'
 }
 
 export async function getEmployerVerificationStatus(params: {
@@ -102,4 +113,85 @@ export async function getEmployerVerificationStatus(params: {
     priceId,
     listingLimit,
   }
+}
+
+export async function getEmployerVerificationTier(params: {
+  supabase: SupabaseClient
+  userId: string
+}) {
+  const { data: resolvedTier } = await params.supabase.rpc('resolve_employer_listing_verification_tier', {
+    target_user_id: params.userId,
+  })
+  if (resolvedTier === 'pro' || resolvedTier === 'starter') return resolvedTier
+  if (resolvedTier === 'free') return 'free'
+
+  const status = await getEmployerVerificationStatus(params)
+  return resolveEmployerVerificationTier({ planId: status.planId, isVerifiedEmployer: status.isVerifiedEmployer })
+}
+
+export async function getEmployerVerificationTiers(params: {
+  supabase: SupabaseClient
+  userIds: string[]
+}) {
+  const uniqueUserIds = Array.from(new Set(params.userIds.map((id) => id.trim()).filter(Boolean)))
+  const tiers = new Map<string, EmployerVerificationTier>()
+  if (uniqueUserIds.length === 0) return tiers
+
+  const { data: resolvedRows } = await params.supabase.rpc('get_employer_listing_verification_tiers', {
+    target_user_ids: uniqueUserIds,
+  })
+  for (const row of (resolvedRows ?? []) as Array<{ user_id: string; tier: string | null }>) {
+    if (typeof row.user_id !== 'string') continue
+    const tier = row.tier
+    tiers.set(row.user_id, tier === 'pro' || tier === 'starter' ? tier : 'free')
+  }
+  if (tiers.size > 0) return tiers
+
+  const [{ data: subscriptions }, { data: profiles }] = await Promise.all([
+    params.supabase.from('subscriptions').select('user_id, status, price_id').in('user_id', uniqueUserIds),
+    params.supabase
+      .from('employer_profiles')
+      .select('user_id, verified_employer_manual_override, is_beta_employer')
+      .in('user_id', uniqueUserIds),
+  ])
+
+  const subscriptionByUser = new Map(
+    (subscriptions ?? [])
+      .filter((row): row is { user_id: string; status: string | null; price_id: string | null } => typeof row.user_id === 'string')
+      .map((row) => [row.user_id, row])
+  )
+  const profileByUser = new Map(
+    (profiles ?? [])
+      .filter(
+        (row): row is {
+          user_id: string
+          verified_employer_manual_override: boolean | null
+          is_beta_employer: boolean | null
+        } => typeof row.user_id === 'string'
+      )
+      .map((row) => [row.user_id, row])
+  )
+
+  for (const userId of uniqueUserIds) {
+    const subscription = subscriptionByUser.get(userId)
+    const profile = profileByUser.get(userId)
+    const status = subscription?.status ?? null
+    const priceId = subscription?.price_id ?? null
+    const isBetaEmployer = Boolean(profile?.is_beta_employer)
+    const subscriptionPlanId = resolveEmployerPlan({ status, priceId }).id
+    const planId = getEmployerFeaturePlanId({ subscriptionPlanId, isBetaEmployer })
+    const hasPaidAccess = getEmployerPaidAccess({ status, isBetaEmployer })
+    const hasManualOverride = Boolean(profile?.verified_employer_manual_override)
+    const isVerifiedEmployer = hasManualOverride || (hasPaidAccess && planId === 'pro') || isBetaEmployer
+
+    tiers.set(
+      userId,
+      resolveEmployerVerificationTier({
+        planId,
+        isVerifiedEmployer,
+      })
+    )
+  }
+
+  return tiers
 }

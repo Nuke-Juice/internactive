@@ -36,5 +36,45 @@ test('category breakdown uses fixed weights and deterministic earned points', ()
   )
   const availability = categories.find((row) => row.key === 'availability')
   assert.ok(availability)
-  assert.equal(availability?.status, 'blocked')
+  assert.equal(availability?.status, 'partial')
+})
+
+test('skills category is full when required skills are fully matched and no preferred skills are listed', () => {
+  const match = evaluateInternshipMatch(
+    {
+      id: 'skills-required-only',
+      majors: ['finance'],
+      required_skill_ids: ['skill-a', 'skill-b'],
+    },
+    {
+      majors: ['finance'],
+      skill_ids: ['skill-a', 'skill-b'],
+    },
+    undefined,
+    { explain: true }
+  )
+
+  const skills = match.breakdown?.categories.find((row) => row.key === 'skills')
+  assert.ok(skills)
+  assert.equal(skills?.earned_points, 25)
+  assert.equal(skills?.status, 'good')
+})
+
+test('major category treats targeted majors as OR and awards full major points on any overlap', () => {
+  const match = evaluateInternshipMatch(
+    {
+      id: 'major-denominator',
+      majors: ['finance', 'accounting'],
+    },
+    {
+      majors: ['finance'],
+    },
+    undefined,
+    { explain: true }
+  )
+
+  const major = match.breakdown?.categories.find((row) => row.key === 'major')
+  assert.ok(major)
+  assert.equal(major?.earned_points, 20)
+  assert.ok(match.reasons.some((reason) => reason.toLowerCase().includes('your major matches')))
 })

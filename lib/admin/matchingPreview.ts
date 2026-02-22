@@ -15,6 +15,7 @@ import {
 import { parseStudentPreferenceSignals } from '../student/preferenceSignals.ts'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { inferLevelBandFromCourseNumber } from '@/lib/coursework/classification'
+import { normalizeSeason } from '@/lib/availability/normalizeSeason'
 
 export type MatchingPreviewFilters = {
   category?: string
@@ -169,12 +170,7 @@ function nameFromAuthMetadata(input: { firstName?: string; lastName?: string; em
 }
 
 function seasonFromMonth(value: string | null | undefined) {
-  const normalized = (value ?? '').trim().toLowerCase()
-  if (normalized.startsWith('jun') || normalized.startsWith('jul') || normalized.startsWith('aug')) return 'summer'
-  if (normalized.startsWith('sep') || normalized.startsWith('oct') || normalized.startsWith('nov')) return 'fall'
-  if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
-  if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
-  return ''
+  return normalizeSeason(value) ?? ''
 }
 
 function asArray<T>(value: T | T[] | null | undefined): T[] {

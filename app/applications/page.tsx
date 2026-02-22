@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
@@ -15,8 +16,6 @@ type ApplicationRow = {
   created_at: string | null
   submitted_at: string | null
   employer_viewed_at: string | null
-  match_score: number | null
-  match_reasons: unknown
   quick_apply_note: string | null
   ats_invite_status: string | null
   ats_invited_at: string | null
@@ -59,11 +58,6 @@ function formatDate(value: string | null | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'n/a'
   return date.toLocaleString()
-}
-
-function parseReasons(value: unknown) {
-  if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 2)
 }
 
 function normalizeInviteStatus(value: string | null | undefined) {
@@ -198,7 +192,7 @@ export default async function ApplicationsPage() {
   const { data: rawApplications } = await supabase
     .from('applications')
     .select(
-      'id, internship_id, status, created_at, submitted_at, employer_viewed_at, match_score, match_reasons, quick_apply_note, ats_invite_status, ats_invited_at, ats_invite_message, external_apply_required, external_apply_completed_at, external_apply_clicks, external_apply_last_clicked_at, internship:internships(id, title, company_name, employer_id, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults)'
+      'id, internship_id, status, created_at, submitted_at, employer_viewed_at, quick_apply_note, ats_invite_status, ats_invited_at, ats_invite_message, external_apply_required, external_apply_completed_at, external_apply_clicks, external_apply_last_clicked_at, internship:internships(id, title, company_name, employer_id, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults)'
     )
     .eq('student_id', user.id)
     .order('created_at', { ascending: false })
@@ -324,9 +318,9 @@ export default async function ApplicationsPage() {
           <div className="space-y-4">
             {applications.map((application) => {
               const status = asStatus(application.status)
-              const topReasons = parseReasons(application.match_reasons)
               const inviteStatus = normalizeInviteStatus(application.ats_invite_status)
               const messages = messagesByApplicationId.get(application.id) ?? []
+              const listingId = String(application.internship?.id ?? application.internship_id)
 
               return (
                 <div key={application.id} className="rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-5 shadow-sm">
@@ -345,43 +339,50 @@ export default async function ApplicationsPage() {
                       Quick Apply note: {application.quick_apply_note}
                     </div>
                   ) : null}
-                  {topReasons.length > 0 ? (
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-700">
-                      {topReasons.map((reason) => (
-                        <li key={`${application.id}-${reason}`}>{reason}</li>
-                      ))}
-                    </ul>
-                  ) : null}
+                  <div className="mt-2">
+                    <Link
+                      href={`/jobs/${encodeURIComponent(listingId)}#match-details`}
+                      className="text-xs font-medium text-blue-700 hover:underline"
+                    >
+                      View match details
+                    </Link>
+                  </div>
 
                   <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Messages</div>
-                    <div className="mt-2 space-y-2">
-                      {messages.length === 0 ? (
-                        <div className="text-xs text-slate-500">No messages yet.</div>
-                      ) : (
-                        messages.map((message) => (
-                          <div key={message.id} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs">
-                            <div className="font-medium text-slate-700">{message.sender_user_id === user.id ? 'You' : 'Employer'} · {formatDate(message.created_at)}</div>
-                            <div className="mt-1 whitespace-pre-wrap text-slate-800">{message.body}</div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <form action={sendMessageAction} className="mt-3 space-y-2">
-                      <input type="hidden" name="application_id" value={application.id} />
-                      <textarea
-                        name="message_body"
-                        rows={2}
-                        className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
-                        placeholder="Message employer..."
-                      />
-                      <button
-                        type="submit"
-                        className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                      >
-                        Send message
-                      </button>
-                    </form>
+                    <details open={messages.length > 0} className="group">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <span>Messages ({messages.length})</span>
+                        <span className="text-[11px] normal-case text-slate-500 group-open:hidden">Open</span>
+                        <span className="hidden text-[11px] normal-case text-slate-500 group-open:inline">Close</span>
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {messages.length === 0 ? (
+                          <div className="text-xs text-slate-500">No messages yet.</div>
+                        ) : (
+                          messages.map((message) => (
+                            <div key={message.id} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs">
+                              <div className="font-medium text-slate-700">{message.sender_user_id === user.id ? 'You' : 'Employer'} · {formatDate(message.created_at)}</div>
+                              <div className="mt-1 whitespace-pre-wrap text-slate-800">{message.body}</div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <form action={sendMessageAction} className="mt-3 space-y-2">
+                        <input type="hidden" name="application_id" value={application.id} />
+                        <textarea
+                          name="message_body"
+                          rows={2}
+                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                          placeholder="Message employer..."
+                        />
+                        <button
+                          type="submit"
+                          className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          Message employer
+                        </button>
+                      </form>
+                    </details>
                   </div>
                 </div>
               )

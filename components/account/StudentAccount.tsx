@@ -24,6 +24,7 @@ import {
 } from '@/lib/profileCompleteness'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { normalizeSkillsClient } from '@/lib/skills/normalizeSkillsClient'
+import { normalizeSeason } from '@/lib/availability/normalizeSeason'
 
 type StudentProfileRow = {
   university_id: string | number | null
@@ -71,7 +72,7 @@ const experienceLevels: Array<{ label: string; value: ExperienceLevel }> = [
   { label: "I've taken classes / built projects related to it", value: 'projects' },
   { label: "I've had an internship or role in the field", value: 'internship' },
 ]
-const seasons = ['Summer', 'Fall', 'Spring'] as const
+const seasons = ['Spring', 'Summer', 'Fall', 'Winter'] as const
 const months = [
   'January',
   'February',
@@ -153,13 +154,10 @@ function normalizeHoursPerWeek(value: number | string | null | undefined) {
 
 function defaultSeasonFromMonth(value: string | null) {
   if (!value) return ['Summer']
-  const normalized = value.toLowerCase()
-  if (normalized.startsWith('jan') || normalized.startsWith('feb') || normalized.startsWith('mar')) {
-    return ['Spring']
-  }
-  if (normalized.startsWith('sep') || normalized.startsWith('oct') || normalized.startsWith('nov')) {
-    return ['Fall']
-  }
+  const season = normalizeSeason(value)
+  if (season === 'spring') return ['Spring']
+  if (season === 'fall') return ['Fall']
+  if (season === 'winter') return ['Winter']
   return ['Summer']
 }
 
@@ -378,10 +376,8 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
       startMonth: Boolean(availabilityStartMonth.trim()),
       hours: Number(availabilityHoursPerWeek) > 0,
       coursework: coursework.length > 0,
-      seasons: availability.length > 0,
     }
   }, [
-    availability,
     availabilityHoursPerWeek,
     availabilityStartMonth,
     coursework.length,
@@ -935,10 +931,6 @@ function addCourseworkItem(value: string) {
       return
     }
 
-    if (availability.length === 0) {
-      setError('Select at least one season.')
-      return
-    }
     if (!firstName.trim() || !lastName.trim()) {
       setError('First name and last name are required.')
       return
@@ -1818,19 +1810,19 @@ function addCourseworkItem(value: string) {
             <p className="mt-1 text-xs text-slate-600">Used automatically when you apply if you do not upload a new file.</p>
           </div>
 
-          <div id="preferences" className={`${cardClass(!completionFlags.seasons)} sm:col-span-2`}>
-            {!completionFlags.seasons && (
-              <span className="absolute right-12 top-2 h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden />
-            )}
+          <div id="preferences" className={`${cardClass(false)} sm:col-span-2`}>
             <button
               type="button"
-              aria-label="Edit season preferences"
-              onClick={() => editField('season-summer')}
+              aria-label="Edit availability preferences"
+              onClick={() => editField('start-month-input')}
               className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-100"
             >
               <Pencil className="h-4 w-4" />
             </button>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Season preferences</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Availability preferences (optional)</div>
+            <p className="mt-2 text-sm text-slate-700">
+              Start month is your primary availability signal. Season preferences are optional fallback hints.
+            </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {availability.length > 0 ? (
                 availability.map((season) => (
@@ -1842,7 +1834,7 @@ function addCourseworkItem(value: string) {
                   </span>
                 ))
               ) : (
-                <span className="text-sm text-slate-700">Not set</span>
+                <span className="text-sm text-slate-700">No optional season preferences set.</span>
               )}
             </div>
             <div className="mt-3 text-sm text-slate-700">Remote OK: {remoteOk ? 'Yes' : 'No'}</div>
@@ -2112,6 +2104,7 @@ function addCourseworkItem(value: string) {
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-slate-500">Select the earliest month you can start.</p>
             </div>
 
             <div>
@@ -2355,8 +2348,9 @@ function addCourseworkItem(value: string) {
               </div>
             </div>
 
-            <div id="preferences" className="sm:col-span-2">
-              <div className="text-sm font-medium text-slate-700">Season preferences</div>
+            <details id="preferences" className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-slate-700">Advanced (optional): season preferences</summary>
+              <p className="mt-2 text-xs text-slate-500">Used only as fallback when start month is missing.</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {seasons.map((season) => {
                   const active = availability.includes(season)
@@ -2377,7 +2371,7 @@ function addCourseworkItem(value: string) {
                   )
                 })}
               </div>
-            </div>
+            </details>
 
             <div className="sm:col-span-2">
               <label className="inline-flex items-center gap-2 text-sm text-slate-700">

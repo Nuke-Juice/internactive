@@ -7,6 +7,7 @@ import { normalizeCatalogLabel, normalizeCatalogToken } from '@/lib/catalog/norm
 import { hasUniversitySpecificCourses } from '@/lib/coursework/universityCourseCatalog'
 import { normalizeCourseworkClient } from '@/lib/coursework/normalizeCourseworkClient'
 import { normalizeSkillsClient } from '@/lib/skills/normalizeSkillsClient'
+import { normalizeSeason } from '@/lib/availability/normalizeSeason'
 import {
   US_CITY_OPTIONS,
   isVerifiedCityForState,
@@ -176,12 +177,7 @@ function parseDelimitedTokens(value: string) {
 }
 
 function seasonFromMonth(value: string | null | undefined) {
-  const normalized = (value ?? '').trim().toLowerCase()
-  if (normalized.startsWith('jun') || normalized.startsWith('jul') || normalized.startsWith('aug')) return 'summer'
-  if (normalized.startsWith('sep') || normalized.startsWith('oct') || normalized.startsWith('nov')) return 'fall'
-  if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
-  if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
-  return ''
+  return normalizeSeason(value) ?? ''
 }
 
 function parseOnboardingInterests(value: string | null | undefined): ParsedOnboardingInterests {

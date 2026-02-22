@@ -1,12 +1,11 @@
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { ArrowLeft, BarChart3, Briefcase, FileText, LayoutDashboard, ShieldCheck, Star } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
-import { getMinimumProfileCompleteness, getMinimumProfileFieldLabel } from '@/lib/profileCompleteness'
 import { getStudentEntitlements, maybeExpireTrial } from '@/lib/student/entitlements'
 import PremiumLockedOverlay from '@/components/student/PremiumLockedOverlay'
-import AppNav from '@/components/navigation/AppNav'
 import { supabaseServer } from '@/lib/supabase/server'
+import { getStudentProfileCompleteness } from '@/src/profile/getStudentProfileCompleteness'
 
 type DashboardSectionSlug =
   | 'action-center'
@@ -80,6 +79,7 @@ export default async function StudentDashboardSectionPage({
 }) {
   const { section } = await params
   if (!isSectionSlug(section)) notFound()
+  if (section === 'profile-strength') redirect('/account')
 
   const meta = SECTION_META[section]
   const Icon = meta.icon
@@ -89,18 +89,7 @@ export default async function StudentDashboardSectionPage({
   await maybeExpireTrial(user.id, { supabase })
   const entitlements = await getStudentEntitlements(user.id, { supabase })
 
-  const [profileResult, applicationsResult, latestAnalysisResult, studentCategoriesResult, internshipsResult, latestResumeFileResult] = await Promise.all([
-    supabase
-      .from('student_profiles')
-      .select('school, major_id, majors, availability_start_month, availability_hours_per_week')
-      .eq('user_id', user.id)
-      .maybeSingle<{
-        school: string | null
-        major_id: string | null
-        majors: string[] | string | null
-        availability_start_month: string | null
-        availability_hours_per_week: number | string | null
-      }>(),
+  const [applicationsResult, latestAnalysisResult, studentCategoriesResult, internshipsResult] = await Promise.all([
     supabase
       .from('applications')
       .select('id, status, employer_viewed_at, match_score, match_reasons, created_at, internship:internships(id, title, company_name)')
@@ -127,24 +116,18 @@ export default async function StudentDashboardSectionPage({
       .select('id, internship_required_course_categories(category_id, category:canonical_course_categories(name))')
       .eq('is_active', true)
       .limit(250),
-    supabase
-      .from('student_resume_files')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('latest_version', true)
-      .order('uploaded_at', { ascending: false })
-      .limit(1)
-      .maybeSingle<{ id: string }>(),
   ])
 
-  const hasResumeOnFile = Boolean(latestResumeFileResult.data?.id)
-  const courseworkCount = (studentCategoriesResult.data ?? []).length
-  const profileCompleteness = getMinimumProfileCompleteness(profileResult.data ?? null)
-  const missingProfileLabels = profileCompleteness.missing.map((field) => getMinimumProfileFieldLabel(field))
-  const profileBasicsPercent = Math.round(((4 - missingProfileLabels.length) / 4) * 100)
-  const resumeStrengthPercent = hasResumeOnFile ? 100 : 0
-  const courseworkStrengthPercent = courseworkCount >= 5 ? 100 : courseworkCount >= 3 ? 80 : courseworkCount >= 1 ? 50 : 0
-  const profileStrengthPercent = Math.round(profileBasicsPercent * 0.6 + resumeStrengthPercent * 0.25 + courseworkStrengthPercent * 0.15)
+  const profileCompleteness = await getStudentProfileCompleteness({
+    supabase,
+    userId: user.id,
+    preloaded: {
+      resumePath: typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path : null,
+    },
+  })
+  const missingProfileLabels = profileCompleteness.missing.map((item) => item.label)
+  const hasResumeOnFile = profileCompleteness.breakdown.resumeUploaded
+  const courseworkCategoryCount = profileCompleteness.breakdown.derivedCourseworkCategoryCount
 
   const applications = (applicationsResult.data ?? []) as Array<{
     id: string
@@ -212,7 +195,7 @@ export default async function StudentDashboardSectionPage({
   const actionCenterItems = [
     hasResumeOnFile ? 'Refresh your resume with one quantified bullet.' : 'Upload a resume PDF to unlock stronger recommendations.',
     submittedCount < 2 ? 'Apply to at least 2 internships this week.' : 'Keep your application pace steady this week.',
-    courseworkCount < 3 ? 'Add more coursework categories to improve matching coverage.' : 'Review coursework tags for accuracy.',
+    courseworkCategoryCount < 1 ? 'Add coursework to improve matching coverage.' : 'Review coursework categories for accuracy.',
     missingProfileLabels.length > 0 ? `Complete profile: ${missingProfileLabels[0]}.` : 'Profile baseline is complete, keep details current.',
   ]
 
@@ -238,10 +221,6 @@ export default async function StudentDashboardSectionPage({
           </div>
         </div>
 
-        <div className="mt-6">
-          <AppNav role="student" variant="workspaceTabs" />
-        </div>
-
         <article className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           {section === 'action-center' ? (
             <ul className="space-y-3">
@@ -251,22 +230,6 @@ export default async function StudentDashboardSectionPage({
                 </li>
               ))}
             </ul>
-          ) : null}
-
-          {section === 'profile-strength' ? (
-            <div className="space-y-4">
-              <p className="text-4xl font-semibold text-slate-900">{profileStrengthPercent}%</p>
-              <div className="grid gap-2 md:grid-cols-3">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Profile basics: <span className="font-semibold">{profileBasicsPercent}%</span></div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Resume signal: <span className="font-semibold">{resumeStrengthPercent}%</span></div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Coursework depth: <span className="font-semibold">{courseworkStrengthPercent}%</span></div>
-              </div>
-              {missingProfileLabels.length > 0 ? (
-                <p className="text-sm text-slate-700">Missing profile basics: {missingProfileLabels.join(', ')}</p>
-              ) : (
-                <p className="text-sm text-slate-700">Profile basics are complete.</p>
-              )}
-            </div>
           ) : null}
 
           {section === 'application-analytics' ? (
@@ -315,7 +278,7 @@ export default async function StudentDashboardSectionPage({
 
           {section === 'course-strategy' ? (
             <div className="space-y-4">
-              <p className="text-sm text-slate-700">Current coursework tags: <span className="font-semibold">{courseworkCount}</span></p>
+              <p className="text-sm text-slate-700">Current coursework categories: <span className="font-semibold">{courseworkCategoryCount}</span></p>
               <PremiumLockedOverlay
                 locked={!entitlements.isPremiumActive}
                 title="Premium course strategy"
@@ -331,7 +294,7 @@ export default async function StudentDashboardSectionPage({
                     ))
                   ) : (
                     <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                      Not enough data yet. Add coursework tags and we will expand recommendations.
+                      Not enough data yet. Add coursework and we will expand recommendations.
                     </p>
                   )}
                 </div>

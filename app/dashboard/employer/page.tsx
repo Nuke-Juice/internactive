@@ -517,6 +517,13 @@ export default async function EmployerDashboardPage({
         : parseCommaList(formatMajors(editingInternship?.majors ?? ''))
   const verificationSummary = await getEmployerVerificationStatus({ supabase, userId: user.id })
   const { plan } = verificationSummary
+  const employerVerificationTier =
+    normalizeEmployerVerificationTier(plan.id) ?? (verificationSummary.isVerifiedEmployer ? 'pro' : 'free')
+  await supabase
+    .from('internships')
+    .update({ employer_verification_tier: employerVerificationTier })
+    .eq('employer_id', user.id)
+    .or(`employer_verification_tier.is.null,employer_verification_tier.neq.${employerVerificationTier}`)
   const { data: conciergeRequests } = launchConciergeEnabled && !createOnly
     ? await supabase
         .from('employer_concierge_requests')
@@ -1610,7 +1617,8 @@ export default async function EmployerDashboardPage({
         ),
       }
     : null
-  const showUpgradeModal = isPlanLimitReachedCode(resolvedSearchParams?.code) && isActuallyAtPlanLimit
+  const canUpgradePlan = plan.id !== 'pro'
+  const showUpgradeModal = canUpgradePlan && isPlanLimitReachedCode(resolvedSearchParams?.code) && isActuallyAtPlanLimit
   const internshipTotal = internshipCounts.totalCount
   const showCreateInternshipForm =
     createOnly ||
@@ -1732,6 +1740,7 @@ export default async function EmployerDashboardPage({
                 atLimit={plan.maxActiveInternships !== null && activeInternshipsCount >= plan.maxActiveInternships}
                 activeCount={activeInternshipsCount}
                 planLimit={plan.maxActiveInternships}
+                canUpgrade={canUpgradePlan}
               />
               <span className="text-xs text-slate-500 sm:text-right">{internshipTotal} total</span>
             </div>

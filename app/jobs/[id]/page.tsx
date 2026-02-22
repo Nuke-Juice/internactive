@@ -1,21 +1,19 @@
 import Link from 'next/link'
-import {
-  ArrowLeft,
-  Briefcase,
-  FileText,
-  ShieldCheck,
-  Star,
-  Users,
-} from 'lucide-react'
+import { ArrowLeft, FileText, ShieldCheck, Star, Users } from 'lucide-react'
 import EmployerVerificationBadge from '@/components/badges/EmployerVerificationBadge'
+import MatchScoreCircleButton from '@/components/jobs/MatchScoreCircleButton'
+import { getMatchScoreTone } from '@/components/jobs/getMatchScoreTone'
+import { getEmployerVerificationTier } from '@/lib/billing/subscriptions'
 import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getCommuteMinutesForListings, toGeoPoint } from '@/lib/commute'
 import { supabaseServer } from '@/lib/supabase/server'
 import { evaluateInternshipMatch, MATCH_SIGNAL_DEFINITIONS, parseMajors } from '@/lib/matching'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
+import { normalizeSeason } from '@/lib/availability/normalizeSeason'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
-import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
+import { formatCompleteness } from '@/src/profile/profileCompleteness'
+import { getStudentProfileCompleteness } from '@/src/profile/getStudentProfileCompleteness'
 import ApplyModalLauncher from '../_components/ApplyModalLauncher'
 
 function formatMajors(value: string[] | string | null) {
@@ -33,15 +31,6 @@ function formatTargetYear(value: string | null | undefined) {
   if (normalized === 'junior') return 'Junior'
   if (normalized === 'senior') return 'Senior'
   return value
-}
-
-function seasonFromMonth(value: string | null | undefined) {
-  const normalized = (value ?? '').trim().toLowerCase()
-  if (normalized.startsWith('jun') || normalized.startsWith('jul') || normalized.startsWith('aug')) return 'summer'
-  if (normalized.startsWith('sep') || normalized.startsWith('oct') || normalized.startsWith('nov')) return 'fall'
-  if (normalized.startsWith('dec') || normalized.startsWith('jan') || normalized.startsWith('feb')) return 'winter'
-  if (normalized.startsWith('mar') || normalized.startsWith('apr') || normalized.startsWith('may')) return 'spring'
-  return ''
 }
 
 function fallbackPreferredLocation(city: string | null | undefined, state: string | null | undefined) {
@@ -100,14 +89,7 @@ function normalizeSkillChipToken(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
-function scoreLabel(score: number | null, insufficientData: boolean, noSkillSignals: boolean) {
-  if (insufficientData) {
-    return {
-      title: 'Personalized match insights',
-      badge: noSkillSignals ? 'Add skills for scoring' : 'Profile needed',
-      tone: 'pending' as const,
-    }
-  }
+function scoreLabel(score: number | null) {
   if (score === null) {
     return { title: 'How you match', badge: 'Match pending', tone: 'pending' as const }
   }
@@ -116,20 +98,12 @@ function scoreLabel(score: number | null, insufficientData: boolean, noSkillSign
   return { title: 'Match details', badge: 'Low match', tone: 'low' as const }
 }
 
-function missingProfileFieldLabel(value: string) {
-  if (value === 'school') return 'School'
-  if (value === 'major') return 'Major'
-  if (value === 'availability_start_month') return 'Availability start month'
-  if (value === 'availability_hours_per_week') return 'Hours per week'
-  return value
-}
-
 function gapCta(gap: string) {
   const normalized = gap.toLowerCase()
   if (normalized.includes('missing required skills')) {
     return { href: '/account#skills', label: 'Add skills' }
   }
-  if (normalized.includes('hours exceed availability') || normalized.includes('availability')) {
+  if (normalized.includes('hours exceed availability') || normalized.includes('availability') || normalized.includes('late start')) {
     return { href: '/account#availability', label: 'Update availability' }
   }
   if (
@@ -292,6 +266,17 @@ export default async function JobDetailPage({
     }
   }
 
+  if (listing?.employer_id) {
+    const derivedTier = await getEmployerVerificationTier({
+      supabase,
+      userId: listing.employer_id,
+    })
+    listing = {
+      ...listing,
+      employer_verification_tier: derivedTier,
+    }
+  }
+
   let matchBreakdown:
     | {
         scorePercent: number
@@ -304,7 +289,14 @@ export default async function JobDetailPage({
           summary: string
           reasons: Array<{ text: string; points: number }>
           gaps: Array<{ text: string }>
-          status: 'ok' | 'missing_data' | 'blocked'
+          status: 'good' | 'partial' | 'gap' | 'unknown'
+          couldImprove?: string | null
+          availabilityFit?: {
+            hours_fit: { score: number; max: number; label: string }
+            term_fit: { score: number; max: number; label: string }
+            category_score: number
+            status: 'good' | 'partial' | 'gap' | 'unknown'
+          }
         }>
         signalContributions?: Array<{
           signalKey: string
@@ -315,11 +307,10 @@ export default async function JobDetailPage({
         }>
       }
     | null = null
-  let insufficientMatchData = true
-  let missingMatchFields: string[] = []
-  let missingSkillSignals = false
+  let profileCompletionPercent = 0
   let commuteMinutes: number | null = null
   let maxCommuteMinutes: number | null = null
+  let employerAvatarUrl: string | null = null
   let requiredCustomSkillTokens = new Set<string>()
   let preferredCustomSkillTokens = new Set<string>()
   if (user && userRole === 'student' && listing) {
@@ -403,15 +394,22 @@ export default async function JobDetailPage({
           ? [profilePreferredLocation]
           : []
     const combinedProfileSkills = Array.from(new Set([...preferenceSignals.skills, ...canonicalSkillLabels, ...customSkillLabels]))
-    const minimumCompleteness = getMinimumProfileCompleteness(profile)
-    missingMatchFields = minimumCompleteness.missing
-    missingSkillSignals = combinedProfileSkills.length === 0
-    insufficientMatchData =
-      !minimumCompleteness.ok ||
-      (combinedProfileSkills.length === 0 &&
-        !courseworkFeatures.coverage.hasCanonical &&
-        !courseworkFeatures.coverage.hasLegacy &&
-        !courseworkFeatures.coverage.hasText)
+    const profileCompleteness = await getStudentProfileCompleteness({
+      supabase,
+      userId: user.id,
+      preloaded: {
+        profile: profile ?? null,
+        resumePath: typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path : null,
+        skillsCount: combinedProfileSkills.length,
+        courseworkFeatures: {
+          courseCount: coursework.length,
+          canonicalCategoryIds: courseworkFeatures.canonicalCategoryIds,
+          textCoursework: courseworkFeatures.textCoursework,
+          unverifiedText: courseworkFeatures.unverifiedText,
+        },
+      },
+    })
+    profileCompletionPercent = formatCompleteness(profileCompleteness.percent)
     const normalizedListingCoursework = normalizeListingCoursework({
       internship_required_course_categories: listing.internship_required_course_categories,
       internship_coursework_category_links: listing.internship_coursework_category_links,
@@ -500,7 +498,10 @@ export default async function JobDetailPage({
           preferenceSignals.preferredTerms.length > 0
             ? preferenceSignals.preferredTerms
             : profile?.availability_start_month
-              ? [seasonFromMonth(profile.availability_start_month)]
+              ? (() => {
+                  const season = normalizeSeason(profile.availability_start_month)
+                  return season ? [season] : []
+                })()
               : [],
         preferred_locations: preferredLocations,
         preferred_work_modes: preferenceSignals.preferredWorkModes,
@@ -529,17 +530,19 @@ export default async function JobDetailPage({
 
     matchBreakdown = {
       scorePercent: typeof match.breakdown?.total_score === 'number' ? match.breakdown.total_score : match.score,
-      categories: (match.breakdown?.categories ?? []).map((item) => ({
-        key: item.key,
-        label: item.label,
-        weightPoints: item.weight_points,
-        achievedFraction: item.achieved_fraction,
-        earnedPoints: item.earned_points,
-        summary: item.summary,
-        reasons: item.reasons,
-        gaps: item.gaps,
-        status: item.status,
-      })),
+        categories: (match.breakdown?.categories ?? []).map((item) => ({
+          key: item.key,
+          label: item.label,
+          weightPoints: item.weight_points,
+          achievedFraction: item.achieved_fraction,
+          earnedPoints: item.earned_points,
+          summary: item.summary,
+          reasons: item.reasons,
+          gaps: item.gaps,
+          status: item.status,
+          couldImprove: item.could_improve ?? null,
+          availabilityFit: item.availability_fit,
+        })),
       signalContributions: match.breakdown?.perSignalContributions.map((item) => ({
         signalKey: item.signalKey,
         pointsAwarded: item.pointsAwarded,
@@ -574,11 +577,12 @@ export default async function JobDetailPage({
     if (listing.employer_id) {
       const { data: employerProfile } = await supabase
         .from('employer_profiles')
-        .select('location, location_lat, location_lng')
+        .select('location, location_lat, location_lng, avatar_url')
         .eq('user_id', listing.employer_id)
         .maybeSingle()
       if (employerProfile) {
         const parsed = parseCityState(employerProfile.location ?? null)
+        employerAvatarUrl = typeof employerProfile.avatar_url === 'string' ? employerProfile.avatar_url : null
         fallbackEmployerLocation = {
           city: parsed.city,
           state: parsed.state,
@@ -659,7 +663,7 @@ export default async function JobDetailPage({
     typeof responseStatsRow?.applications_total === 'number' ? responseStatsRow.applications_total : 0
   const employerResponseRate =
     typeof responseStatsRow?.viewed_within_7d_rate === 'number' ? responseStatsRow.viewed_within_7d_rate : null
-  const scoreUi = scoreLabel(matchBreakdown?.scorePercent ?? null, insufficientMatchData, missingSkillSignals)
+  const scoreUi = scoreLabel(matchBreakdown?.scorePercent ?? null)
   const showMatchDebug = resolvedSearchParams?.debug_match === '1'
   const screeningQuestion = parseScreeningQuestion(listing.description)
   const structuredResponsibilities = Array.isArray(listing.responsibilities)
@@ -676,31 +680,61 @@ export default async function JobDetailPage({
     structuredQualifications.length > 0 ||
     parsedRoleOverviewBullets.length > 0 ||
     Boolean(listing.description?.trim())
-  const scoreToneClasses =
-    scoreUi.tone === 'high'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-      : scoreUi.tone === 'medium'
-        ? 'border-amber-200 bg-amber-50 text-amber-800'
-        : scoreUi.tone === 'low'
-          ? 'border-slate-300 bg-slate-100 text-slate-700'
-          : 'border-blue-200 bg-blue-50 text-blue-800'
-  const scoreCircleClasses =
-    scoreUi.tone === 'high'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-      : scoreUi.tone === 'medium'
-        ? 'border-amber-200 bg-amber-50 text-amber-800'
-        : scoreUi.tone === 'low'
-          ? 'border-slate-300 bg-slate-100 text-slate-700'
-          : 'border-blue-200 bg-blue-50 text-blue-800'
-  const scoreCircleValue = insufficientMatchData
-    ? '—'
-      : (matchBreakdown?.scorePercent ?? 0) <= 0
+  const scoreCircleClasses = getMatchScoreTone(matchBreakdown?.scorePercent ?? null)
+  const scoreCircleValue = (matchBreakdown?.scorePercent ?? 0) <= 0
       ? 'Low'
       : String(Math.round(matchBreakdown?.scorePercent ?? 0))
-  const scoredCategories = (matchBreakdown?.categories ?? []).filter((category) => category.earnedPoints > 0)
-  const gapCategories = (matchBreakdown?.categories ?? []).filter(
-    (category) => category.gaps.length > 0 || category.earnedPoints <= 0
+  const reasonCategories = (matchBreakdown?.categories ?? []).filter(
+    (category) => category.status === 'good' || category.status === 'partial'
   )
+  const gapCategories = (matchBreakdown?.categories ?? []).filter((category) => category.status === 'gap')
+  const rowTone = (status: 'good' | 'partial' | 'gap' | 'unknown') => {
+    if (status === 'good') {
+      return {
+        card: 'border-l-2 border-l-emerald-500 border-slate-200 bg-white',
+        badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        label: 'Good',
+      }
+    }
+    if (status === 'partial') {
+      return {
+        card: 'border-l-2 border-l-amber-500 border-slate-200 bg-white',
+        badge: 'border-amber-200 bg-amber-50 text-amber-700',
+        label: 'Partial',
+      }
+    }
+    if (status === 'gap') {
+      return {
+        card: 'border-l-2 border-l-rose-500 border-slate-200 bg-white',
+        badge: 'border-rose-200 bg-rose-50 text-rose-700',
+        label: 'Gap',
+      }
+    }
+    return {
+      card: 'border-l-2 border-l-slate-300 border-slate-200 bg-white',
+      badge: 'border-slate-200 bg-slate-100 text-slate-700',
+      label: 'Unknown',
+    }
+  }
+  const conciseLines = (category: (typeof reasonCategories)[number] | (typeof gapCategories)[number]) => {
+    const normalizeLine = (value: string) =>
+      value
+        .replace(/\s*\(\+\d+(?:\.\d+)?\)\s*$/i, '')
+        .replace(/^[^:]+:\s*/, '')
+        .trim()
+    if (category.status === 'gap') {
+      return category.gaps.slice(0, 2).map((item) => normalizeLine(item.text)).filter(Boolean)
+    }
+    return category.reasons.slice(0, 2).map((item) => normalizeLine(item.text)).filter(Boolean)
+  }
+  const metadataParts = [
+    listing.location || 'Location TBD',
+    listing.work_mode || null,
+    listing.term || null,
+    typeof listing.hours_per_week === 'number' ? `${listing.hours_per_week} hrs/week` : null,
+    formatTargetYear((listing as { target_student_year?: string | null }).target_student_year ?? listing.experience_level) || null,
+  ].filter((value): value is string => Boolean(value))
+  const companyInitial = (listing.company_name ?? 'C').trim().charAt(0).toUpperCase()
   const deadlineDate = listing.application_deadline ? new Date(listing.application_deadline) : null
   const nowMs = new Date().getTime()
   const daysToDeadline =
@@ -732,118 +766,218 @@ export default async function JobDetailPage({
           <div className="space-y-6">
             <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{listing.title || 'Internship'}</h1>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-                    {listing.employer_id ? (
-                      <Link
-                        href={`/employers/${encodeURIComponent(listing.employer_id)}`}
-                        className="font-medium text-slate-700 hover:text-blue-700 hover:underline"
-                      >
-                        {listing.company_name || 'Company'}
-                      </Link>
+                <div className="min-w-0 flex items-start gap-3">
+                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+                    {employerAvatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={employerAvatarUrl} alt={`${listing.company_name ?? 'Company'} logo`} className="h-full w-full object-cover" />
                     ) : (
-                      <span className="font-medium text-slate-700">{listing.company_name || 'Company'}</span>
+                      <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-slate-600">{companyInitial}</div>
                     )}
-                    <EmployerVerificationBadge tier={listing.employer_verification_tier ?? 'free'} />
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">{listing.title || 'Internship'}</h1>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                      {listing.employer_id ? (
+                        <Link
+                          href={`/employers/${encodeURIComponent(listing.employer_id)}`}
+                          className="font-medium text-slate-700 hover:text-blue-700 hover:underline"
+                        >
+                          {listing.company_name || 'Company'}
+                        </Link>
+                      ) : (
+                        <span className="font-medium text-slate-700">{listing.company_name || 'Company'}</span>
+                      )}
+                      <EmployerVerificationBadge tier={listing.employer_verification_tier ?? 'free'} />
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  {isDeadlineSoon ? (
-                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
-                      Deadline soon
-                    </span>
-                  ) : null}
                   {userRole === 'student' ? (
-                    <div className="flex flex-col items-center">
-                      <div className={`grid h-24 w-24 place-items-center rounded-full border-2 ${scoreCircleClasses}`}>
-                        <span className="text-2xl font-semibold leading-none">{scoreCircleValue}</span>
-                      </div>
-                      <p className="mt-2 text-xs font-semibold text-slate-700">{scoreUi.badge}</p>
-                      {insufficientMatchData ? (
-                        <p className="mt-1 max-w-[9rem] text-center text-[11px] text-slate-500">
-                          Complete your profile to calculate your match.
-                        </p>
-                      ) : null}
+                    <div className="flex flex-col items-center gap-2">
+                      <MatchScoreCircleButton value={scoreCircleValue} className={scoreCircleClasses} />
                     </div>
                   ) : null}
                 </div>
               </div>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <Briefcase className="h-3.5 w-3.5" />
-                    Location
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">{listing.location || 'TBD'}</div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <Briefcase className="h-3.5 w-3.5" />
-                    Work mode
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">{listing.work_mode || 'Not specified'}</div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <FileText className="h-3.5 w-3.5" />
-                    Term
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">{listing.term || 'Open term'}</div>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <Star className="h-3.5 w-3.5" />
-                    Year in school
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">
-                    {formatTargetYear((listing as { target_student_year?: string | null }).target_student_year ?? listing.experience_level) ||
-                      'Any year'}
-                  </div>
-                </div>
-                {typeof listing.hours_per_week === 'number' ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hours/week</div>
-                    <div className="mt-1 text-base font-semibold text-slate-900">{listing.hours_per_week}</div>
-                  </div>
-                ) : null}
-                {typeof commuteMinutes === 'number' ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estimated commute</div>
-                    <div
-                      className={`mt-1 text-base font-semibold ${
-                        typeof maxCommuteMinutes === 'number' && commuteMinutes > maxCommuteMinutes
-                          ? 'text-amber-700'
-                          : 'text-slate-900'
-                      }`}
-                    >
-                      ~{commuteMinutes} min
-                    </div>
-                  </div>
-                ) : null}
-                {listing.majors ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:col-span-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Majors targeted</div>
-                    <div className="mt-1 text-sm text-slate-800">{formatMajors(listing.majors)}</div>
-                  </div>
-                ) : null}
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:col-span-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <Users className="h-3.5 w-3.5" />
-                    Applicants
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">
-                    {applicationsCount} of {applicationCap} spots filled
-                  </div>
-                </div>
-                {Array.isArray(listing.recommended_coursework) && listing.recommended_coursework.length > 0 ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:col-span-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recommended coursework</div>
-                    <div className="mt-1 text-sm text-slate-800">{listing.recommended_coursework.join(', ')}</div>
-                  </div>
+              <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
+                {metadataParts.map((part, index) => (
+                  <span key={`${part}:${index}`} className="inline-flex items-center gap-2">
+                    {index > 0 ? <span className="text-slate-400">•</span> : null}
+                    {part}
+                  </span>
+                ))}
+                {isDeadlineSoon ? (
+                  <span className="ml-1 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                    Deadline soon
+                  </span>
                 ) : null}
               </div>
+              {listing.majors ? (
+                <p className="mt-3 text-sm text-slate-600">
+                  <span className="font-medium text-slate-700">Target majors:</span> {formatMajors(listing.majors)}
+                </p>
+              ) : null}
+              {typeof commuteMinutes === 'number' ? (
+                <p className="mt-1 text-sm text-slate-600">
+                  <span className="font-medium text-slate-700">Estimated commute:</span>{' '}
+                  <span className={typeof maxCommuteMinutes === 'number' && commuteMinutes > maxCommuteMinutes ? 'text-amber-700' : 'text-slate-600'}>
+                    ~{commuteMinutes} min
+                  </span>
+                </p>
+              ) : null}
+              {Array.isArray(listing.recommended_coursework) && listing.recommended_coursework.length > 0 ? (
+                <p className="mt-1 text-sm text-slate-600">
+                  <span className="font-medium text-slate-700">Recommended coursework:</span> {listing.recommended_coursework.join(', ')}
+                </p>
+              ) : null}
+            </section>
+
+            <section id="match-details" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-semibold text-slate-900">{scoreUi.title}</h2>
+              </div>
+              {!user ? (
+                <p className="mt-2 text-sm text-slate-600">Sign in to see your personalized match breakdown.</p>
+              ) : userRole !== 'student' ? (
+                <p className="mt-2 text-sm text-slate-600">Match breakdown is available for student accounts.</p>
+              ) : !matchBreakdown ? (
+                <p className="mt-2 text-sm text-slate-600">Match breakdown unavailable.</p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-700">
+                        <Star className="h-3.5 w-3.5" />
+                        Reasons
+                      </div>
+                      {reasonCategories.length > 0 ? (
+                        <ul className="mt-2 space-y-1.5">
+                          {reasonCategories.map((category) => {
+                            const percent = category.weightPoints > 0 ? Math.round((category.earnedPoints / category.weightPoints) * 100) : 0
+                            const tone = rowTone(category.status)
+                            const lines = conciseLines(category)
+                            return (
+                            <li key={`reason:${category.key}`} className={`rounded-md border px-3 py-1.5 text-sm text-slate-900 ${tone.card}`}>
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
+                                <span>{category.label} - {Math.round(category.weightPoints)}%</span>
+                                <div className="flex items-center gap-2">
+                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.badge}`}>
+                                    {tone.label}
+                                  </span>
+                                  <span>{percent}% • {category.earnedPoints.toFixed(1)}/{category.weightPoints}</span>
+                                </div>
+                              </div>
+                              {lines.length > 0 ? (
+                                <div className="mt-1 space-y-0.5 text-xs text-slate-700">
+                                  {lines.map((line) => (
+                                    <p key={`${category.key}:${line}`}>{line}</p>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </li>
+                          )})}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-sm text-slate-600">No strong overlaps yet. Add skills/coursework to improve this score.</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        Gaps
+                      </div>
+                      {gapCategories.length > 0 ? (
+                        <ul className="mt-2 space-y-1.5">
+                          {gapCategories.map((category) => {
+                            const primaryGap = category.gaps[0]?.text ?? `${category.label} not enough data yet`
+                            const cta = gapCta(primaryGap)
+                            const percent = category.weightPoints > 0 ? Math.round((category.earnedPoints / category.weightPoints) * 100) : 0
+                            const tone = rowTone(category.status)
+                            const lines = conciseLines(category)
+                            return (
+                              <li key={`gap:${category.key}`} className={`rounded-md border px-3 py-1.5 text-sm ${tone.card}`}>
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-rose-900">
+                                  <span>{category.label} - {Math.round(category.weightPoints)}%</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.badge}`}>
+                                      {tone.label}
+                                    </span>
+                                    <span>{percent}% • {category.earnedPoints.toFixed(1)}/{category.weightPoints}</span>
+                                  </div>
+                                </div>
+                                {lines.length > 0 ? (
+                                  <div className="mt-1 space-y-0.5 text-xs text-rose-900">
+                                    {lines.map((line) => (
+                                      <p key={`${category.key}:gap:${line}`}>{line}</p>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="mt-1 text-xs text-rose-900">{primaryGap}</div>
+                                )}
+                                {cta ? <p className="mt-1 text-xs text-rose-800">Fix: {cta.label}.</p> : null}
+                                {cta ? (
+                                  <Link href={cta.href} className="mt-1 inline-flex text-xs font-medium text-blue-700 hover:underline">
+                                    {cta.label}
+                                  </Link>
+                                ) : null}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-sm text-slate-600">No major gaps detected.</p>
+                      )}
+                    </div>
+
+                    {showMatchDebug && matchBreakdown.signalContributions && matchBreakdown.signalContributions.length > 0 ? (
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                          <FileText className="h-3.5 w-3.5" />
+                          Score factors (debug)
+                        </div>
+                        <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
+                          <table className="min-w-full divide-y divide-slate-200 text-xs">
+                            <thead className="bg-slate-50 text-slate-600">
+                              <tr>
+                                <th className="px-3 py-2 text-left font-semibold">Signal</th>
+                                <th className="px-3 py-2 text-left font-semibold">Points</th>
+                                <th className="px-3 py-2 text-left font-semibold">Raw</th>
+                                <th className="px-3 py-2 text-left font-semibold">Weight</th>
+                                <th className="px-3 py-2 text-left font-semibold">Evidence</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                              {matchBreakdown.signalContributions
+                                .slice()
+                                .sort((a, b) => Math.abs(b.pointsAwarded) - Math.abs(a.pointsAwarded))
+                                .map((item) => {
+                                  const definition = MATCH_SIGNAL_DEFINITIONS[item.signalKey as keyof typeof MATCH_SIGNAL_DEFINITIONS]
+                                  return (
+                                    <tr key={item.signalKey}>
+                                      <td className="px-3 py-2">{definition?.label ?? item.signalKey}</td>
+                                      <td className={`px-3 py-2 font-semibold ${item.pointsAwarded < 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                        {item.pointsAwarded > 0 ? '+' : ''}
+                                        {item.pointsAwarded.toFixed(2)}
+                                      </td>
+                                      <td className="px-3 py-2">{item.rawMatchValue.toFixed(2)}</td>
+                                      <td className="px-3 py-2">{item.weight.toFixed(2)}</td>
+                                      <td className="px-3 py-2">{item.evidence.slice(0, 2).join(' | ') || 'n/a'}</td>
+                                    </tr>
+                                  )
+                                })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Developer diagnostics enabled via <code>?debug_match=1</code>.
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              )}
             </section>
 
             {hasRoleOverviewContent ? (
@@ -928,157 +1062,6 @@ export default async function JobDetailPage({
                 </div>
               </section>
             ) : null}
-
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-semibold text-slate-900">{scoreUi.title}</h2>
-              </div>
-              {!user ? (
-                <p className="mt-2 text-sm text-slate-600">Sign in to see your personalized match breakdown.</p>
-              ) : userRole !== 'student' ? (
-                <p className="mt-2 text-sm text-slate-600">Match breakdown is available for student accounts.</p>
-              ) : insufficientMatchData ? (
-                <div className="mt-3 space-y-3">
-                  <p className="text-sm text-slate-700">
-                    {missingSkillSignals ? 'Add at least one skill to calculate a stronger match.' : 'Complete your profile to unlock full match insights.'}
-                  </p>
-                  {missingMatchFields.length > 0 ? (
-                    <ul className="space-y-2">
-                      {missingMatchFields.map((field) => (
-                        <li key={field} className="flex items-center gap-2 text-sm text-slate-700">
-                          <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-                          {missingProfileFieldLabel(field)}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  <Link
-                    href={missingSkillSignals ? '/account#skills' : '/account?complete=1'}
-                    className="inline-flex text-sm font-medium text-blue-700 hover:text-blue-800 hover:underline"
-                  >
-                    {missingSkillSignals ? 'Add skills' : 'Update profile'}
-                  </Link>
-                </div>
-              ) : !matchBreakdown ? (
-                <p className="mt-2 text-sm text-slate-600">Match breakdown unavailable.</p>
-              ) : (
-                <div className="mt-4 grid gap-4 md:grid-cols-[160px_1fr]">
-                  <div className={`rounded-xl border p-4 ${scoreToneClasses}`}>
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Match score</div>
-                    <div className="mt-1 text-3xl font-semibold text-slate-900">{matchBreakdown.scorePercent.toFixed(1)}</div>
-                    <div className="text-xs text-slate-500">out of 100</div>
-                    <div className="mt-1 text-[11px] text-slate-500">Based on 5 categories (100% total)</div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                        <Star className="h-3.5 w-3.5" />
-                        Reasons
-                      </div>
-                      {scoredCategories.length > 0 ? (
-                        <ul className="mt-2 space-y-2">
-                          {scoredCategories.map((category) => (
-                            <li key={`reason:${category.key}`} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
-                                <span>{category.label} - {Math.round(category.weightPoints)}%</span>
-                                <span>{Math.round(category.achievedFraction * 100)}% • {category.earnedPoints.toFixed(1)}/{category.weightPoints}</span>
-                              </div>
-                              <div className="mt-1 text-xs text-emerald-800">{category.summary}</div>
-                              {category.reasons.length > 0 ? (
-                                <ul className="mt-1 list-disc space-y-1 pl-4 text-xs">
-                                  {category.reasons.slice(0, 3).map((reason) => (
-                                    <li key={`${category.key}:${reason.text}`}>{reason.text}</li>
-                                  ))}
-                                </ul>
-                              ) : null}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-2 text-sm text-slate-600">No strong overlaps yet. Add skills/coursework to improve this score.</p>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        Gaps
-                      </div>
-                      {gapCategories.length > 0 ? (
-                        <ul className="mt-2 space-y-2">
-                          {gapCategories.map((category) => {
-                            const primaryGap = category.gaps[0]?.text ?? `${category.label} not enough data yet`
-                            const cta = gapCta(primaryGap)
-                            return (
-                              <li key={`gap:${category.key}`} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
-                                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-amber-900">
-                                  <span>{category.label} - {Math.round(category.weightPoints)}%</span>
-                                  <span>{category.earnedPoints.toFixed(1)}/{category.weightPoints}</span>
-                                </div>
-                                <div className="mt-1 text-amber-900">{primaryGap}</div>
-                                {cta ? (
-                                  <Link href={cta.href} className="mt-1 inline-flex text-xs font-medium text-blue-700 hover:underline">
-                                    {cta.label}
-                                  </Link>
-                                ) : null}
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      ) : (
-                        <p className="mt-2 text-sm text-slate-600">No major gaps detected.</p>
-                      )}
-                    </div>
-
-                    {showMatchDebug && matchBreakdown.signalContributions && matchBreakdown.signalContributions.length > 0 ? (
-                      <div>
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
-                          <FileText className="h-3.5 w-3.5" />
-                          Score factors (debug)
-                        </div>
-                        <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
-                          <table className="min-w-full divide-y divide-slate-200 text-xs">
-                            <thead className="bg-slate-50 text-slate-600">
-                              <tr>
-                                <th className="px-3 py-2 text-left font-semibold">Signal</th>
-                                <th className="px-3 py-2 text-left font-semibold">Points</th>
-                                <th className="px-3 py-2 text-left font-semibold">Raw</th>
-                                <th className="px-3 py-2 text-left font-semibold">Weight</th>
-                                <th className="px-3 py-2 text-left font-semibold">Evidence</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
-                              {matchBreakdown.signalContributions
-                                .slice()
-                                .sort((a, b) => Math.abs(b.pointsAwarded) - Math.abs(a.pointsAwarded))
-                                .map((item) => {
-                                  const definition = MATCH_SIGNAL_DEFINITIONS[item.signalKey as keyof typeof MATCH_SIGNAL_DEFINITIONS]
-                                  return (
-                                    <tr key={item.signalKey}>
-                                      <td className="px-3 py-2">{definition?.label ?? item.signalKey}</td>
-                                      <td className={`px-3 py-2 font-semibold ${item.pointsAwarded < 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
-                                        {item.pointsAwarded > 0 ? '+' : ''}
-                                        {item.pointsAwarded.toFixed(2)}
-                                      </td>
-                                      <td className="px-3 py-2">{item.rawMatchValue.toFixed(2)}</td>
-                                      <td className="px-3 py-2">{item.weight.toFixed(2)}</td>
-                                      <td className="px-3 py-2">{item.evidence.slice(0, 2).join(' | ') || 'n/a'}</td>
-                                    </tr>
-                                  )
-                                })}
-                            </tbody>
-                          </table>
-                        </div>
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          Developer diagnostics enabled via <code>?debug_match=1</code>.
-                        </p>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-            </section>
           </div>
 
           <aside className="lg:sticky lg:top-6 lg:self-start">
@@ -1096,55 +1079,18 @@ export default async function JobDetailPage({
                     <Users className="h-3.5 w-3.5" />
                     Applicants
                   </span>
-                  <span className="text-right font-semibold">{applicationsCount} / {applicationCap}</span>
+                  <span className="text-right text-sm font-semibold">{applicationsCount} / {applicationCap}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center gap-1 text-slate-600">
-                    <Briefcase className="h-3.5 w-3.5" />
-                    Company
-                  </span>
+                <div className="grid grid-cols-[84px_1fr] items-start gap-2">
+                  <span className="text-slate-600">Company</span>
                   {listing.employer_id ? (
-                    <Link href={`/employers/${encodeURIComponent(listing.employer_id)}`} className="font-medium text-blue-800 hover:underline">
+                    <Link href={`/employers/${encodeURIComponent(listing.employer_id)}`} className="text-right font-medium text-blue-800 hover:underline">
                       {listing.company_name || 'Company'}
                     </Link>
                   ) : (
-                    <span className="font-medium">{listing.company_name || 'Company'}</span>
+                    <span className="text-right font-medium">{listing.company_name || 'Company'}</span>
                   )}
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="inline-flex items-center gap-1 text-slate-600">
-                    <Briefcase className="h-3.5 w-3.5" />
-                    Location
-                  </span>
-                  <span className="text-right font-semibold">{listing.location || 'TBD'}</span>
-                </div>
-                {listing.term ? (
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1 text-slate-600">
-                      <FileText className="h-3.5 w-3.5" />
-                      Term
-                    </span>
-                    <span className="font-semibold">{listing.term}</span>
-                  </div>
-                ) : null}
-                {listing.work_mode ? (
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1 text-slate-600">
-                      <Briefcase className="h-3.5 w-3.5" />
-                      Work mode
-                    </span>
-                    <span className="font-semibold">{listing.work_mode}</span>
-                  </div>
-                ) : null}
-                {typeof listing.hours_per_week === 'number' ? (
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1 text-slate-600">
-                      <Briefcase className="h-3.5 w-3.5" />
-                      Hours/week
-                    </span>
-                    <span className="font-semibold">{listing.hours_per_week}</span>
-                  </div>
-                ) : null}
               </div>
 
               <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-900">
