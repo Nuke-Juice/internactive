@@ -4,6 +4,7 @@ import { trackAnalyticsEvent } from '@/lib/analytics'
 import { getCommuteMinutesForListings, toGeoPoint } from '@/lib/commute'
 import { fetchInternships, fetchInternshipsByIds, formatMajors, type Internship } from '@/lib/jobs/internships'
 import { parseSponsoredInternshipIds, splitSponsoredListings } from '@/lib/jobs/sponsored'
+import { normalizeInternshipBrowseParams, type InternshipBrowseSortMode } from '@/lib/jobs/browseParams'
 import { normalizeStateCode } from '@/lib/locations/usLocationCatalog'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import { normalizeSeason } from '@/lib/availability/normalizeSeason'
@@ -20,6 +21,7 @@ import JobCard from '@/app/jobs/_components/JobCard'
 import JobCardSkeleton from '@/app/jobs/_components/JobCardSkeleton'
 
 const categoryTiles = [...INTERNSHIP_CATEGORIES]
+type SortMode = InternshipBrowseSortMode
 
 export type JobsQuery = {
   sort?: string
@@ -45,8 +47,6 @@ type JobsViewProps = {
   basePath?: string
   anchorId?: string
 }
-
-type SortMode = 'best_match' | 'newest'
 
 type JobsFilterState = {
   searchQuery: string
@@ -82,13 +82,6 @@ const SORT_CONFIG: Record<SortMode, { label: string; matchingSignals: string[] }
     label: 'Newest',
     matchingSignals: [],
   },
-}
-
-function normalizeSort(value: string | undefined): SortMode {
-  if (value === 'best_match' || value === 'newest') {
-    return value
-  }
-  return 'best_match'
 }
 
 function withSearchParams(basePath: string, params: URLSearchParams, anchorId?: string) {
@@ -522,7 +515,15 @@ export default async function JobsView({
   }
 
   const isStudent = role === 'student'
-  activeSortMode = normalizeSort(requestedSortRaw)
+  const normalizedBrowseParams = normalizeInternshipBrowseParams({
+    sort: requestedSortRaw,
+    filters,
+    user: {
+      isSignedIn: Boolean(user),
+      role: role ?? null,
+    },
+  })
+  activeSortMode = normalizedBrowseParams.sort
 
   const filteredCandidates = internships.filter((listing) => matchesListingFilters(listing, filters))
 
@@ -790,6 +791,8 @@ export default async function JobsView({
           resetAllHref: buildBrowseHref(basePath, anchorId),
         }
       : null
+  const hasNewestFallbackListings = filteredInternships.length === 0 && newestInternships.length > 0
+  const resultsCount = hasNewestFallbackListings ? newestInternships.length : filteredInternships.length
 
   const bestMatchHref = (() => {
     const params = new URLSearchParams(preservedQueryParams)
@@ -896,7 +899,10 @@ export default async function JobsView({
                 </Link>
               </div>
             ) : null}
-            <div className="mt-1">{filteredInternships.length} results</div>
+            <div className="mt-1">{resultsCount} results</div>
+            {normalizedBrowseParams.sortWasCoerced ? (
+              <div className="mt-1 text-blue-700">Sign in to sort by best match.</div>
+            ) : null}
           </div>
         </div>
 
@@ -920,6 +926,8 @@ export default async function JobsView({
               noMatchesHint={noMatchesHint}
               basePath={basePath}
               anchorId={anchorId}
+              isSignedIn={Boolean(user)}
+              userRole={role ?? null}
               compact
             />
           </aside>
@@ -975,36 +983,21 @@ export default async function JobsView({
                 )}
               </section>
             ) : filteredInternships.length === 0 ? (
-              <div className="space-y-6">
-                <div className="flex min-h-[280px] items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div className="max-w-xl text-center">
-                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-lg text-blue-700">
-                      ✦
-                    </div>
-                    <h3 className="mt-4 text-xl font-semibold text-slate-900">No matches for these filters</h3>
-                    <p className="mt-2 text-sm text-slate-600">
-                      Try clearing filters or adjusting your search to see matching opportunities.
-                    </p>
-                    <div className="mt-5 flex flex-col items-center justify-center gap-2 sm:flex-row">
-                      <Link
-                        href={buildBrowseHref(basePath, anchorId)}
-                        prefetch={false}
-                        className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                      >
+              <div className="space-y-4">
+                {hasNewestFallbackListings ? (
+                  <section className="rounded-2xl border border-blue-200 bg-blue-50/40 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm text-blue-900">
+                        No matches for the current view. Showing newest internships instead.
+                      </p>
+                      <Link href={buildBrowseHref(basePath, anchorId)} prefetch={false} className="text-sm font-medium text-blue-700 hover:underline">
                         Clear filters
                       </Link>
-                      <Link
-                        href={buildBrowseHref(basePath, anchorId)}
-                        prefetch={false}
-                        className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                      >
-                        Browse all internships
-                      </Link>
                     </div>
-                  </div>
-                </div>
+                  </section>
+                ) : null}
 
-                {newestInternships.length > 0 && (
+                {hasNewestFallbackListings ? (
                   <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-base font-semibold text-slate-900">Newest internships</h3>
@@ -1038,6 +1031,34 @@ export default async function JobsView({
                       })}
                     </div>
                   </section>
+                ) : (
+                  <div className="flex min-h-[280px] items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="max-w-xl text-center">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-lg text-blue-700">
+                        ✦
+                      </div>
+                      <h3 className="mt-4 text-xl font-semibold text-slate-900">No matches for these filters</h3>
+                      <p className="mt-2 text-sm text-slate-600">
+                        Try clearing filters or adjusting your search to see matching opportunities.
+                      </p>
+                      <div className="mt-5 flex flex-col items-center justify-center gap-2 sm:flex-row">
+                        <Link
+                          href={buildBrowseHref(basePath, anchorId)}
+                          prefetch={false}
+                          className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                        >
+                          Clear filters
+                        </Link>
+                        <Link
+                          href={buildBrowseHref(basePath, anchorId)}
+                          prefetch={false}
+                          className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          Browse all internships
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             ) : (

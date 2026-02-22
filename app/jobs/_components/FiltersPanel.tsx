@@ -5,6 +5,7 @@ import { Cog, X } from '@/lib/lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { normalizeStateCode, US_CITY_OPTIONS, US_STATE_OPTIONS } from '@/lib/locations/usLocationCatalog'
+import { normalizeInternshipBrowseParams } from '@/lib/jobs/browseParams'
 
 type FilterState = {
   sort: 'best_match' | 'newest'
@@ -33,6 +34,8 @@ type Props = {
   basePath?: string
   anchorId?: string
   compact?: boolean
+  isSignedIn?: boolean
+  userRole?: 'student' | 'employer' | null
 }
 
 const SLIDER_MIN = 0
@@ -71,6 +74,8 @@ export default function FiltersPanel({
   basePath = '/jobs',
   anchorId,
   compact = false,
+  isSignedIn = false,
+  userRole = null,
 }: Props) {
   const router = useRouter()
   const initialMin = clamp(parseIntOrFallback(state.hoursMin, 10), SLIDER_MIN, SLIDER_MAX)
@@ -153,6 +158,42 @@ export default function FiltersPanel({
 
   function applyFilters(overrides: Partial<FilterState>) {
     router.replace(href(overrides))
+  }
+
+  function clearAllFilters() {
+    const normalized = normalizeInternshipBrowseParams({
+      sort: state.sort,
+      filters: {
+        searchQuery: '',
+        category: '',
+        payMin: '',
+        remoteOnly: false,
+        experience: '',
+        hoursMin: '',
+        hoursMax: '',
+        locationCity: '',
+        locationState: '',
+        radius: '',
+      },
+      user: {
+        isSignedIn,
+        role: userRole,
+      },
+    })
+
+    applyFilters({
+      sort: normalized.sort,
+      searchQuery: '',
+      category: '',
+      payMin: '',
+      remoteOnly: false,
+      experience: '',
+      hoursMin: '',
+      hoursMax: '',
+      locationCity: '',
+      locationState: '',
+      radius: '',
+    })
   }
 
   const activeFilterCount = useMemo(() => {
@@ -296,21 +337,7 @@ export default function FiltersPanel({
           {!compact ? (
             <button
               type="button"
-              onClick={() =>
-                applyFilters({
-                  sort: state.sort,
-                  searchQuery: '',
-                  category: '',
-                  payMin: '',
-                  remoteOnly: false,
-                  experience: '',
-                  hoursMin: '',
-                  hoursMax: '',
-                  locationCity: '',
-                  locationState: '',
-                  radius: '',
-                })
-              }
+              onClick={clearAllFilters}
               className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 ${
                 compact ? 'justify-center' : ''
               }`}
@@ -623,19 +650,7 @@ export default function FiltersPanel({
                   <button
                     type="button"
                     onClick={() => {
-                      applyFilters({
-                        sort: state.sort,
-                        searchQuery: '',
-                        category: '',
-                        payMin: '',
-                        remoteOnly: false,
-                        experience: '',
-                        hoursMin: '',
-                        hoursMax: '',
-                        locationCity: '',
-                        locationState: '',
-                        radius: '',
-                      })
+                      clearAllFilters()
                       setIsOpen(false)
                     }}
                     className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
