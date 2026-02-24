@@ -33,3 +33,7 @@ body {
   color: #64748b !important;
   opacity: 1 !important;
 }
+
+body[data-filters-modal-open="1"] .js-switch-account-cta {
+  visibility: hidden;
+}

@@ -427,7 +427,7 @@ export default async function EmployerDashboardPage({
     ? await supabase
         .from('internships')
         .select(
-          'id, employer_id, title, company_name, category, role_category, employment_type, internship_types, work_authorization_scope, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, compensation_currency, compensation_interval, compensation_is_estimated, bonus_eligible, compensation_notes, majors, required_skills, preferred_skills, responsibilities, qualifications, requirements_details, compliance_details, source_metadata, description_raw, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, target_graduation_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, canonical_skill:skills(label), custom_skill:custom_skills(name)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
+          'id, employer_id, title, company_name, category, role_category, employment_type, internship_types, work_authorization_scope, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, compensation_currency, compensation_interval, compensation_is_estimated, bonus_eligible, compensation_notes, majors, required_skills, preferred_skills, responsibilities, qualifications, requirements_details, compliance_details, source_metadata, description_raw, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, target_graduation_years, required_course_category_ids, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, canonical_skill:skills(label), custom_skill:custom_skills(name)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
         )
         .eq('id', editingInternshipId)
         .eq('employer_id', user.id)
@@ -968,6 +968,7 @@ export default async function EmployerDashboardPage({
       target_student_year: targetStudentYear || null,
       target_student_years: targetStudentYears,
       desired_coursework_strength: desiredCourseworkStrength || null,
+      required_course_category_ids: selectedRequiredCourseCategoryIds,
       experience_level: targetStudentYear || null,
       work_mode: workMode,
       apply_mode: resolvedApplyMode,

@@ -14,6 +14,8 @@ export type ListingCoverageSource = {
   required_course_category_ids?: string[] | null
   internship_required_course_categories?: RequiredCourseCategoryRelation[] | null
   target_graduation_years?: string[] | null
+  eligible_graduation_years?: string[] | null
+  target_all_graduation_years?: boolean | null
   target_student_year?: string | null
   experience_level?: string | null
   term?: string | null
@@ -52,6 +54,22 @@ function canonicalRequiredCategoryIds(listing: ListingCoverageSource) {
   return []
 }
 
+function graduationYearsCoveragePresent(listing: ListingCoverageSource) {
+  const eligibleGraduationYears = Array.isArray(listing.eligible_graduation_years)
+    ? listing.eligible_graduation_years
+    : Array.isArray(listing.target_graduation_years)
+      ? listing.target_graduation_years
+      : null
+
+  if (listing.target_all_graduation_years === true) return true
+  if (listing.target_all_graduation_years === false) {
+    return Array.isArray(eligibleGraduationYears) && eligibleGraduationYears.length > 0
+  }
+
+  // Empty array represents all graduation years by default.
+  return true
+}
+
 export function getListingCoverage(listing: ListingCoverageSource): ListingCoverage {
   const requiredSkillsCount = Array.isArray(listing.required_skills) ? listing.required_skills.length : 0
   const preferredSkillsCount = Array.isArray(listing.preferred_skills) ? listing.preferred_skills.length : 0
@@ -79,8 +97,7 @@ export function getListingCoverage(listing: ListingCoverageSource): ListingCover
         : preferredSkillIdsCount > 0
           ? preferredSkillIdsCount
           : preferredSkillsCount,
-    targetGraduationYearsPresent:
-      Array.isArray(listing.target_graduation_years) && listing.target_graduation_years.length > 0,
+    targetGraduationYearsPresent: graduationYearsCoveragePresent(listing),
     experiencePresent: Boolean((listing.target_student_year ?? listing.experience_level ?? '').trim()),
     termPresent: Boolean((listing.term ?? '').trim()),
     hoursPresent:

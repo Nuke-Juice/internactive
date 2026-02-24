@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Cog, X } from '@/lib/lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { normalizeStateCode, US_CITY_OPTIONS, US_STATE_OPTIONS } from '@/lib/locations/usLocationCatalog'
 import { normalizeInternshipBrowseParams } from '@/lib/jobs/browseParams'
 
@@ -91,6 +92,7 @@ export default function FiltersPanel({
   const [stateOpen, setStateOpen] = useState(false)
   const [autoFilledState, setAutoFilledState] = useState<string | null>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
 
   const normalizedStateInput = normalizeStateCode(stateInput)
 
@@ -223,11 +225,20 @@ export default function FiltersPanel({
   ])
 
   useEffect(() => {
-    if (!isOpen) return
-    const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    setIsMounted(true)
+  }, [])
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    if (isOpen) {
+      document.body.style.overflow = 'hidden'
+      document.body.setAttribute('data-filters-modal-open', '1')
+    } else {
+      document.body.removeAttribute('data-filters-modal-open')
+    }
     return () => {
-      document.body.style.overflow = previous
+      document.body.style.overflow = previousOverflow
+      document.body.removeAttribute('data-filters-modal-open')
     }
   }, [isOpen])
 
@@ -365,9 +376,12 @@ export default function FiltersPanel({
           </div>
         ) : null}
       </div>
-      {isOpen ? (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 p-4 md:p-8">
-          <div className="mx-auto h-full w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+      {isMounted && isOpen
+        ? createPortal(
+            <div className="fixed inset-0 z-[9999]">
+              <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-[1px]" onClick={() => setIsOpen(false)} aria-hidden="true" />
+              <div className="relative z-[10000] h-full p-4 md:p-8">
+                <div className="mx-auto h-full w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-slate-900">Filters</h2>
               <button
@@ -673,9 +687,12 @@ export default function FiltersPanel({
                 </div>
               </form>
             </div>
-          </div>
-        </div>
-      ) : null}
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </>
   )
 }

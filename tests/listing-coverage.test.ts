@@ -50,5 +50,40 @@ test('same listing yields identical coverage across feed/dashboard/edit input sh
   assert.equal(feedCoverage.score, editCoverage.score)
   assert.deepEqual(feedCoverage.missingFields, dashboardCoverage.missingFields)
   assert.deepEqual(feedCoverage.missingFields, editCoverage.missingFields)
-  assert.equal(feedCoverage.missingSummary, 'Missing: Coursework categories, Graduation years')
+  assert.equal(feedCoverage.missingSummary, 'Missing: Coursework categories')
+})
+
+test('graduation years are missing only when listing explicitly restricts years and selects none', () => {
+  const coverage = getListingCoverage({
+    majors: ['Accounting'],
+    required_skills: ['Excel'],
+    preferred_skills: [],
+    required_course_category_ids: ['cat-accounting'],
+    target_all_graduation_years: false,
+    target_graduation_years: [],
+    target_student_year: 'any',
+    term: 'Spring 2026',
+    hours_min: 10,
+    hours_max: 20,
+    work_mode: 'remote',
+  })
+
+  assert.equal(coverage.missingFields.includes('Graduation years'), true)
+})
+
+test('coursework coverage is satisfied from canonical relation fallback', () => {
+  const coverage = getListingCoverage({
+    majors: ['Accounting'],
+    required_skills: ['Excel'],
+    preferred_skills: [],
+    internship_required_course_categories: [{ category_id: '11111111-1111-4111-8111-111111111111' }],
+    target_graduation_years: [],
+    target_student_year: 'any',
+    term: 'Spring 2026',
+    hours_min: 10,
+    hours_max: 20,
+    work_mode: 'remote',
+  })
+
+  assert.equal(coverage.missingFields.includes('Coursework categories'), false)
 })

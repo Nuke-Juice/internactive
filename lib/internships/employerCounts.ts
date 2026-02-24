@@ -28,6 +28,10 @@ export type EmployerInternshipRow = {
   required_skills?: string[] | null
   preferred_skills?: string[] | null
   required_course_category_ids?: string[] | null
+  internship_required_course_categories?: Array<{
+    category_id?: string | null
+    category?: { name?: string | null } | null
+  }> | null
   term?: string | null
   hours_min?: number | null
   hours_max?: number | null
@@ -73,7 +77,7 @@ export async function getEmployerInternships(
 ): Promise<EmployerInternshipRow[]> {
   const { data, error } = await supabase
     .from('internships')
-    .select('*')
+    .select('*, internship_required_course_categories(category_id, category:canonical_course_categories(name))')
     .eq('employer_id', employerUserId)
     .order('created_at', { ascending: false })
   if (error) {

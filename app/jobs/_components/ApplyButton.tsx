@@ -60,7 +60,7 @@ export default function ApplyButton({
         type="button"
         disabled
         title="Employer accounts cannot apply. Switch to a student account to apply."
-        className={`${buttonClassName} cursor-not-allowed opacity-60`}
+        className={`${buttonClassName} js-switch-account-cta cursor-not-allowed opacity-60`}
       >
         Switch to student account to apply
       </button>

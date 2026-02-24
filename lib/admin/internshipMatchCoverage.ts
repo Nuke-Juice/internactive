@@ -33,7 +33,7 @@ export const MATCH_SIGNALS: readonly MatchSignalDefinition[] = [
   {
     key: 'target_graduation_years',
     label: 'Graduation years',
-    fixHint: 'Select at least one target graduation year.',
+    fixHint: 'Leave blank for all years, or select one or more years to restrict eligibility.',
   },
   {
     key: 'experience_level',
@@ -114,7 +114,7 @@ export function computeInternshipMatchCoverage(input: InternshipCoverageInput): 
     },
     target_graduation_years: {
       present: input.targetGraduationYearsPresent,
-      detail: input.targetGraduationYearsPresent ? 'At least one year selected' : 'No years selected',
+      detail: input.targetGraduationYearsPresent ? 'All years (default) or specific years selected' : 'Restricted years enabled but none selected',
     },
     experience_level: {
       present: input.experiencePresent,
