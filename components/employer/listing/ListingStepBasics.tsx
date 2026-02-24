@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { US_CITY_OPTIONS } from '@/lib/locations/usLocationCatalog'
+import { US_CITY_OPTIONS, US_STATE_OPTIONS } from '@/lib/locations/usLocationCatalog'
 import type { ApplyMode, AtsStageMode, ListingStep1FieldKey, WorkMode } from './types'
 
 type Props = {
@@ -10,6 +10,11 @@ type Props = {
   workMode: WorkMode
   locationCity: string
   locationState: string
+  employmentType: string
+  internshipTypes: string
+  workAuthorizationScope: string
+  remoteEligibilityMode: 'single_state' | 'selected_states' | 'us_only'
+  remoteEligibleStates: string[]
   applyMode: ApplyMode
   atsStageMode: AtsStageMode
   externalApplyUrl: string
@@ -85,6 +90,7 @@ export default function ListingStepBasics(props: Props) {
       : props.employerDefaultAtsStageMode === 'curated'
         ? 'Curated ATS'
         : 'Immediate redirect'
+  const selectedStateSet = useMemo(() => new Set(props.remoteEligibleStates), [props.remoteEligibleStates])
 
   return (
     <div className="space-y-4">
@@ -239,6 +245,107 @@ export default function ListingStepBasics(props: Props) {
               maxLength={2}
             />
           </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="text-sm font-medium text-slate-700">Work schedule</label>
+          <select
+            name="employment_type"
+            value={props.employmentType}
+            onChange={(event) => props.onChange({ employmentType: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+          >
+            <option value="internship">Internship</option>
+            <option value="part_time">Part-time</option>
+            <option value="full_time">Full-time</option>
+            <option value="contract">Contract</option>
+            <option value="temporary">Temporary</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-sm font-medium text-slate-700">Internship type tags</label>
+          <input
+            name="internship_types"
+            value={props.internshipTypes}
+            onChange={(event) => props.onChange({ internshipTypes: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+            placeholder="e.g., Fixed Term, Trainee"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-slate-700">Work authorization scope</label>
+        <input
+          name="work_authorization_scope"
+          value={props.workAuthorizationScope}
+          onChange={(event) => props.onChange({ workAuthorizationScope: event.target.value })}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+          placeholder="e.g., Virtual role open to residents of all 50 states + D.C."
+        />
+      </div>
+
+      {(props.workMode === 'remote' || props.workMode === 'hybrid') ? (
+        <div className={`space-y-3 rounded-lg border p-4 ${props.fieldErrors?.remote_eligibility ? 'border-red-300' : 'border-slate-200'}`}>
+          <div>
+            <label><LabelWithError text="Remote eligibility" hasError={Boolean(props.fieldErrors?.remote_eligibility)} /></label>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm">
+                <input
+                  type="radio"
+                  name="remote_eligibility_mode"
+                  checked={props.remoteEligibilityMode === 'single_state'}
+                  onChange={() => props.onChange({ remoteEligibilityMode: 'single_state' })}
+                />
+                Single state
+              </label>
+              <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm">
+                <input
+                  type="radio"
+                  name="remote_eligibility_mode"
+                  checked={props.remoteEligibilityMode === 'selected_states'}
+                  onChange={() => props.onChange({ remoteEligibilityMode: 'selected_states' })}
+                />
+                Selected states
+              </label>
+              <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm">
+                <input
+                  type="radio"
+                  name="remote_eligibility_mode"
+                  checked={props.remoteEligibilityMode === 'us_only'}
+                  onChange={() => props.onChange({ remoteEligibilityMode: 'us_only' })}
+                />
+                US-only (50 + D.C.)
+              </label>
+            </div>
+          </div>
+
+          {(props.remoteEligibilityMode === 'single_state' || props.remoteEligibilityMode === 'selected_states') ? (
+            <div className="max-h-48 overflow-auto rounded-md border border-slate-200 bg-white p-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {US_STATE_OPTIONS.map((state) => (
+                  <label key={state.code} className="flex items-center gap-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={selectedStateSet.has(state.code)}
+                      onChange={(event) => {
+                        const next = new Set(selectedStateSet)
+                        if (props.remoteEligibilityMode === 'single_state') next.clear()
+                        if (event.target.checked) next.add(state.code)
+                        else next.delete(state.code)
+                        props.onChange({ remoteEligibleStates: JSON.stringify(Array.from(next)) })
+                      }}
+                    />
+                    {state.name} ({state.code})
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <input type="hidden" name="remote_eligibility_mode" value={props.remoteEligibilityMode} />
+          <input type="hidden" name="remote_eligible_states_json" value={JSON.stringify(props.remoteEligibleStates)} />
         </div>
       ) : null}
 

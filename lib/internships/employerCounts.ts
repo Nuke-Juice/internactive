@@ -19,9 +19,19 @@ export type EmployerInternshipRow = {
   employer_id: string | null
   title: string | null
   location: string | null
+  location_city?: string | null
+  location_state?: string | null
   target_student_years: string[] | null
   target_student_year: string | null
+  target_graduation_years?: string[] | null
   majors: unknown
+  required_skills?: string[] | null
+  preferred_skills?: string[] | null
+  required_course_category_ids?: string[] | null
+  term?: string | null
+  hours_min?: number | null
+  hours_max?: number | null
+  hours_per_week?: number | null
   created_at: string
   updated_at: string | null
   is_active: boolean | null

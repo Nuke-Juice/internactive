@@ -15,6 +15,7 @@ import { getStudentProfileCompleteness } from '@/src/profile/getStudentProfileCo
 import { supabaseServer } from '@/lib/supabase/server'
 import { INTERNSHIP_CATEGORIES } from '@/lib/internships/categories'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
+import { getListingCoverage } from '@/lib/listings/getListingCoverage'
 import ProfileSetupBanner from '@/components/profile/ProfileSetupBanner'
 import FiltersPanel from '@/app/jobs/_components/FiltersPanel'
 import JobCard from '@/app/jobs/_components/JobCard'
@@ -791,6 +792,12 @@ export default async function JobsView({
           resetAllHref: buildBrowseHref(basePath, anchorId),
         }
       : null
+  const listingCoverageById = new Map(
+    internships.map((listing) => {
+      const coverage = getListingCoverage(listing)
+      return [listing.id, coverage] as const
+    })
+  )
   const hasNewestFallbackListings = filteredInternships.length === 0 && newestInternships.length > 0
   const resultsCount = hasNewestFallbackListings ? newestInternships.length : filteredInternships.length
 
@@ -952,6 +959,11 @@ export default async function JobsView({
                           employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
                           employer_response_total: responseStats?.applicationsTotal ?? 0,
                           employer_avatar_url: listing.employer_id ? employerAvatarById.get(listing.employer_id) ?? null : null,
+                          quality_badge:
+                            (() => {
+                              const coverage = listingCoverageById.get(listing.id)
+                              return coverage && coverage.met < coverage.total ? 'More details needed' : null
+                            })(),
                         }}
                         isAuthenticated={Boolean(user)}
                         userRole={role ?? null}
@@ -1021,6 +1033,11 @@ export default async function JobsView({
                               employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
                               employer_response_total: responseStats?.applicationsTotal ?? 0,
                               employer_avatar_url: listing.employer_id ? employerAvatarById.get(listing.employer_id) ?? null : null,
+                              quality_badge:
+                                (() => {
+                                  const coverage = listingCoverageById.get(listing.id)
+                                  return coverage && coverage.met < coverage.total ? 'More details needed' : null
+                                })(),
                             }}
                             isAuthenticated={Boolean(user)}
                             userRole={role ?? null}
@@ -1077,6 +1094,11 @@ export default async function JobsView({
                       employer_response_rate: responseStats?.viewedWithin7dRate ?? null,
                       employer_response_total: responseStats?.applicationsTotal ?? 0,
                       employer_avatar_url: listing.employer_id ? employerAvatarById.get(listing.employer_id) ?? null : null,
+                      quality_badge:
+                        (() => {
+                          const coverage = listingCoverageById.get(listing.id)
+                          return coverage && coverage.met < coverage.total ? 'More details needed' : null
+                        })(),
                     }}
                     isAuthenticated={Boolean(user)}
                     userRole={role ?? null}

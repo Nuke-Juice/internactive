@@ -39,6 +39,7 @@ type Listing = {
   commuteMinutes?: number | null
   maxCommuteMinutes?: number | null
   matchScore?: number | null
+  quality_badge?: string | null
 }
 
 type Props = {
@@ -354,6 +355,11 @@ export default function JobCard({
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         {isSponsored ? <span className={badgeClass(true)}>Sponsored</span> : null}
+        {listing.quality_badge ? (
+          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+            {listing.quality_badge}
+          </span>
+        ) : null}
         {locationChips.map((chip) => (
           <span key={chip.label} className={badgeClass(Boolean(chip.primary))}>
             {chip.label}

@@ -13,6 +13,8 @@ export type ActiveInternshipListItem = {
   createdAtLabel: string
   targetYearsLabel: string
   majorsLabel: string | null
+  qualityBadge?: string | null
+  qualitySummary?: string | null
 }
 
 type ActiveInternshipsListProps = {
@@ -73,6 +75,14 @@ export default function ActiveInternshipsList({
               <div className="text-xs text-slate-500">Target years: {internship.targetYearsLabel}</div>
             </div>
             {internship.majorsLabel ? <div className="mt-2 text-xs text-slate-500">Majors: {internship.majorsLabel}</div> : null}
+            {internship.qualityBadge ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+                  {internship.qualityBadge}
+                </span>
+                {internship.qualitySummary ? <span className="text-xs text-slate-500">{internship.qualitySummary}</span> : null}
+              </div>
+            ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
               <Link
                 href={`/jobs/${internship.id}`}

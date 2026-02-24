@@ -44,6 +44,7 @@ import {
   type EmployerAtsDefaults,
 } from '@/lib/apply/effectiveAts'
 import { trackAnalyticsEvent } from '@/lib/analytics'
+import { getListingCoverage } from '@/lib/listings/getListingCoverage'
 import ListingDraftCleanup from '@/components/employer/listing/ListingDraftCleanup'
 import ListingWizard from '@/components/employer/listing/ListingWizard'
 import CreateInternshipCta from '@/app/dashboard/employer/_components/CreateInternshipCta'
@@ -426,7 +427,7 @@ export default async function EmployerDashboardPage({
     ? await supabase
         .from('internships')
         .select(
-          'id, employer_id, title, company_name, category, role_category, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, majors, required_skills, preferred_skills, responsibilities, qualifications, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, canonical_skill:skills(label), custom_skill:custom_skills(name)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
+          'id, employer_id, title, company_name, category, role_category, employment_type, internship_types, work_authorization_scope, location_city, location_state, location, work_mode, remote_eligibility_scope, remote_eligible_states, remote_eligible_state, remote_eligible_region, apply_mode, ats_stage_mode, external_apply_url, external_apply_type, use_employer_ats_defaults, term, start_date, hours_min, hours_max, pay, pay_min, pay_max, compensation_currency, compensation_interval, compensation_is_estimated, bonus_eligible, compensation_notes, majors, required_skills, preferred_skills, responsibilities, qualifications, requirements_details, compliance_details, source_metadata, description_raw, resume_required, application_deadline, apply_deadline, short_summary, description, target_student_year, target_student_years, target_graduation_years, desired_coursework_strength, is_active, status, internship_required_skill_items(skill_id, skill:skills(label)), internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, canonical_skill:skills(label), custom_skill:custom_skills(name)), internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_major_links(major_id, major:canonical_majors(name))'
         )
         .eq('id', editingInternshipId)
         .eq('employer_id', user.id)
@@ -634,6 +635,9 @@ export default async function EmployerDashboardPage({
     const category = String(formData.get('category') ?? '').trim()
     const locationCity = String(formData.get('location_city') ?? '').trim()
     const locationState = normalizeStateCode(String(formData.get('location_state') ?? ''))
+    const employmentType = String(formData.get('employment_type') ?? 'internship').trim().toLowerCase()
+    const internshipTypes = parseCommaList(String(formData.get('internship_types') ?? '').trim())
+    const workAuthorizationScope = String(formData.get('work_authorization_scope') ?? '').trim()
     const workModeRaw = String(formData.get('work_mode') ?? '').trim().toLowerCase()
     const workMode =
       workModeRaw === 'on-site' || workModeRaw === 'onsite' || workModeRaw === 'in person'
@@ -642,20 +646,25 @@ export default async function EmployerDashboardPage({
     const remoteEligibleRegionInput = String(formData.get('remote_eligible_region') ?? '').trim().toLowerCase()
     const remoteEligibleRegion = remoteEligibleRegionInput === 'us-wide' ? 'us-wide' : remoteEligibleRegionInput === 'state' ? 'state' : null
     const remoteEligibleStateInput = normalizeStateCode(String(formData.get('remote_eligible_state') ?? ''))
-    const remoteEligibleState = remoteEligibleRegion === 'state' ? (remoteEligibleStateInput || employerBaseState || locationState) : null
+    const remoteEligibilityMode = String(formData.get('remote_eligibility_mode') ?? '').trim().toLowerCase()
+    const remoteEligibleStatesInput = parseJsonStringArray(formData.get('remote_eligible_states_json')).map((item) => normalizeStateCode(item)).filter(Boolean)
+    const normalizedRemoteEligibleStates = Array.from(new Set(remoteEligibleStatesInput))
+    const remoteEligibleState = remoteEligibleRegion === 'state' ? (normalizedRemoteEligibleStates[0] || remoteEligibleStateInput || employerBaseState || locationState) : null
     const remoteEligibilityScope =
       workMode === 'remote' || workMode === 'hybrid'
         ? remoteEligibleRegion === 'us-wide'
-          ? 'worldwide'
+          ? 'us_only'
           : 'us_states'
         : null
     const remoteEligibleStates =
       workMode === 'remote' || workMode === 'hybrid'
         ? remoteEligibleRegion === 'us-wide'
           ? []
-          : remoteEligibleState
-            ? [remoteEligibleState]
-            : []
+          : normalizedRemoteEligibleStates.length > 0
+            ? normalizedRemoteEligibleStates
+            : remoteEligibleState
+              ? [remoteEligibleState]
+              : []
         : []
     const startMonth = String(formData.get('start_month') ?? '').trim()
     const startYear = String(formData.get('start_year') ?? '').trim()
@@ -715,10 +724,34 @@ export default async function EmployerDashboardPage({
     const shortSummary = normalizeShortSummary(String(formData.get('short_summary') ?? ''))
     const description = String(formData.get('description') ?? '').trim()
     const responsibilities = parseList(String(formData.get('responsibilities') ?? '').trim())
+    const minimumQualifications = parseList(String(formData.get('minimum_qualifications') ?? '').trim())
     const qualifications = parseList(String(formData.get('qualifications') ?? '').trim())
+    const preferredQualifications = parseList(String(formData.get('preferred_qualifications') ?? '').trim())
+    const descriptionRaw = String(formData.get('description_raw') ?? '').trim()
+    const complianceEeoProvided = String(formData.get('compliance_eeo_provided') ?? '0').trim() === '1'
+    const compliancePayTransparencyProvided = String(formData.get('compliance_pay_transparency_provided') ?? '0').trim() === '1'
+    const complianceAtWillProvided = String(formData.get('compliance_at_will_provided') ?? '0').trim() === '1'
+    const complianceAccommodationsProvided = String(formData.get('compliance_accommodations_provided') ?? '0').trim() === '1'
+    const complianceAccommodationsEmail = String(formData.get('compliance_accommodations_email') ?? '').trim().toLowerCase()
+    const complianceText = String(formData.get('compliance_text') ?? '').trim()
+    const sourcePlatform = String(formData.get('source_platform') ?? '').trim()
+    const sourcePostedDate = normalizeDateInputValue(String(formData.get('source_posted_date') ?? '').trim())
+    const sourceApplicantCountRaw = String(formData.get('source_applicant_count') ?? '').trim()
+    const sourceApplicantCount = Number(sourceApplicantCountRaw)
+    const sourcePromoted = String(formData.get('source_promoted') ?? '0').trim() === '1'
+    const sourceResponsesManagedOffPlatform = String(formData.get('source_responses_managed_off_platform') ?? '0').trim() === '1'
+    const compensationCurrency = String(formData.get('compensation_currency') ?? 'USD').trim().toUpperCase() || 'USD'
+    const compensationIntervalRaw = String(formData.get('compensation_interval') ?? 'hour').trim().toLowerCase()
+    const compensationInterval = compensationIntervalRaw === 'week' || compensationIntervalRaw === 'month' || compensationIntervalRaw === 'year'
+      ? compensationIntervalRaw
+      : 'hour'
+    const compensationIsEstimated = String(formData.get('compensation_is_estimated') ?? '0').trim() === '1'
+    const bonusEligible = String(formData.get('bonus_eligible') ?? '0').trim() === '1'
+    const compensationNotes = String(formData.get('compensation_notes') ?? '').trim()
     const payMin = Number(String(formData.get('pay_min') ?? '').trim())
     const payMax = Number(String(formData.get('pay_max') ?? '').trim())
-    const pay = Number.isFinite(payMin) && Number.isFinite(payMax) ? `$${payMin}-$${payMax}/hr` : ''
+    const paySuffix = compensationInterval === 'hour' ? '/hr' : compensationInterval === 'week' ? '/wk' : compensationInterval === 'month' ? '/mo' : '/yr'
+    const pay = Number.isFinite(payMin) && Number.isFinite(payMax) ? `$${payMin}-$${payMax}${paySuffix}` : ''
     const resumeRequired = String(formData.get('resume_required') ?? '1').trim() !== '0'
 
     if (isPublishing && !applicationDeadline) {
@@ -895,6 +928,9 @@ export default async function EmployerDashboardPage({
       company_name: companyName || employerProfile?.company_name || null,
       category: category || null,
       role_category: category || null,
+      employment_type: employmentType || null,
+      internship_types: internshipTypes,
+      work_authorization_scope: workAuthorizationScope || null,
       location: normalizedLocation,
       location_city: locationCity || null,
       location_state: locationState || null,
@@ -904,8 +940,30 @@ export default async function EmployerDashboardPage({
       remote_eligible_region: remoteEligibleRegion,
       remote_eligible_states: remoteEligibleStates,
       description,
+      description_raw: descriptionRaw || null,
       responsibilities: responsibilities.length > 0 ? responsibilities : null,
       qualifications: qualifications.length > 0 ? qualifications : null,
+      requirements_details: {
+        minimum: minimumQualifications,
+        required: qualifications,
+        preferred: preferredQualifications,
+      },
+      compliance_details: {
+        eeoProvided: complianceEeoProvided,
+        payTransparencyProvided: compliancePayTransparencyProvided,
+        atWillProvided: complianceAtWillProvided,
+        accommodationsProvided: complianceAccommodationsProvided,
+        accommodationsEmail: complianceAccommodationsEmail || null,
+        text: complianceText || null,
+      },
+      source_metadata: {
+        platform: sourcePlatform || null,
+        postedDate: sourcePostedDate || null,
+        applicantCount: Number.isFinite(sourceApplicantCount) && sourceApplicantCount >= 0 ? sourceApplicantCount : null,
+        promoted: sourcePromoted,
+        responsesManagedOffPlatform: sourceResponsesManagedOffPlatform,
+        remoteEligibilityMode: remoteEligibilityMode || null,
+      },
       short_summary: shortSummary || null,
       target_student_year: targetStudentYear || null,
       target_student_years: targetStudentYears,
@@ -925,6 +983,11 @@ export default async function EmployerDashboardPage({
       hours_per_week: hoursMax,
       pay_min: Number.isFinite(payMin) ? payMin : null,
       pay_max: Number.isFinite(payMax) ? payMax : null,
+      compensation_currency: compensationCurrency,
+      compensation_interval: compensationInterval,
+      compensation_is_estimated: compensationIsEstimated,
+      bonus_eligible: bonusEligible,
+      compensation_notes: compensationNotes || null,
       is_active: isPublishing,
       status: isPublishing ? 'published' : 'draft',
       source: 'employer_self' as const,
@@ -1639,6 +1702,13 @@ export default async function EmployerDashboardPage({
   const activeInternshipId =
     selectedInternshipId && internshipIds.includes(selectedInternshipId) ? selectedInternshipId : (internshipIds[0] ?? '')
   const activeInternshipItems: ActiveInternshipListItem[] = activeInternships.map((internship) => ({
+    ...(() => {
+      const coverage = getListingCoverage(internship)
+      return {
+        qualityBadge: coverage.met < coverage.total ? 'More details needed' : null,
+        qualitySummary: coverage.met < coverage.total ? coverage.missingSummary : null,
+      }
+    })(),
     id: internship.id,
     title: internship.title,
     location: internship.location,
@@ -1959,6 +2029,20 @@ export default async function EmployerDashboardPage({
                 workMode: (editingInternship?.work_mode as 'in_person' | 'hybrid' | 'remote' | null) ?? 'hybrid',
                 locationCity: editingInternship?.location_city ?? '',
                 locationState: editingInternship?.location_state ?? '',
+                employmentType:
+                  (typeof editingInternship?.employment_type === 'string' ? editingInternship.employment_type : 'internship') as 'full_time' | 'part_time' | 'contract' | 'temporary' | 'internship',
+                internshipTypes: Array.isArray(editingInternship?.internship_types) ? editingInternship.internship_types.join(', ') : '',
+                workAuthorizationScope:
+                  typeof editingInternship?.work_authorization_scope === 'string' ? editingInternship.work_authorization_scope : '',
+                remoteEligibilityMode:
+                  editingInternship?.remote_eligibility_scope === 'us_only'
+                    ? 'us_only'
+                    : Array.isArray(editingInternship?.remote_eligible_states) && editingInternship.remote_eligible_states.length > 1
+                      ? 'selected_states'
+                      : 'single_state',
+                remoteEligibleStates: Array.isArray(editingInternship?.remote_eligible_states)
+                  ? editingInternship.remote_eligible_states
+                  : [],
                 applyMode:
                   (editingEffectiveAts.applyMode as 'native' | 'ats_link' | 'hybrid' | null) ??
                   (plan.id === 'free' ? 'native' : 'ats_link'),
@@ -1972,6 +2056,12 @@ export default async function EmployerDashboardPage({
                     : 'new_tab',
                 useEmployerAtsDefaults: editingUseEmployerDefaults,
                 payType: 'hourly',
+                compensationCurrency: typeof editingInternship?.compensation_currency === 'string' ? editingInternship.compensation_currency : 'USD',
+                compensationInterval:
+                  (editingInternship?.compensation_interval as 'hour' | 'week' | 'month' | 'year' | null) ?? 'hour',
+                compensationIsEstimated: editingInternship?.compensation_is_estimated === true,
+                bonusEligible: editingInternship?.bonus_eligible === true,
+                compensationNotes: typeof editingInternship?.compensation_notes === 'string' ? editingInternship.compensation_notes : '',
                 payMin: String(editingInternship?.pay_min ?? '20'),
                 payMax: String(editingInternship?.pay_max ?? '28'),
                 hoursMin: String(editingInternship?.hours_min ?? '15'),
@@ -1983,11 +2073,15 @@ export default async function EmployerDashboardPage({
                   normalizeDateInputValue(editingInternship?.apply_deadline),
                 shortSummary: editingInternship?.short_summary ?? '',
                 description: editingInternship?.description ?? '',
+                descriptionRaw: typeof editingInternship?.description_raw === 'string' ? editingInternship.description_raw : '',
                 responsibilities: Array.isArray(editingInternship?.responsibilities)
                   ? editingInternship.responsibilities
                       .map((item) => String(item).replace(/^[-*•\s]+/, '').trim())
                       .filter(Boolean)
                       .join('\n')
+                  : '',
+                minimumQualifications: Array.isArray((editingInternship as { requirements_details?: { minimum?: string[] } | null })?.requirements_details?.minimum)
+                  ? ((editingInternship as { requirements_details?: { minimum?: string[] } | null }).requirements_details?.minimum ?? []).join('\n')
                   : '',
                 qualifications: Array.isArray(editingInternship?.qualifications)
                   ? editingInternship.qualifications
@@ -1995,7 +2089,32 @@ export default async function EmployerDashboardPage({
                       .filter(Boolean)
                       .join('\n')
                   : '',
+                preferredQualifications: Array.isArray((editingInternship as { requirements_details?: { preferred?: string[] } | null })?.requirements_details?.preferred)
+                  ? ((editingInternship as { requirements_details?: { preferred?: string[] } | null }).requirements_details?.preferred ?? []).join('\n')
+                  : '',
                 screeningQuestion: '',
+                complianceEeoProvided:
+                  Boolean((editingInternship as { compliance_details?: { eeoProvided?: boolean } | null })?.compliance_details?.eeoProvided),
+                compliancePayTransparencyProvided:
+                  Boolean((editingInternship as { compliance_details?: { payTransparencyProvided?: boolean } | null })?.compliance_details?.payTransparencyProvided),
+                complianceAtWillProvided:
+                  Boolean((editingInternship as { compliance_details?: { atWillProvided?: boolean } | null })?.compliance_details?.atWillProvided),
+                complianceAccommodationsProvided:
+                  Boolean((editingInternship as { compliance_details?: { accommodationsProvided?: boolean } | null })?.compliance_details?.accommodationsProvided),
+                complianceAccommodationsEmail:
+                  String((editingInternship as { compliance_details?: { accommodationsEmail?: string } | null })?.compliance_details?.accommodationsEmail ?? ''),
+                complianceText:
+                  String((editingInternship as { compliance_details?: { text?: string } | null })?.compliance_details?.text ?? ''),
+                sourcePlatform: String((editingInternship as { source_metadata?: { platform?: string } | null })?.source_metadata?.platform ?? ''),
+                sourcePostedDate: normalizeDateInputValue((editingInternship as { source_metadata?: { postedDate?: string } | null })?.source_metadata?.postedDate),
+                sourceApplicantCount: String((editingInternship as { source_metadata?: { applicantCount?: number } | null })?.source_metadata?.applicantCount ?? ''),
+                sourcePromoted:
+                  Boolean((editingInternship as { source_metadata?: { promoted?: boolean } | null })?.source_metadata?.promoted),
+                sourceResponsesManagedOffPlatform:
+                  Boolean((editingInternship as { source_metadata?: { responsesManagedOffPlatform?: boolean } | null })?.source_metadata?.responsesManagedOffPlatform),
+                targetGraduationYears: Array.isArray(editingInternship?.target_graduation_years)
+                  ? editingInternship.target_graduation_years
+                  : [],
                 resumeRequired: editingInternship?.resume_required !== false,
                 requiredSkillLabels: editingRequiredSkillLabels,
                 preferredSkillLabels: editingPreferredSkillLabels,

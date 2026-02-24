@@ -14,6 +14,7 @@ export type ListingStep1FieldKey =
   | 'location_city'
   | 'location_state'
   | 'external_apply_url'
+  | 'remote_eligibility'
 
 export type ListingStep2FieldKey =
   | 'pay_min'
@@ -47,12 +48,22 @@ export type ListingWizardInitialValues = {
   workMode: WorkMode
   locationCity: string
   locationState: string
+  employmentType: 'full_time' | 'part_time' | 'contract' | 'temporary' | 'internship'
+  internshipTypes: string
+  workAuthorizationScope: string
+  remoteEligibilityMode: 'single_state' | 'selected_states' | 'us_only'
+  remoteEligibleStates: string[]
   applyMode: ApplyMode
   atsStageMode: AtsStageMode
   externalApplyUrl: string
   externalApplyType: string
   useEmployerAtsDefaults: boolean
   payType: 'hourly'
+  compensationCurrency: string
+  compensationInterval: 'hour' | 'week' | 'month' | 'year'
+  compensationIsEstimated: boolean
+  bonusEligible: boolean
+  compensationNotes: string
   payMin: string
   payMax: string
   hoursMin: string
@@ -62,9 +73,24 @@ export type ListingWizardInitialValues = {
   applicationDeadline: string
   shortSummary: string
   description: string
+  descriptionRaw: string
   responsibilities: string
+  minimumQualifications: string
   qualifications: string
+  preferredQualifications: string
   screeningQuestion: string
+  complianceEeoProvided: boolean
+  compliancePayTransparencyProvided: boolean
+  complianceAtWillProvided: boolean
+  complianceAccommodationsProvided: boolean
+  complianceAccommodationsEmail: string
+  complianceText: string
+  sourcePlatform: string
+  sourcePostedDate: string
+  sourceApplicantCount: string
+  sourcePromoted: boolean
+  sourceResponsesManagedOffPlatform: boolean
+  targetGraduationYears: string[]
   resumeRequired: boolean
   requiredSkillLabels: string[]
   preferredSkillLabels: string[]

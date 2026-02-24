@@ -20,7 +20,7 @@ export default function CreateInternshipCta({ atLimit, activeCount, planLimit, c
         href="/dashboard/employer/new"
         className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 sm:w-auto"
       >
-        Create internship
+        + Create internship
       </Link>
     )
   }
@@ -35,7 +35,7 @@ export default function CreateInternshipCta({ atLimit, activeCount, planLimit, c
         onClick={() => setShowUpgradeModal(true)}
         className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 sm:w-auto"
       >
-        Create internship
+        + Create internship
       </button>
       <CenteredModal
         open={showUpgradeModal}

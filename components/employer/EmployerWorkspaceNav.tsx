@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { BarChart3, Briefcase, FileText, ShieldCheck, Users } from 'lucide-react'
+import { BarChart3, Briefcase, Cog, FileText, MessageSquare, Users } from 'lucide-react'
 import AppNav, { type AppNavItem } from '@/components/navigation/AppNav'
 import { matchPath } from '@/src/navigation/matchPath'
 
@@ -21,9 +21,9 @@ type Props = {
 const TABS: AppNavItem[] = [
   { id: 'employer-listings', label: 'Listings', href: '/dashboard/employer', icon: Briefcase, order: 10, match: 'prefix', activeOn: ['/dashboard/employer/new'] },
   { id: 'employer-inbox', label: 'Inbox', href: '/dashboard/employer/applicants', icon: Users, order: 20, match: 'prefix' },
-  { id: 'employer-messages', label: 'Messages', href: '/dashboard/employer/messages', icon: Users, order: 30, match: 'prefix' },
+  { id: 'employer-messages', label: 'Messages', href: '/dashboard/employer/messages', icon: MessageSquare, order: 30, match: 'prefix' },
   { id: 'employer-analytics', label: 'Analytics', href: '/dashboard/employer/analytics', icon: BarChart3, order: 40, match: 'prefix' },
-  { id: 'employer-settings', label: 'Settings', href: '/dashboard/employer/settings', icon: ShieldCheck, order: 50, match: 'prefix' },
+  { id: 'employer-settings', label: 'Settings', href: '/dashboard/employer/settings', icon: Cog, order: 50, match: 'prefix' },
 ]
 
 function withInternshipContext(href: string, internshipId?: string) {

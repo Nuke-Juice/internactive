@@ -1,6 +1,7 @@
 import { supabaseServer } from '@/lib/supabase/server'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { getEmployerVerificationTiers } from '@/lib/billing/subscriptions'
+import { isFeedEligible } from '@/lib/jobs/feedEligibility'
 
 export type Internship = {
   id: string
@@ -25,8 +26,16 @@ export type Internship = {
   desired_coursework_strength?: string | null
   pay_min?: number | null
   pay_max?: number | null
+  compensation_currency?: string | null
+  compensation_interval?: 'hour' | 'week' | 'month' | 'year' | string | null
+  compensation_is_estimated?: boolean | null
+  bonus_eligible?: boolean | null
+  compensation_notes?: string | null
   role_category: string | null
   category: string | null
+  employment_type?: string | null
+  internship_types?: string[] | null
+  work_authorization_scope?: string | null
   work_mode: 'remote' | 'hybrid' | 'in_person' | string | null
   apply_mode?: 'native' | 'ats_link' | 'hybrid' | string | null
   external_apply_url?: string | null
@@ -39,6 +48,27 @@ export type Internship = {
   required_skills: string[] | null
   preferred_skills: string[] | null
   recommended_coursework: string[] | null
+  requirements_details?: {
+    minimum?: string[]
+    required?: string[]
+    preferred?: string[]
+  } | null
+  compliance_details?: {
+    eeoProvided?: boolean
+    payTransparencyProvided?: boolean
+    atWillProvided?: boolean
+    accommodationsProvided?: boolean
+    accommodationsEmail?: string | null
+    text?: string | null
+  } | null
+  source_metadata?: {
+    platform?: string | null
+    postedDate?: string | null
+    applicantCount?: number | null
+    promoted?: boolean | null
+    responsesManagedOffPlatform?: boolean | null
+  } | null
+  description_raw?: string | null
   target_graduation_years: string[] | null
   internship_required_skill_items:
     | Array<{
@@ -149,6 +179,7 @@ export type Internship = {
   created_at: string | null
   is_active: boolean | null
   source: 'concierge' | 'employer_self' | 'partner' | string | null
+  status?: string | null
 }
 
 function normalizeInternshipWorkMode(value: string | null | undefined): Internship['work_mode'] {
@@ -186,6 +217,9 @@ const INTERNSHIP_SELECT_RICH_COLUMNS = [
   'experience_level',
   'target_student_year',
   'desired_coursework_strength',
+  'employment_type',
+  'internship_types',
+  'work_authorization_scope',
   'role_category',
   'category',
   'work_mode',
@@ -197,9 +231,18 @@ const INTERNSHIP_SELECT_RICH_COLUMNS = [
   'start_date',
   'hours_min',
   'hours_max',
+  'compensation_currency',
+  'compensation_interval',
+  'compensation_is_estimated',
+  'bonus_eligible',
+  'compensation_notes',
   'required_skills',
   'preferred_skills',
   'recommended_coursework',
+  'requirements_details',
+  'compliance_details',
+  'source_metadata',
+  'description_raw',
   'target_graduation_years',
   'internship_required_skill_items(skill_id, skill:skills(id, slug, label, category))',
   'internship_preferred_skill_items(skill_id, skill:skills(id, slug, label, category))',
@@ -218,6 +261,7 @@ const INTERNSHIP_SELECT_RICH_COLUMNS = [
   'created_at',
   'is_active',
   'source',
+  'status',
 ] as const
 
 const INTERNSHIP_SELECT_BASE_COLUMNS = [
@@ -246,9 +290,18 @@ const INTERNSHIP_SELECT_BASE_COLUMNS = [
   'start_date',
   'hours_min',
   'hours_max',
+  'compensation_currency',
+  'compensation_interval',
+  'compensation_is_estimated',
+  'bonus_eligible',
+  'compensation_notes',
   'required_skills',
   'preferred_skills',
   'recommended_coursework',
+  'requirements_details',
+  'compliance_details',
+  'source_metadata',
+  'description_raw',
   'target_graduation_years',
   'resume_required',
   'application_deadline',
@@ -259,6 +312,7 @@ const INTERNSHIP_SELECT_BASE_COLUMNS = [
   'created_at',
   'is_active',
   'source',
+  'status',
 ] as const
 
 const INTERNSHIP_SELECT_LEGACY_COLUMNS = [
@@ -296,6 +350,7 @@ const INTERNSHIP_SELECT_LEGACY_COLUMNS = [
   'created_at',
   'is_active',
   'source',
+  'status',
 ] as const
 
 type InternshipFilters = {
@@ -318,15 +373,22 @@ function escapeIlikeInput(value: string) {
 }
 
 function isMissingColumnError(message: string | null | undefined) {
-  return (message ?? '').toLowerCase().includes('does not exist')
+  const normalized = (message ?? '').toLowerCase()
+  return (
+    normalized.includes('does not exist') ||
+    normalized.includes('schema cache') ||
+    normalized.includes("could not find the '") && normalized.includes("' column")
+  )
 }
 
 function extractMissingColumnName(message: string | null | undefined) {
   if (!message) return null
   const lower = message.toLowerCase()
   const match = lower.match(/column\s+[\w."]*?([a-z_][a-z0-9_]*)\s+does not exist/)
-  if (!match) return null
-  return match[1] ?? null
+  if (match?.[1]) return match[1]
+  const schemaCacheMatch = lower.match(/could not find the ['"]([a-z_][a-z0-9_]*)['"] column/)
+  if (schemaCacheMatch?.[1]) return schemaCacheMatch[1]
+  return null
 }
 
 type QueryContext = {
@@ -490,7 +552,9 @@ async function runSchemaTolerantInternshipQuery(params: {
       continue
     }
 
-    if (!isMissingColumnError(error.message)) {
+    if (isMissingColumnError(error.message)) {
+      console.warn(`[jobs] fetchInternships ${label} schema mismatch (unparsed column)`, error.message)
+    } else {
       console.error(`[jobs] fetchInternships ${label} query failed`, error.message)
     }
     return { data: null, error }
@@ -530,6 +594,7 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
   let rows = (data ?? []) as unknown as RawInternshipRow[]
 
   if (error) {
+    console.warn('[jobs] fetchInternships rich query fallback triggered', error.message)
     const { data: fallbackData, error: fallbackError } = await runSchemaTolerantInternshipQuery({
       supabase,
       columns: INTERNSHIP_SELECT_BASE_COLUMNS,
@@ -537,9 +602,7 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
       label: 'base',
     })
     if (fallbackError) {
-      if (!isMissingColumnError(fallbackError.message)) {
-        return { rows: [], hasMore: false }
-      }
+      console.warn('[jobs] fetchInternships base query fallback triggered', fallbackError.message)
 
       const { data: legacyData, error: legacyError } = await runSchemaTolerantInternshipQuery({
         supabase,
@@ -548,6 +611,7 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
         label: 'legacy',
       })
       if (legacyError) {
+        console.error('[jobs] fetchInternships legacy query failed', legacyError.message)
         return { rows: [], hasMore: false }
       }
 
@@ -556,9 +620,16 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
         supabase,
         rows: mapInternshipRows(rows),
       })
+      const visibleRows = mappedRows.filter((row) =>
+        isFeedEligible({
+          is_active: row.is_active,
+          status: row.status ?? null,
+          application_deadline: row.application_deadline ?? null,
+        })
+      )
       return {
-        rows: mappedRows.slice(0, limit),
-        hasMore: mappedRows.length > limit,
+        rows: visibleRows.slice(0, limit),
+        hasMore: visibleRows.length > limit,
       }
     }
 
@@ -569,10 +640,17 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
     supabase,
     rows: mapInternshipRows(rows),
   })
+  const visibleRows = mappedRows.filter((row) =>
+    isFeedEligible({
+      is_active: row.is_active,
+      status: row.status ?? null,
+      application_deadline: row.application_deadline ?? null,
+    })
+  )
 
   return {
-    rows: mappedRows.slice(0, limit),
-    hasMore: mappedRows.length > limit,
+    rows: visibleRows.slice(0, limit),
+    hasMore: visibleRows.length > limit,
   }
 }
 

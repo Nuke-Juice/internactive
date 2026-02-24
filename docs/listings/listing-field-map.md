@@ -38,6 +38,14 @@ This map is used as the checklist for:
 | `required_skills`, `preferred_skills` | `text[]` | Matching/scoring and card skill chips |
 | `target_graduation_years` | `text[]` | Matching and recruiter targeting |
 | `responsibilities`, `qualifications` | `text[]` | Rich details on admin/editorial workflows |
+| `employment_type`, `internship_types` | `text`, `text[]` | Captures part-time/full-time plus fixed-term/trainee style tags |
+| `work_authorization_scope` | `text` | Stores region/legal eligibility language |
+| `compensation_currency`, `compensation_interval` | `text`, `text` | Structured compensation dimensions |
+| `compensation_is_estimated`, `bonus_eligible`, `compensation_notes` | `boolean`, `boolean`, `text` | Pay transparency and context |
+| `requirements_details` | `jsonb` | Structured minimum/required/preferred requirement buckets |
+| `compliance_details` | `jsonb` | EEO/accommodation/at-will/pay transparency flags + text |
+| `source_metadata` | `jsonb` | Optional external source metrics (posted date, applicant count, promoted, off-platform responses) |
+| `description_raw` | `text` | Preserves original source description text |
 
 ## Publish State / Visibility
 
@@ -67,4 +75,3 @@ This map is used as the checklist for:
 - Employer self-serve create/edit: `app/dashboard/employer/page.tsx`
 - Concierge/admin create: `app/admin/internships/new/page.tsx`
 - Concierge/admin edit: `app/admin/internships/[id]/page.tsx`
-

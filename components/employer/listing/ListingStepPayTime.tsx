@@ -4,6 +4,11 @@ import type { ListingStep2FieldKey } from './types'
 
 type Props = {
   payType: string
+  compensationCurrency: string
+  compensationInterval: 'hour' | 'week' | 'month' | 'year'
+  compensationIsEstimated: boolean
+  bonusEligible: boolean
+  compensationNotes: string
   payMin: string
   payMax: string
   hoursMin: string
@@ -41,6 +46,55 @@ export default function ListingStepPayTime(props: Props) {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
+          <label className="text-sm font-medium text-slate-700">Currency</label>
+          <select
+            name="compensation_currency"
+            value={props.compensationCurrency}
+            onChange={(event) => props.onChange({ compensationCurrency: event.target.value.toUpperCase() })}
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+          >
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-sm font-medium text-slate-700">Compensation interval</label>
+          <select
+            name="compensation_interval"
+            value={props.compensationInterval}
+            onChange={(event) => props.onChange({ compensationInterval: event.target.value })}
+            className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+          >
+            <option value="hour">Hourly</option>
+            <option value="week">Weekly</option>
+            <option value="month">Monthly</option>
+            <option value="year">Yearly</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={props.compensationIsEstimated}
+            onChange={(event) => props.onChange({ compensationIsEstimated: event.target.checked ? '1' : '0' })}
+          />
+          Compensation is estimated/anticipated
+        </label>
+        <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={props.bonusEligible}
+            onChange={(event) => props.onChange({ bonusEligible: event.target.checked ? '1' : '0' })}
+          />
+          Bonus eligible
+        </label>
+      </div>
+      <input type="hidden" name="compensation_is_estimated" value={props.compensationIsEstimated ? '1' : '0'} />
+      <input type="hidden" name="bonus_eligible" value={props.bonusEligible ? '1' : '0'} />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
           <label><LabelWithError text="Pay min ($/hr)" hasError={Boolean(props.fieldErrors?.pay_min || props.fieldErrors?.pay_max)} /></label>
           <input
             name="pay_min"
@@ -68,6 +122,18 @@ export default function ListingStepPayTime(props: Props) {
             placeholder="28"
           />
         </div>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-slate-700">Compensation notes (optional)</label>
+        <textarea
+          name="compensation_notes"
+          rows={3}
+          value={props.compensationNotes}
+          onChange={(event) => props.onChange({ compensationNotes: event.target.value })}
+          className="mt-1 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+          placeholder="e.g., Offers typically land in the lower half of range and vary by geography/experience."
+        />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">

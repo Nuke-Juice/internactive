@@ -21,7 +21,8 @@ import { isVerifiedCityForState, normalizeStateCode } from '@/lib/locations/usLo
 import { normalizeSkills } from '@/lib/skills/normalizeSkills'
 import { sanitizeSkillLabels } from '@/lib/skills/sanitizeSkillLabels'
 import { requireVerifiedEmail } from '@/lib/auth/emailVerification'
-import { MATCH_SIGNALS, computeInternshipMatchCoverage } from '@/lib/admin/internshipMatchCoverage'
+import { MATCH_SIGNALS } from '@/lib/admin/internshipMatchCoverage'
+import { getListingCoverage } from '@/lib/listings/getListingCoverage'
 import InternshipLocationFields from '@/components/forms/InternshipLocationFields'
 import CatalogMultiSelect from '@/components/forms/CatalogMultiSelect'
 import TemplatePicker from './_components/TemplatePicker'
@@ -68,6 +69,7 @@ type InternshipAdminRow = {
   majors: string[] | string | null
   term: string | null
   target_graduation_years: string[] | null
+  required_course_category_ids: string[] | null
   hours_per_week: number | null
   location_city: string | null
   location_state: string | null
@@ -211,7 +213,7 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
   let internshipsQuery = admin
     .from('internships')
     .select(
-      'id, title, employer_id, company_name, source, is_active, category, experience_level, apply_deadline, required_skills, preferred_skills, majors, term, target_graduation_years, hours_per_week, location_city, location_state, remote_allowed',
+      'id, title, employer_id, company_name, source, is_active, category, experience_level, apply_deadline, required_skills, preferred_skills, majors, term, target_graduation_years, required_course_category_ids, hours_per_week, location_city, location_state, remote_allowed',
       {
       count: 'exact',
       }
@@ -262,7 +264,7 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
       : Promise.resolve({ data: [] as Array<{ internship_id: string }> }),
     internships.length > 0
       ? admin
-          .from('internship_coursework_category_links')
+          .from('internship_required_course_categories')
           .select('internship_id')
           .in('internship_id', internships.map((row) => row.id))
       : Promise.resolve({ data: [] as Array<{ internship_id: string }> }),
@@ -897,34 +899,12 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                     const applicantsCount = applicantsCountByInternshipId.get(row.id) ?? 0
                     const requiredSkillLinks = requiredSkillLinksByInternshipId.get(row.id) ?? 0
                     const preferredSkillLinks = preferredSkillLinksByInternshipId.get(row.id) ?? 0
-                    const requiredSkillsCount = row.required_skills?.length ?? 0
-                    const preferredSkillsCount = row.preferred_skills?.length ?? 0
                     const courseworkCategoryLinkCount = courseworkCategoryLinksByInternshipId.get(row.id) ?? 0
-                    const majorsPresent = Array.isArray(row.majors)
-                      ? row.majors.length > 0
-                      : typeof row.majors === 'string'
-                        ? row.majors.trim().length > 0
-                        : false
-                    const targetGraduationYearsPresent = Array.isArray(row.target_graduation_years)
-                      ? row.target_graduation_years.length > 0
-                      : false
-                    const experiencePresent = Boolean(row.experience_level?.trim())
-                    const termPresent = Boolean(row.term?.trim())
-                    const hoursPresent = typeof row.hours_per_week === 'number' && row.hours_per_week > 0
-                    const locationOrRemotePresent =
-                      Boolean(row.remote_allowed) || Boolean(row.location_city?.trim() || row.location_state?.trim())
-                    const coverage = computeInternshipMatchCoverage({
-                      majorsPresent,
-                      courseworkCategoryLinkCount,
-                      requiredSkillsCount,
-                      preferredSkillsCount,
-                      verifiedRequiredSkillLinks: requiredSkillLinks,
-                      verifiedPreferredSkillLinks: preferredSkillLinks,
-                      targetGraduationYearsPresent,
-                      experiencePresent,
-                      termPresent,
-                      hoursPresent,
-                      locationOrRemotePresent,
+                    const coverage = getListingCoverage({
+                      ...row,
+                      required_course_category_links_count: courseworkCategoryLinkCount,
+                      verified_required_skill_links_count: requiredSkillLinks,
+                      verified_preferred_skill_links_count: preferredSkillLinks,
                     })
                     const reviewHref = `/admin/internships/${row.id}`
                     const missingPreview = coverage.missingLabels.slice(0, 2).join(', ')

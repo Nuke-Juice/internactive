@@ -7,6 +7,7 @@ import ListingStepBasics from './ListingStepBasics'
 import ListingStepPayTime from './ListingStepPayTime'
 import ListingStepRequirements from './ListingStepRequirements'
 import ListingStepDescription from './ListingStepDescription'
+import { getListingCoverage } from '@/lib/listings/getListingCoverage'
 import {
   isRecentDraft,
   listingDraftStorageKey,
@@ -290,6 +291,7 @@ type Props = {
 
 type PendingExit = { kind: 'back' } | { kind: 'href'; href: string }
 type ServerErrorPayload = NonNullable<Props['serverError']>
+type FormLayoutMode = 'step' | 'all'
 
 type StepFieldErrors = {
   step1: Partial<Record<ListingStep1FieldKey, string>>
@@ -317,6 +319,7 @@ function mapServerFieldsToStepErrors(error: ServerErrorPayload | null | undefine
     if (field === 'work_mode') mapped.step1.work_mode = error.message
     if (field === 'location' || field === 'location_city') mapped.step1.location_city = error.message
     if (field === 'location' || field === 'location_state') mapped.step1.location_state = error.message
+    if (field === 'remote_eligibility' || field === 'remote_eligible_states') mapped.step1.remote_eligibility = error.message
     if (field === 'external_apply_url') mapped.step1.external_apply_url = error.message
     if (field === 'pay' || field === 'pay_min') mapped.step2.pay_min = error.message
     if (field === 'pay' || field === 'pay_max') mapped.step2.pay_max = error.message
@@ -328,6 +331,16 @@ function mapServerFieldsToStepErrors(error: ServerErrorPayload | null | undefine
     if (field === 'short_summary') mapped.step4.short_summary = error.message
   }
   return mapped
+}
+
+function parseJsonStringArrayValue(value: string) {
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((item) => String(item).trim()).filter(Boolean)
+  } catch {
+    return []
+  }
 }
 
 function serializeFormForDirtyCheck(form: HTMLFormElement) {
@@ -446,7 +459,9 @@ async function postAnalyticsEvent(eventName: string, properties: Record<string, 
 }
 
 export default function ListingWizard(props: Props) {
+  const isEditing = Boolean(props.internshipId)
   const [step, setStep] = useState(1)
+  const [layoutMode, setLayoutMode] = useState<FormLayoutMode>(isEditing ? 'all' : 'step')
   const [attemptedStep, setAttemptedStep] = useState<Record<number, boolean>>({})
   const [templateKey, setTemplateKey] = useState('')
   const [savedAt, setSavedAt] = useState<string | null>(null)
@@ -480,6 +495,7 @@ export default function ListingWizard(props: Props) {
   useEffect(() => {
     const initialValues = latestInitialValuesRef.current
     setStep(1)
+    setLayoutMode(Boolean(props.internshipId) ? 'all' : 'step')
     setAttemptedStep({})
     setTemplateKey('')
     setSavedAt(null)
@@ -499,7 +515,7 @@ export default function ListingWizard(props: Props) {
     setMajorLabels(initialValues.majorLabels)
     setCourseworkCategoryLabels(initialValues.courseworkCategoryLabels)
     setPersistentServerError(props.serverError ?? null)
-  }, [props.draftId, props.serverError])
+  }, [props.draftId, props.internshipId, props.serverError])
 
   useEffect(() => {
     postAnalyticsEvent('employer_listing_started', { draft_key: props.draftId })
@@ -560,6 +576,18 @@ export default function ListingWizard(props: Props) {
             : prev.workMode,
         locationCity: typeof parsed.location_city === 'string' ? parsed.location_city : prev.locationCity,
         locationState: typeof parsed.location_state === 'string' ? parsed.location_state : prev.locationState,
+        employmentType: typeof parsed.employment_type === 'string' ? parsed.employment_type as typeof prev.employmentType : prev.employmentType,
+        internshipTypes: typeof parsed.internship_types === 'string' ? parsed.internship_types : prev.internshipTypes,
+        workAuthorizationScope:
+          typeof parsed.work_authorization_scope === 'string' ? parsed.work_authorization_scope : prev.workAuthorizationScope,
+        remoteEligibilityMode:
+          typeof parsed.remote_eligibility_mode === 'string'
+            ? (parsed.remote_eligibility_mode as typeof prev.remoteEligibilityMode)
+            : prev.remoteEligibilityMode,
+        remoteEligibleStates:
+          typeof parsed.remote_eligible_states_json === 'string'
+            ? parseJsonStringArrayValue(parsed.remote_eligible_states_json)
+            : prev.remoteEligibleStates,
         applyMode: typeof parsed.apply_mode === 'string' ? (parsed.apply_mode as ApplyMode) : prev.applyMode,
         atsStageMode: typeof parsed.ats_stage_mode === 'string' ? (parsed.ats_stage_mode as AtsStageMode) : prev.atsStageMode,
         externalApplyUrl: typeof parsed.external_apply_url === 'string' ? parsed.external_apply_url : prev.externalApplyUrl,
@@ -574,6 +602,20 @@ export default function ListingWizard(props: Props) {
             ? parsed.use_employer_ats_defaults !== '0'
             : prev.useEmployerAtsDefaults,
         payType: typeof parsed.pay_type === 'string' ? 'hourly' : prev.payType,
+        compensationCurrency: typeof parsed.compensation_currency === 'string' ? parsed.compensation_currency : prev.compensationCurrency,
+        compensationInterval:
+          typeof parsed.compensation_interval === 'string'
+            ? (parsed.compensation_interval as typeof prev.compensationInterval)
+            : prev.compensationInterval,
+        compensationIsEstimated:
+          typeof parsed.compensation_is_estimated === 'string'
+            ? parsed.compensation_is_estimated !== '0'
+            : prev.compensationIsEstimated,
+        bonusEligible:
+          typeof parsed.bonus_eligible === 'string'
+            ? parsed.bonus_eligible !== '0'
+            : prev.bonusEligible,
+        compensationNotes: typeof parsed.compensation_notes === 'string' ? parsed.compensation_notes : prev.compensationNotes,
         payMin: typeof parsed.pay_min === 'string' ? parsed.pay_min : prev.payMin,
         payMax: typeof parsed.pay_max === 'string' ? parsed.pay_max : prev.payMax,
         hoursMin: typeof parsed.hours_min === 'string' ? parsed.hours_min : prev.hoursMin,
@@ -591,9 +633,47 @@ export default function ListingWizard(props: Props) {
             ? normalizeDateInputValue(parsed.application_deadline) || prev.applicationDeadline
             : prev.applicationDeadline,
         shortSummary: typeof parsed.short_summary === 'string' ? parsed.short_summary : prev.shortSummary,
+        descriptionRaw: typeof parsed.description_raw === 'string' ? parsed.description_raw : prev.descriptionRaw,
+        minimumQualifications:
+          typeof parsed.minimum_qualifications === 'string' ? parsed.minimum_qualifications : prev.minimumQualifications,
         qualifications: typeof parsed.qualifications === 'string' ? parsed.qualifications : prev.qualifications,
+        preferredQualifications:
+          typeof parsed.preferred_qualifications === 'string' ? parsed.preferred_qualifications : prev.preferredQualifications,
         screeningQuestion:
           typeof parsed.screening_question === 'string' ? parsed.screening_question : prev.screeningQuestion,
+        complianceEeoProvided:
+          typeof parsed.compliance_eeo_provided === 'string'
+            ? parsed.compliance_eeo_provided !== '0'
+            : prev.complianceEeoProvided,
+        compliancePayTransparencyProvided:
+          typeof parsed.compliance_pay_transparency_provided === 'string'
+            ? parsed.compliance_pay_transparency_provided !== '0'
+            : prev.compliancePayTransparencyProvided,
+        complianceAtWillProvided:
+          typeof parsed.compliance_at_will_provided === 'string'
+            ? parsed.compliance_at_will_provided !== '0'
+            : prev.complianceAtWillProvided,
+        complianceAccommodationsProvided:
+          typeof parsed.compliance_accommodations_provided === 'string'
+            ? parsed.compliance_accommodations_provided !== '0'
+            : prev.complianceAccommodationsProvided,
+        complianceAccommodationsEmail:
+          typeof parsed.compliance_accommodations_email === 'string'
+            ? parsed.compliance_accommodations_email
+            : prev.complianceAccommodationsEmail,
+        complianceText: typeof parsed.compliance_text === 'string' ? parsed.compliance_text : prev.complianceText,
+        sourcePlatform: typeof parsed.source_platform === 'string' ? parsed.source_platform : prev.sourcePlatform,
+        sourcePostedDate: typeof parsed.source_posted_date === 'string' ? parsed.source_posted_date : prev.sourcePostedDate,
+        sourceApplicantCount:
+          typeof parsed.source_applicant_count === 'string' ? parsed.source_applicant_count : prev.sourceApplicantCount,
+        sourcePromoted:
+          typeof parsed.source_promoted === 'string'
+            ? parsed.source_promoted !== '0'
+            : prev.sourcePromoted,
+        sourceResponsesManagedOffPlatform:
+          typeof parsed.source_responses_managed_off_platform === 'string'
+            ? parsed.source_responses_managed_off_platform !== '0'
+            : prev.sourceResponsesManagedOffPlatform,
         resumeRequired: parsed.resume_required !== '0',
       }))
       if (typeof parsed.responsibilities === 'string') {
@@ -703,16 +783,26 @@ export default function ListingWizard(props: Props) {
       lines.push('Responsibilities:')
       lines.push(...normalizedResponsibilities.map((item) => `- ${item}`))
     }
+    const minimumQualifications = parseBulletLines(state.minimumQualifications)
+    if (minimumQualifications.length > 0) {
+      lines.push('Minimum qualifications:')
+      lines.push(...minimumQualifications.map((item) => `- ${item}`))
+    }
     const qualifications = parseBulletLines(state.qualifications)
     if (qualifications.length > 0) {
       lines.push('Qualifications:')
       lines.push(...qualifications.map((item) => `- ${item}`))
     }
+    const preferredQualifications = parseBulletLines(state.preferredQualifications)
+    if (preferredQualifications.length > 0) {
+      lines.push('Desired qualifications:')
+      lines.push(...preferredQualifications.map((item) => `- ${item}`))
+    }
     if (state.screeningQuestion.trim()) {
       lines.push(`Screening question: ${state.screeningQuestion.trim()}`)
     }
     return lines.join('\n')
-  }, [responsibilities, state.qualifications, state.screeningQuestion, state.shortSummary])
+  }, [responsibilities, state.minimumQualifications, state.preferredQualifications, state.qualifications, state.screeningQuestion, state.shortSummary])
 
   const updateState = (patch: Partial<Record<string, string>>) => {
     setState((prev) => ({
@@ -724,6 +814,15 @@ export default function ListingWizard(props: Props) {
           if (key === 'applyMode') return ['applyMode', normalizedValue as ApplyMode]
           if (key === 'atsStageMode') return ['atsStageMode', normalizedValue as AtsStageMode]
           if (key === 'useEmployerAtsDefaults') return ['useEmployerAtsDefaults', normalizedValue !== '0']
+          if (key === 'compensationIsEstimated') return ['compensationIsEstimated', normalizedValue !== '0']
+          if (key === 'bonusEligible') return ['bonusEligible', normalizedValue !== '0']
+          if (key === 'complianceEeoProvided') return ['complianceEeoProvided', normalizedValue !== '0']
+          if (key === 'compliancePayTransparencyProvided') return ['compliancePayTransparencyProvided', normalizedValue !== '0']
+          if (key === 'complianceAtWillProvided') return ['complianceAtWillProvided', normalizedValue !== '0']
+          if (key === 'complianceAccommodationsProvided') return ['complianceAccommodationsProvided', normalizedValue !== '0']
+          if (key === 'sourcePromoted') return ['sourcePromoted', normalizedValue !== '0']
+          if (key === 'sourceResponsesManagedOffPlatform') return ['sourceResponsesManagedOffPlatform', normalizedValue !== '0']
+          if (key === 'remoteEligibleStates') return ['remoteEligibleStates', parseJsonStringArrayValue(normalizedValue)]
           if (key === 'startDate') return ['startDate', normalizedValue.trim()]
           if (key === 'applicationDeadline') {
             const normalized = normalizeDateInputValue(normalizedValue)
@@ -773,6 +872,16 @@ export default function ListingWizard(props: Props) {
       stepIssues.push('City and state are required for hybrid/in-person roles.')
       if (!state.locationCity.trim()) step1FieldErrors.location_city = 'City is required for hybrid/in-person roles.'
       if (!state.locationState.trim()) step1FieldErrors.location_state = 'State is required for hybrid/in-person roles.'
+    }
+    if ((state.workMode === 'remote' || state.workMode === 'hybrid') && state.remoteEligibilityMode !== 'us_only') {
+      if (state.remoteEligibleStates.length === 0) {
+        stepIssues.push('Choose at least one remote-eligible state, or select US-only.')
+        step1FieldErrors.remote_eligibility = 'Choose at least one remote-eligible state.'
+      }
+      if (state.remoteEligibilityMode === 'single_state' && state.remoteEligibleStates.length > 1) {
+        stepIssues.push('Single-state eligibility can only include one state.')
+        step1FieldErrors.remote_eligibility = 'Choose only one state for single-state mode.'
+      }
     }
     if (
       !state.useEmployerAtsDefaults &&
@@ -875,6 +984,8 @@ export default function ListingWizard(props: Props) {
     state.locationState,
     state.payMax,
     state.payMin,
+    state.remoteEligibilityMode,
+    state.remoteEligibleStates,
     state.shortSummary,
     state.startDate,
     state.title,
@@ -916,6 +1027,39 @@ export default function ListingWizard(props: Props) {
   const step4FieldErrors = {
     ...(attemptedStep[4] ? stepValidation.step4.fieldErrors : {}),
     ...serverStepFieldErrors.step4,
+  }
+  const showAllSections = isEditing && layoutMode === 'all'
+  const allValidationIssues = [
+    ...stepValidation.step1.issues,
+    ...stepValidation.step2.issues,
+    ...stepValidation.step3.issues,
+    ...stepValidation.step4.issues,
+  ]
+  const isAllSectionsValid =
+    stepValidation.step1.valid && stepValidation.step2.valid && stepValidation.step3.valid && stepValidation.step4.valid
+  const coverage = getListingCoverage({
+    majors: majorLabels,
+    required_skills: requiredSkillLabels,
+    preferred_skills: preferredSkillLabels,
+    required_skill_ids: requiredSkillLabels,
+    preferred_skill_ids: preferredSkillLabels,
+    required_course_category_ids: courseworkCategoryLabels,
+    target_graduation_years: state.targetGraduationYears,
+    target_student_year: 'any',
+    term: derivedRange.startMonth && derivedRange.endMonth ? `${derivedRange.startMonth} ${derivedRange.startYear} - ${derivedRange.endMonth} ${derivedRange.endYear}` : null,
+    hours_min: Number.isFinite(Number(state.hoursMin)) ? Number(state.hoursMin) : null,
+    hours_max: Number.isFinite(Number(state.hoursMax)) ? Number(state.hoursMax) : null,
+    work_mode: state.workMode,
+    location_city: state.locationCity,
+    location_state: state.locationState,
+  })
+  const sectionHasIssue = {
+    basics: stepValidation.step1.issues.length > 0,
+    pay: stepValidation.step2.issues.length > 0,
+    requirements: coverage.missingLabels.some((label) =>
+      ['Majors', 'Coursework categories', 'Skills', 'Graduation years'].includes(label)
+    ),
+    description: stepValidation.step4.issues.length > 0,
   }
 
   const previewRequiredSkills = requiredSkillLabels
@@ -966,6 +1110,30 @@ export default function ListingWizard(props: Props) {
     setStep((prev) => Math.max(1, prev - 1))
   }
 
+  const scrollToSection = (sectionId: string) => {
+    const element = document.getElementById(sectionId)
+    if (!element) return
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const scrollToFirstInvalidSection = () => {
+    if (stepValidation.step1.issues.length > 0) {
+      scrollToSection('section-basics')
+      return
+    }
+    if (stepValidation.step2.issues.length > 0) {
+      scrollToSection('section-pay')
+      return
+    }
+    if (sectionHasIssue.requirements) {
+      scrollToSection('section-requirements')
+      return
+    }
+    if (stepValidation.step4.issues.length > 0) {
+      scrollToSection('section-description')
+    }
+  }
+
   const confirmExit = () => {
     allowExitRef.current = true
     window.localStorage.removeItem(storageKey)
@@ -992,7 +1160,32 @@ export default function ListingWizard(props: Props) {
       <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="space-y-4">
-            <ListingProgressBar currentStep={step} totalSteps={TOTAL_STEPS} />
+            {isEditing ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-slate-900">Edit mode layout</h3>
+                <div className="inline-flex rounded-md border border-slate-300 bg-white p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setLayoutMode('all')}
+                    className={`rounded px-2.5 py-1 ${
+                      layoutMode === 'all' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    All fields
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLayoutMode('step')}
+                    className={`rounded px-2.5 py-1 ${
+                      layoutMode === 'step' ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Step-by-step
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {!showAllSections ? <ListingProgressBar currentStep={step} totalSteps={TOTAL_STEPS} /> : null}
 
             <div>
               <label className="text-sm font-medium text-slate-700">Start from template (optional)</label>
@@ -1094,6 +1287,35 @@ export default function ListingWizard(props: Props) {
               </div>
             ) : null}
 
+            {showAllSections ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium">
+                    Listing quality coverage: {coverage.met}/{coverage.total}
+                  </p>
+                  {coverage.met < coverage.total ? (
+                    <span className="inline-flex items-center rounded-full border border-amber-300 bg-white px-2 py-0.5 text-xs font-medium text-amber-800">
+                      More details needed
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      Complete
+                    </span>
+                  )}
+                </div>
+                {coverage.met < coverage.total ? (
+                  <p className="mt-1 text-xs text-amber-800">{coverage.missingSummary}</p>
+                ) : null}
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  <a href="#section-basics" className="text-blue-700 hover:underline">Basics</a>
+                  <a href="#section-pay" className="text-blue-700 hover:underline">Pay & time</a>
+                  <a href="#section-requirements" className="text-blue-700 hover:underline">Requirements</a>
+                  <a href="#section-graduation" className="text-blue-700 hover:underline">Graduation years</a>
+                  <a href="#section-description" className="text-blue-700 hover:underline">Description & compliance</a>
+                </div>
+              </div>
+            ) : null}
+
             <form
               id={props.formId}
               ref={formRef}
@@ -1114,20 +1336,43 @@ export default function ListingWizard(props: Props) {
               <input type="hidden" name="target_student_year" value="any" />
               <input type="hidden" name="target_student_years" value={JSON.stringify(['freshman', 'sophomore', 'junior', 'senior'])} />
               <input type="hidden" name="desired_coursework_strength" value="low" />
-              <input type="hidden" name="remote_eligible_region" value="state" />
-              <input type="hidden" name="remote_eligible_state" value={state.locationState || props.employerBaseState || 'UT'} />
+              <input
+                type="hidden"
+                name="remote_eligible_region"
+                value={state.remoteEligibilityMode === 'us_only' ? 'us-wide' : state.remoteEligibilityMode === 'single_state' ? 'state' : 'state'}
+              />
+              <input
+                type="hidden"
+                name="remote_eligible_state"
+                value={state.remoteEligibleStates[0] ?? state.locationState ?? props.employerBaseState ?? 'UT'}
+              />
+              <input type="hidden" name="remote_eligible_states_json" value={JSON.stringify(state.remoteEligibleStates)} />
               <input type="hidden" name="description" value={derivedDescription} />
               <input type="hidden" name="responsibilities" value={responsibilities.map((item) => item.trim()).filter(Boolean).join('\n')} />
               <input type="hidden" name="apply_mode" value={state.applyMode} />
               <input type="hidden" name="ats_stage_mode" value={state.atsStageMode} />
 
-              <div className={step === 1 ? '' : 'hidden'}>
+              <section
+                id="section-basics"
+                className={showAllSections ? 'scroll-mt-24 rounded-xl border border-slate-200 p-4' : step === 1 ? '' : 'hidden'}
+              >
+                {showAllSections ? (
+                  <h4 className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    Basics
+                    {sectionHasIssue.basics ? <span className="inline-block h-2 w-2 rounded-full bg-red-500" /> : null}
+                  </h4>
+                ) : null}
                 <ListingStepBasics
                   title={state.title}
                   category={state.category}
                   workMode={state.workMode}
                   locationCity={state.locationCity}
                   locationState={state.locationState}
+                  employmentType={state.employmentType}
+                  internshipTypes={state.internshipTypes}
+                  workAuthorizationScope={state.workAuthorizationScope}
+                  remoteEligibilityMode={state.remoteEligibilityMode}
+                  remoteEligibleStates={state.remoteEligibleStates}
                   applyMode={state.applyMode}
                   atsStageMode={state.atsStageMode}
                   externalApplyUrl={state.externalApplyUrl}
@@ -1142,11 +1387,25 @@ export default function ListingWizard(props: Props) {
                   fieldErrors={step1FieldErrors}
                   onChange={updateState}
                 />
-              </div>
+              </section>
 
-              <div className={step === 2 ? '' : 'hidden'}>
+              <section
+                id="section-pay"
+                className={showAllSections ? 'scroll-mt-24 rounded-xl border border-slate-200 p-4' : step === 2 ? '' : 'hidden'}
+              >
+                {showAllSections ? (
+                  <h4 className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    Pay & time
+                    {sectionHasIssue.pay ? <span className="inline-block h-2 w-2 rounded-full bg-red-500" /> : null}
+                  </h4>
+                ) : null}
                 <ListingStepPayTime
                   payType={state.payType}
+                  compensationCurrency={state.compensationCurrency}
+                  compensationInterval={state.compensationInterval}
+                  compensationIsEstimated={state.compensationIsEstimated}
+                  bonusEligible={state.bonusEligible}
+                  compensationNotes={state.compensationNotes}
                   payMin={state.payMin}
                   payMax={state.payMax}
                   hoursMin={state.hoursMin}
@@ -1160,9 +1419,18 @@ export default function ListingWizard(props: Props) {
                 <p className="text-xs text-slate-500">
                   Listings with pay + hours filled get more qualified applicants.
                 </p>
-              </div>
+              </section>
 
-              <div className={step === 3 ? '' : 'hidden'}>
+              <section
+                id="section-requirements"
+                className={showAllSections ? 'scroll-mt-24 rounded-xl border border-slate-200 p-4' : step === 3 ? '' : 'hidden'}
+              >
+                {showAllSections ? (
+                  <h4 className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    Requirements, skills, coursework
+                    {sectionHasIssue.requirements ? <span className="inline-block h-2 w-2 rounded-full bg-red-500" /> : null}
+                  </h4>
+                ) : null}
                 <ListingStepRequirements
                   skillCatalog={props.skillCatalog}
                   majorCatalog={props.majorCatalog}
@@ -1180,27 +1448,63 @@ export default function ListingWizard(props: Props) {
                   onCourseworkCategoryLabelsChange={setCourseworkCategoryLabels}
                   onResumeRequiredChange={(value) => setState((prev) => ({ ...prev, resumeRequired: value }))}
                 />
-              </div>
+              </section>
 
-              <div className={step === 4 ? '' : 'hidden'}>
+              <section
+                id="section-description"
+                className={showAllSections ? 'scroll-mt-24 rounded-xl border border-slate-200 p-4' : step === 4 ? '' : 'hidden'}
+              >
+                {showAllSections ? (
+                  <h4 className="mb-3 inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    Description, compliance, source metadata
+                    {sectionHasIssue.description ? <span className="inline-block h-2 w-2 rounded-full bg-red-500" /> : null}
+                  </h4>
+                ) : null}
                 <ListingStepDescription
                   shortSummary={state.shortSummary}
                   responsibilities={responsibilities}
+                  minimumQualifications={state.minimumQualifications}
                   qualifications={state.qualifications}
+                  preferredQualifications={state.preferredQualifications}
+                  descriptionRaw={state.descriptionRaw}
                   screeningQuestion={state.screeningQuestion}
+                  complianceEeoProvided={state.complianceEeoProvided}
+                  compliancePayTransparencyProvided={state.compliancePayTransparencyProvided}
+                  complianceAtWillProvided={state.complianceAtWillProvided}
+                  complianceAccommodationsProvided={state.complianceAccommodationsProvided}
+                  complianceAccommodationsEmail={state.complianceAccommodationsEmail}
+                  complianceText={state.complianceText}
+                  sourcePlatform={state.sourcePlatform}
+                  sourcePostedDate={state.sourcePostedDate}
+                  sourceApplicantCount={state.sourceApplicantCount}
+                  sourcePromoted={state.sourcePromoted}
+                  sourceResponsesManagedOffPlatform={state.sourceResponsesManagedOffPlatform}
                   fieldErrors={step4FieldErrors}
                   onChange={updateState}
                   onResponsibilitiesChange={setResponsibilities}
                 />
-              </div>
+              </section>
+              {showAllSections ? (
+                <section id="section-graduation" className="scroll-mt-24 rounded-xl border border-slate-200 p-4">
+                  <h4 className="mb-3 text-sm font-semibold text-slate-900">Graduation years</h4>
+                  <p className="text-sm text-slate-700">All years are currently targeted for this listing.</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    This editor preserves existing behavior: all graduation years are included by default.
+                  </p>
+                </section>
+              ) : null}
 
-              {attemptedStep[step] && currentIssues.length > 0 ? (
+              {(showAllSections
+                ? attemptedStep[4] && allValidationIssues.length > 0
+                : attemptedStep[step] && currentIssues.length > 0) ? (
                 <div
                   className={`rounded-md px-3 py-2 text-sm ${
-                    step === 3 ? 'border border-blue-200 bg-blue-50 text-blue-800' : 'border border-red-200 bg-red-50 text-red-700'
+                    showAllSections || step !== 3
+                      ? 'border border-red-200 bg-red-50 text-red-700'
+                      : 'border border-blue-200 bg-blue-50 text-blue-800'
                   }`}
                 >
-                  {currentIssues.join(' ')}
+                  {(showAllSections ? allValidationIssues : currentIssues).join(' ')}
                 </div>
               ) : null}
 
@@ -1209,23 +1513,7 @@ export default function ListingWizard(props: Props) {
                   {savedAt ? `Draft saved ${new Date(savedAt).toLocaleTimeString()}` : 'Autosaving draft...'}
                 </div>
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={onBack}
-                    disabled={step === 1}
-                    className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
-                  >
-                    Back
-                  </button>
-                  {step < TOTAL_STEPS ? (
-                    <button
-                      type="button"
-                      onClick={onNext}
-                      className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-                    >
-                      Next
-                    </button>
-                  ) : (
+                  {showAllSections ? (
                     <div className="flex gap-2">
                       <button
                         type="submit"
@@ -1249,18 +1537,75 @@ export default function ListingWizard(props: Props) {
                         value="publish"
                         onClick={(event) => {
                           setPersistentServerError(null)
-                          setAttemptedStep((prev) => ({ ...prev, 4: true }))
-                          if (!stepValidation.step4.valid) {
+                          setAttemptedStep((prev) => ({ ...prev, 1: true, 2: true, 3: true, 4: true }))
+                          if (!isAllSectionsValid) {
                             event.preventDefault()
+                            scrollToFirstInvalidSection()
                             return
                           }
                           void postAnalyticsEvent('employer_listing_published', { draft_key: props.draftId })
                         }}
                         className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
-                        {props.internshipId ? 'Update & publish' : 'Publish internship'}
+                        Save changes
                       </button>
                     </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={onBack}
+                        disabled={step === 1}
+                        className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                      >
+                        Back
+                      </button>
+                      {step < TOTAL_STEPS ? (
+                        <button
+                          type="button"
+                          onClick={onNext}
+                          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                        >
+                          Next
+                        </button>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button
+                            type="submit"
+                            name="create_mode"
+                            value="draft"
+                            onClick={() => {
+                              setPersistentServerError(null)
+                              void postAnalyticsEvent('employer_listing_draft_saved', {
+                                draft_key: props.draftId,
+                                step,
+                                autosave: false,
+                              })
+                            }}
+                            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                          >
+                            Save draft
+                          </button>
+                          <button
+                            type="submit"
+                            name="create_mode"
+                            value="publish"
+                            onClick={(event) => {
+                              setPersistentServerError(null)
+                              setAttemptedStep((prev) => ({ ...prev, 4: true }))
+                              if (!stepValidation.step4.valid) {
+                                event.preventDefault()
+                                return
+                              }
+                              void postAnalyticsEvent('employer_listing_published', { draft_key: props.draftId })
+                            }}
+                            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                          >
+                            {props.internshipId ? 'Update & publish' : 'Publish internship'}
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

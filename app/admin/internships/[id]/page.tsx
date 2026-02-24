@@ -25,7 +25,7 @@ import { normalizeSkills } from '@/lib/skills/normalizeSkills'
 import { sanitizeSkillLabels } from '@/lib/skills/sanitizeSkillLabels'
 import { requireVerifiedEmail } from '@/lib/auth/emailVerification'
 import { validateListingForPublish } from '@/lib/listings/validateListingForPublish'
-import { computeInternshipMatchCoverage } from '@/lib/admin/internshipMatchCoverage'
+import { getListingCoverage } from '@/lib/listings/getListingCoverage'
 import InternshipLocationFields from '@/components/forms/InternshipLocationFields'
 import CatalogMultiSelect from '@/components/forms/CatalogMultiSelect'
 
@@ -208,7 +208,7 @@ export default async function AdminInternshipEditPage({
     admin
       .from('internships')
       .select(
-        'id, title, employer_id, company_name, source, is_active, category, experience_level, work_mode, location_city, location_state, remote_allowed, remote_eligibility, pay_min_hourly, pay_max_hourly, hours_per_week_min, hours_per_week_max, short_summary, description, responsibilities, qualifications, majors, term, target_graduation_years, required_skills, preferred_skills, recommended_coursework, apply_deadline, application_deadline, admin_notes, template_used, created_at, updated_at'
+        'id, title, employer_id, company_name, source, is_active, category, experience_level, work_mode, employment_type, internship_types, work_authorization_scope, location_city, location_state, remote_allowed, remote_eligibility, remote_eligibility_scope, remote_eligible_states, pay_min_hourly, pay_max_hourly, pay_min, pay_max, compensation_currency, compensation_interval, compensation_is_estimated, bonus_eligible, compensation_notes, short_summary, description, description_raw, responsibilities, qualifications, requirements_details, compliance_details, source_metadata, majors, term, target_graduation_years, required_course_category_ids, required_skills, preferred_skills, recommended_coursework, apply_deadline, application_deadline, admin_notes, template_used, created_at, updated_at'
       )
       .eq('id', id)
       .maybeSingle(),
@@ -229,8 +229,8 @@ export default async function AdminInternshipEditPage({
       .select('coursework_item_id, coursework:coursework_items(name)')
       .eq('internship_id', id),
     admin
-      .from('internship_coursework_category_links')
-      .select('category_id, category:coursework_categories(name)')
+      .from('internship_required_course_categories')
+      .select('category_id, category:canonical_course_categories(name)')
       .eq('internship_id', id),
     admin.from('applications').select('id', { count: 'exact', head: true }).eq('internship_id', id),
   ])
@@ -281,26 +281,15 @@ export default async function AdminInternshipEditPage({
   const legacyGraduationYears = Array.from(selectedGraduationYearSet).filter(
     (year) => !graduationYearOptions.includes(year)
   )
-  const majorsPresent = Array.isArray(internship.majors)
-    ? internship.majors.length > 0
-    : typeof internship.majors === 'string'
-      ? internship.majors.trim().length > 0
-      : false
-  const coverage = computeInternshipMatchCoverage({
-    majorsPresent,
-    courseworkCategoryLinkCount: courseworkCategoryLabels.length,
-    requiredSkillsCount: requiredSkillLabels.length || internship.required_skills?.length || 0,
-    preferredSkillsCount: preferredSkillLabels.length || internship.preferred_skills?.length || 0,
-    verifiedRequiredSkillLinks: requiredSkillLinkRows?.length ?? 0,
-    verifiedPreferredSkillLinks: preferredSkillLinkRows?.length ?? 0,
-    targetGraduationYearsPresent: Array.isArray(internship.target_graduation_years) && internship.target_graduation_years.length > 0,
-    experiencePresent: Boolean(internship.experience_level?.trim()),
-    termPresent: Boolean(internship.term?.trim()),
-    hoursPresent:
-      (typeof internship.hours_per_week_max === 'number' && internship.hours_per_week_max > 0) ||
-      (typeof internship.hours_per_week_min === 'number' && internship.hours_per_week_min > 0),
-    locationOrRemotePresent:
-      Boolean(internship.remote_allowed) || Boolean(internship.location_city?.trim() || internship.location_state?.trim()),
+  const hoursPerWeekMax = (internship as { hours_per_week_max?: number | null }).hours_per_week_max
+  const hoursPerWeekMin = (internship as { hours_per_week_min?: number | null }).hours_per_week_min
+  const coverage = getListingCoverage({
+    ...internship,
+    required_course_category_links_count: courseworkCategoryLabels.length,
+    verified_required_skill_links_count: requiredSkillLinkRows?.length ?? 0,
+    verified_preferred_skill_links_count: preferredSkillLinkRows?.length ?? 0,
+    hours_min: typeof hoursPerWeekMin === 'number' ? hoursPerWeekMin : null,
+    hours_max: typeof hoursPerWeekMax === 'number' ? hoursPerWeekMax : null,
   })
   const verificationStatus = isVerifiedEmployerStatus(subscriptionRow?.status ?? null) ? 'verified' : 'unverified'
   const applicantsTotal = applicantsCount ?? 0
@@ -828,12 +817,24 @@ export default async function AdminInternshipEditPage({
                 <dd className="mt-0.5">{normalizeSource(internship.source)}</dd>
               </div>
               <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Employment</dt>
+                <dd className="mt-0.5">{String(internship.employment_type ?? 'n/a')}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Comp interval</dt>
+                <dd className="mt-0.5">{String(internship.compensation_interval ?? 'n/a')}</dd>
+              </div>
+              <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-500">Updated</dt>
                 <dd className="mt-0.5">{formatDateTime(internship.updated_at)}</dd>
               </div>
               <div>
                 <dt className="text-xs uppercase tracking-wide text-slate-500">Created</dt>
                 <dd className="mt-0.5">{formatDateTime(internship.created_at)}</dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="text-xs uppercase tracking-wide text-slate-500">Work authorization scope</dt>
+                <dd className="mt-0.5 whitespace-pre-line">{String(internship.work_authorization_scope ?? 'n/a')}</dd>
               </div>
             </dl>
           </section>
@@ -886,6 +887,31 @@ export default async function AdminInternshipEditPage({
             <div>Verified skill links: {coverage.skillsBreakdown.verifiedLinks}</div>
             <div>Required coursework categories: {coverage.courseworkBreakdown.categoryLinks}</div>
           </div>
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <h2 className="text-sm font-semibold text-slate-900">Structured metadata</h2>
+          <pre className="mt-3 overflow-x-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-700">
+{JSON.stringify(
+  {
+    internship_types: internship.internship_types ?? [],
+    remote_eligibility_scope: internship.remote_eligibility_scope ?? null,
+    remote_eligible_states: internship.remote_eligible_states ?? [],
+    compensation: {
+      currency: internship.compensation_currency ?? null,
+      interval: internship.compensation_interval ?? null,
+      estimated: internship.compensation_is_estimated ?? null,
+      bonus_eligible: internship.bonus_eligible ?? null,
+      notes: internship.compensation_notes ?? null,
+    },
+    requirements_details: internship.requirements_details ?? {},
+    compliance_details: internship.compliance_details ?? {},
+    source_metadata: internship.source_metadata ?? {},
+  },
+  null,
+  2
+)}
+          </pre>
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
@@ -1104,7 +1130,7 @@ export default async function AdminInternshipEditPage({
                 <input
                   type="number"
                   name="hours_per_week_min"
-                  defaultValue={internship.hours_per_week_min ?? ''}
+                  defaultValue={hoursPerWeekMin ?? ''}
                   className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
                 />
               </div>
@@ -1113,7 +1139,7 @@ export default async function AdminInternshipEditPage({
                 <input
                   type="number"
                   name="hours_per_week_max"
-                  defaultValue={internship.hours_per_week_max ?? ''}
+                  defaultValue={hoursPerWeekMax ?? ''}
                   className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
                 />
               </div>
