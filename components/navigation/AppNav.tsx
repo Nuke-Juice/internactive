@@ -68,7 +68,7 @@ function topItemClasses(active: boolean) {
 }
 
 function workspaceItemClasses(active: boolean) {
-  return `inline-flex h-12 items-center gap-2 rounded-lg border px-4 text-sm font-semibold shadow-sm transition ${
+  return `inline-flex h-12 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-semibold shadow-sm transition ${
     active
       ? 'border-blue-300 bg-blue-600 text-white'
       : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50'
@@ -167,7 +167,7 @@ export default function AppNav({ role, variant, items, pathname, className }: Pr
 
   if (variant === 'workspaceTabs') {
     return (
-      <nav className={className ?? 'flex flex-wrap items-center gap-2'}>
+      <nav className={className ?? 'flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-0.5'}>
         {configuredItems.map((item) => {
           const Icon = resolveIcon(item)
           const active = item.id === activeItemId

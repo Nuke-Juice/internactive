@@ -6,6 +6,7 @@ import { supabaseBrowser } from '@/lib/supabase/client'
 import { useToast } from '@/components/feedback/ToastProvider'
 import { normalizeAuthError } from '@/lib/auth/normalizeAuthError'
 import { maskEmail } from '@/lib/auth/maskEmail'
+import { signOutAndResetClientView } from '@/lib/auth/clientSignOut'
 
 type ResendState = {
   ok: boolean
@@ -94,7 +95,7 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
       }
       setRefreshing(false)
       if (error.message.toLowerCase().includes('refresh token not found')) {
-        await supabase.auth.signOut()
+        await signOutAndResetClientView({ supabase, router, redirectTo: '/login' })
         setRefreshError('Session expired. Please sign in again, then click your verification link.')
         showToast({
           kind: 'warning',
@@ -138,7 +139,11 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
   async function signOutNow() {
     setSigningOut(true)
     const supabase = supabaseBrowser()
-    const { error } = await supabase.auth.signOut()
+    const { error } = await signOutAndResetClientView({
+      supabase,
+      router,
+      redirectTo: '/login',
+    })
     setSigningOut(false)
 
     if (error) {
@@ -152,8 +157,6 @@ export default function VerifyRequiredPanel({ email, nextUrl, actionName, resend
       return
     }
 
-    router.replace('/login')
-    router.refresh()
   }
 
   useEffect(() => {

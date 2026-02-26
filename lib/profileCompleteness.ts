@@ -9,6 +9,7 @@ export type MinimumProfileField = (typeof MINIMUM_PROFILE_FIELDS)[number]
 
 export type MinimumProfileInput = {
   school?: string | null
+  university_id?: string | null
   major_id?: string | null
   majors?: string[] | string | null
   availability_start_month?: string | null
@@ -60,6 +61,10 @@ function hasValidSchool(value: string | null | undefined) {
   return normalized !== 'not set' && normalized !== 'n/a' && normalized !== 'none'
 }
 
+function hasUniversityId(value: string | null | undefined) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
 export function getMinimumProfileCompleteness(profile: MinimumProfileInput | null): MinimumProfileCompleteness {
   if (!profile) {
     return { ok: false, missing: [...MINIMUM_PROFILE_FIELDS] }
@@ -68,7 +73,7 @@ export function getMinimumProfileCompleteness(profile: MinimumProfileInput | nul
   const majors = parseMajors(profile.majors)
 
   const checks: Record<MinimumProfileField, boolean> = {
-    school: hasValidSchool(profile.school),
+    school: hasValidSchool(profile.school) || hasUniversityId(profile.university_id),
     major: (typeof profile.major_id === 'string' && profile.major_id.trim().length > 0) || majors.length > 0,
     availability_start_month:
       typeof profile.availability_start_month === 'string' && profile.availability_start_month.trim().length > 0,

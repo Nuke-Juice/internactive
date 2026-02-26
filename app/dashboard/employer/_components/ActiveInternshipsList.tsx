@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useMemo, useRef, useState } from 'react'
 import CenteredModal from '@/app/dashboard/employer/_components/CenteredModal'
+import { formatLocationWithWorkMode, formatWorkMode } from '@/lib/internships/formatWorkMode'
 
 export type ActiveInternshipListItem = {
   id: string
@@ -29,7 +30,8 @@ function shouldShowWorkModeSuffix(location: string | null, workMode: string | nu
   if (!normalizedMode) return false
   const normalizedLocation = (location ?? '').trim().toLowerCase()
   if (!normalizedLocation) return true
-  return !normalizedLocation.includes(`(${normalizedMode})`)
+  const formattedMode = formatWorkMode(workMode).toLowerCase()
+  return !normalizedLocation.includes(`(${normalizedMode})`) && !normalizedLocation.includes(`(${formattedMode})`)
 }
 
 export default function ActiveInternshipsList({
@@ -61,14 +63,16 @@ export default function ActiveInternshipsList({
   return (
     <>
       <div className="mt-2 grid gap-3">
-        {internships.map((internship) => (
+        {internships.map((internship) => {
+          const locationLabel = formatLocationWithWorkMode(internship.location, internship.workMode) || internship.location
+          return (
           <div key={internship.id} className="rounded-xl border border-slate-200 p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="text-sm font-semibold text-slate-900">{internship.title || 'Untitled listing'}</div>
                 <div className="text-xs text-slate-500">
-                  {internship.location} • {internship.stateLabel}
-                  {shouldShowWorkModeSuffix(internship.location, internship.workMode) ? ` • ${internship.workMode}` : ''}
+                  {locationLabel} • {internship.stateLabel}
+                  {shouldShowWorkModeSuffix(locationLabel, internship.workMode) ? ` • ${formatWorkMode(internship.workMode)}` : ''}
                 </div>
                 <div className="text-xs text-slate-500">Created: {internship.createdAtLabel}</div>
               </div>
@@ -125,7 +129,8 @@ export default function ActiveInternshipsList({
               </button>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       <CenteredModal

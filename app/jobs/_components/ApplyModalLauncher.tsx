@@ -85,6 +85,17 @@ export default function ApplyModalLauncher({
       return
     }
     if (state.error) {
+      if ((state.profile_missing?.length ?? 0) > 0) {
+        showToast({
+          kind: 'error',
+          message: state.error,
+          actionLabel: 'Go to Profile',
+          onAction: () => {
+            router.push('/account')
+          },
+        })
+        return
+      }
       showToast({ kind: 'error', message: state.error })
     }
   }, [router, showToast, state])

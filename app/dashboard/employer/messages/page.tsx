@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
 import EmployerDashboardHeader from '@/components/employer/EmployerDashboardHeader'
@@ -81,16 +80,6 @@ export default async function EmployerMessagesPage({ searchParams }: { searchPar
   return (
     <main className="min-h-screen bg-white">
       <section className="mx-auto max-w-6xl px-6 py-10">
-        <div className="mb-4">
-          <Link
-            href="/dashboard/employer/applicants"
-            aria-label="Go back"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
-        </div>
-
         <EmployerDashboardHeader
           title="Messages"
           description="Communication and updates are grouped here so the applicant inbox can stay focused on ATS processing."

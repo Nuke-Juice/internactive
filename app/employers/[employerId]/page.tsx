@@ -3,6 +3,7 @@ import Image from 'next/image'
 import { ArrowLeft } from 'lucide-react'
 import EmployerVerificationBadge from '@/components/badges/EmployerVerificationBadge'
 import { getEmployerVerificationTier } from '@/lib/billing/subscriptions'
+import { formatLocationWithWorkMode, formatWorkMode } from '@/lib/internships/formatWorkMode'
 import { supabaseServer } from '@/lib/supabase/server'
 
 type Params = Promise<{ employerId: string }>
@@ -228,7 +229,7 @@ export default async function PublicEmployerProfilePage({ params }: { params: Pa
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-900">{listing.title || 'Internship'}</h3>
-                    <p className="mt-1 text-xs text-slate-600">{listing.location || 'Location TBD'}</p>
+                    <p className="mt-1 text-xs text-slate-600">{formatLocationWithWorkMode(listing.location, listing.work_mode) || 'Location TBD'}</p>
                   </div>
                   <div className="text-right text-xs text-slate-500">{formatDate(listing.created_at) ?? 'Date n/a'}</div>
                 </div>
@@ -237,7 +238,7 @@ export default async function PublicEmployerProfilePage({ params }: { params: Pa
                     <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">{listing.term}</span>
                   ) : null}
                   {listing.work_mode ? (
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">{listing.work_mode}</span>
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">{formatWorkMode(listing.work_mode)}</span>
                   ) : null}
                   {formatTargetYear(listing.target_student_year ?? listing.experience_level) ? (
                     <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700">{formatTargetYear(listing.target_student_year ?? listing.experience_level)}</span>

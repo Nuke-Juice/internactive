@@ -1,12 +1,12 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth/requireRole'
 import { normalizeExternalApplyUrl } from '@/lib/apply/externalApply'
 import { normalizeEmployerAtsDefaultMode } from '@/lib/apply/effectiveAts'
 import { supabaseServer } from '@/lib/supabase/server'
+import EmployerDashboardHeader from '@/components/employer/EmployerDashboardHeader'
 
-type SearchParams = Promise<{ success?: string; error?: string }>
+type SearchParams = Promise<{ success?: string; error?: string; internship_id?: string }>
 
 type EmployerSettingsRow = {
   default_ats_stage_mode: string | null
@@ -17,16 +17,24 @@ type EmployerSettingsRow = {
 
 export default async function EmployerAtsSettingsPage({ searchParams }: { searchParams?: SearchParams }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined
+  const selectedInternshipId = String(resolvedSearchParams?.internship_id ?? '').trim()
   const { user } = await requireRole('employer', { requestedPath: '/dashboard/employer/settings' })
   const supabase = await supabaseServer()
 
-  const { data: settingsRow } = await supabase
-    .from('employer_settings')
-    .select('default_ats_stage_mode, default_external_apply_url, default_external_apply_type, default_external_apply_label')
-    .eq('employer_id', user.id)
-    .maybeSingle()
+  const [{ data: settingsRow }, { data: internshipsData }] = await Promise.all([
+    supabase
+      .from('employer_settings')
+      .select('default_ats_stage_mode, default_external_apply_url, default_external_apply_type, default_external_apply_label')
+      .eq('employer_id', user.id)
+      .maybeSingle(),
+    supabase.from('internships').select('id, title').eq('employer_id', user.id).order('created_at', { ascending: false }).limit(200),
+  ])
 
   const settings = (settingsRow ?? null) as EmployerSettingsRow | null
+  const internships = (internshipsData ?? []) as Array<{ id: string; title: string | null }>
+  const internshipIds = internships.map((row) => row.id)
+  const activeInternshipId =
+    selectedInternshipId && internshipIds.includes(selectedInternshipId) ? selectedInternshipId : (internshipIds[0] ?? '')
   const defaultMode = normalizeEmployerAtsDefaultMode(settings?.default_ats_stage_mode)
   const defaultUrl = settings?.default_external_apply_url ?? ''
   const defaultType = settings?.default_external_apply_type === 'redirect' ? 'redirect' : 'new_tab'
@@ -71,14 +79,13 @@ export default async function EmployerAtsSettingsPage({ searchParams }: { search
 
   return (
     <main className="min-h-screen bg-white">
-      <section className="mx-auto max-w-4xl px-6 py-10">
-        <div className="mb-4">
-          <Link href="/dashboard/employer" className="text-sm font-medium text-slate-700 hover:underline">
-            Back to employer dashboard
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">ATS settings</h1>
-          <p className="mt-1 text-sm text-slate-600">Set defaults once. Listings can inherit these automatically.</p>
-        </div>
+      <section className="mx-auto max-w-6xl px-6 py-10">
+        <EmployerDashboardHeader
+          title="ATS settings"
+          description="Set defaults once. Listings can inherit these automatically."
+          selectedInternshipId={activeInternshipId || undefined}
+          internships={internships.map((row) => ({ id: row.id, title: row.title?.trim() || 'Internship' }))}
+        />
 
         {resolvedSearchParams?.success ? (
           <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -91,7 +98,7 @@ export default async function EmployerAtsSettingsPage({ searchParams }: { search
           </div>
         ) : null}
 
-        <form action={saveSettings} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <form action={saveSettings} className="mx-auto max-w-4xl space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div>
             <label className="text-sm font-medium text-slate-700">Default mode</label>
             <select

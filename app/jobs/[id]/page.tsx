@@ -688,6 +688,11 @@ export default async function JobDetailPage({
       label: 'Unknown',
     }
   }
+  const badgeForPercent = (pct: number): 'good' | 'partial' | 'gap' => {
+    if (pct >= 95) return 'good'
+    if (pct > 0) return 'partial'
+    return 'gap'
+  }
   const conciseLines = (category: (typeof reasonCategories)[number] | (typeof gapCategories)[number]) => {
     const normalizeLine = (value: string) =>
       value
@@ -857,7 +862,7 @@ export default async function JobDetailPage({
                         <ul className="mt-2 space-y-1.5">
                           {reasonCategories.map((category) => {
                             const percent = category.weightPoints > 0 ? Math.round((category.earnedPoints / category.weightPoints) * 100) : 0
-                            const tone = rowTone(category.status)
+                            const tone = rowTone(badgeForPercent(percent))
                             const lines = conciseLines(category)
                             return (
                             <li key={`reason:${category.key}`} className={`rounded-md border px-3 py-1.5 text-sm text-slate-900 ${tone.card}`}>
@@ -896,7 +901,7 @@ export default async function JobDetailPage({
                             const primaryGap = category.gaps[0]?.text ?? `${category.label} not enough data yet`
                             const cta = gapCta(primaryGap)
                             const percent = category.weightPoints > 0 ? Math.round((category.earnedPoints / category.weightPoints) * 100) : 0
-                            const tone = rowTone(category.status)
+                            const tone = rowTone(badgeForPercent(percent))
                             const lines = conciseLines(category)
                             return (
                               <li key={`gap:${category.key}`} className={`rounded-md border px-3 py-1.5 text-sm ${tone.card}`}>

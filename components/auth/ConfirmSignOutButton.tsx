@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabase/client'
+import { signOutAndResetClientView } from '@/lib/auth/clientSignOut'
 
 type Props = {
   className?: string
@@ -24,11 +25,17 @@ export default function ConfirmSignOutButton({
   async function handleSignOut() {
     setSigningOut(true)
     const supabase = supabaseBrowser()
-    await supabase.auth.signOut()
+    const { error } = await signOutAndResetClientView({
+      supabase,
+      router,
+      redirectTo,
+    })
+    if (error) {
+      setSigningOut(false)
+      return
+    }
     setSigningOut(false)
     setConfirmOpen(false)
-    router.push(redirectTo)
-    router.refresh()
   }
 
   return (

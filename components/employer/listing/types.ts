@@ -92,6 +92,8 @@ export type ListingWizardInitialValues = {
   sourceResponsesManagedOffPlatform: boolean
   targetGraduationYears: string[]
   resumeRequired: boolean
+  restrictByMajor: boolean
+  restrictByYear: boolean
   requiredSkillLabels: string[]
   preferredSkillLabels: string[]
   majorLabels: string[]

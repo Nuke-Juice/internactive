@@ -25,6 +25,7 @@ import {
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { normalizeSkillsClient } from '@/lib/skills/normalizeSkillsClient'
 import { normalizeSeason } from '@/lib/availability/normalizeSeason'
+import { signOutAndResetClientView } from '@/lib/auth/clientSignOut'
 
 type StudentProfileRow = {
   university_id: string | number | null
@@ -1458,7 +1459,11 @@ function addCourseworkItem(value: string) {
   async function signOut() {
     setSigningOut(true)
     const supabase = supabaseBrowser()
-    const { error: signOutError } = await supabase.auth.signOut()
+    const { error: signOutError } = await signOutAndResetClientView({
+      supabase,
+      router,
+      redirectTo: '/login',
+    })
     setSigningOut(false)
     setSignOutConfirmOpen(false)
 
@@ -1466,9 +1471,6 @@ function addCourseworkItem(value: string) {
       setError(signOutError.message)
       return
     }
-
-    router.push('/login')
-    router.refresh()
   }
 
   function editField(focusId: string) {

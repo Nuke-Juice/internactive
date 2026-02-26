@@ -675,6 +675,8 @@ export default function ListingWizard(props: Props) {
             ? parsed.source_responses_managed_off_platform !== '0'
             : prev.sourceResponsesManagedOffPlatform,
         resumeRequired: parsed.resume_required !== '0',
+        restrictByMajor: parsed.restrict_by_major === '1',
+        restrictByYear: parsed.restrict_by_year === '1',
       }))
       if (typeof parsed.responsibilities === 'string') {
         setResponsibilities(parseResponsibilities(parsed.responsibilities))
@@ -1442,11 +1444,15 @@ export default function ListingWizard(props: Props) {
                   title={state.title}
                   category={state.category}
                   resumeRequired={state.resumeRequired}
+                  restrictByMajor={state.restrictByMajor}
+                  restrictByYear={state.restrictByYear}
                   onRequiredSkillsChange={setRequiredSkillLabels}
                   onPreferredSkillsChange={setPreferredSkillLabels}
                   onMajorLabelsChange={setMajorLabels}
                   onCourseworkCategoryLabelsChange={setCourseworkCategoryLabels}
                   onResumeRequiredChange={(value) => setState((prev) => ({ ...prev, resumeRequired: value }))}
+                  onRestrictByMajorChange={(value) => setState((prev) => ({ ...prev, restrictByMajor: value }))}
+                  onRestrictByYearChange={(value) => setState((prev) => ({ ...prev, restrictByYear: value }))}
                 />
               </section>
 

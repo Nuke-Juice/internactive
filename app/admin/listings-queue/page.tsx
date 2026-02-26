@@ -6,6 +6,7 @@ import { requireAnyRole } from '@/lib/auth/requireAnyRole'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
 import { computeListingQualityScore } from '@/lib/admin/listingQuality'
 import { getEmployerVerificationTiers } from '@/lib/billing/subscriptions'
+import { formatWorkMode } from '@/lib/internships/formatWorkMode'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
 
 type SearchParams = Promise<{ tab?: string; success?: string; error?: string }>
@@ -60,8 +61,8 @@ function toQueueTab(input: {
 }
 
 function buildLocationLabel(row: InternshipRow) {
-  const mode = row.work_mode ?? 'n/a'
-  if (mode === 'remote') return 'remote'
+  const mode = formatWorkMode(row.work_mode) || 'n/a'
+  if ((row.work_mode ?? '').trim().toLowerCase() === 'remote') return mode
   if (row.location_city && row.location_state) return `${mode} · ${row.location_city}, ${row.location_state}`
   if (row.location_state) return `${mode} · ${row.location_state}`
   return mode

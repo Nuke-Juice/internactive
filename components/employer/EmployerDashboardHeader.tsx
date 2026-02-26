@@ -1,4 +1,5 @@
 import EmployerWorkspaceNav from '@/components/employer/EmployerWorkspaceNav'
+import type { ReactNode } from 'react'
 
 type InternshipOption = {
   id: string
@@ -11,6 +12,7 @@ type Props = {
   internships: InternshipOption[]
   selectedInternshipId?: string
   includeAllOption?: boolean
+  rightSlot?: ReactNode
 }
 
 export default function EmployerDashboardHeader(props: Props) {
@@ -24,6 +26,7 @@ export default function EmployerDashboardHeader(props: Props) {
         selectedInternshipId={props.selectedInternshipId}
         internships={props.internships}
         includeAllOption={props.includeAllOption}
+        rightSlot={props.rightSlot}
       />
     </div>
   )

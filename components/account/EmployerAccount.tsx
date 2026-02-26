@@ -8,6 +8,7 @@ import { useToast } from '@/components/feedback/ToastProvider'
 import EmployerVerificationBadge from '@/components/badges/EmployerVerificationBadge'
 import ConfirmSignOutButton from '@/components/auth/ConfirmSignOutButton'
 import SecuritySettings from '@/components/account/SecuritySettings'
+import SettingsButton from '@/components/ui/SettingsButton'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import type { EmployerPlanId } from '@/lib/billing/plan'
 
@@ -364,7 +365,7 @@ export default function EmployerAccount({
             >
               Brand page
             </button>
-            <button
+            <SettingsButton
               type="button"
               onClick={() => setActiveTab('settings')}
               className={`rounded-md px-3 py-2 text-sm font-medium ${
@@ -372,9 +373,7 @@ export default function EmployerAccount({
                   ? 'border border-blue-300 bg-blue-50 text-blue-700'
                   : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
               }`}
-            >
-              Settings
-            </button>
+            />
           </div>
           <Link
             href={`/employers/${encodeURIComponent(userId)}`}

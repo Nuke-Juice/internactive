@@ -5,6 +5,7 @@ import { requireAnyRole } from '@/lib/auth/requireAnyRole'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
 import { canAccessAdminMatching } from '@/lib/auth/adminMatchingAccess'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
+import { formatWorkMode } from '@/lib/internships/formatWorkMode'
 import {
   evaluateSinglePreviewMatch,
   loadAdminInternshipPreviewItems,
@@ -174,7 +175,7 @@ export default async function AdminMatchingPreviewPage({ searchParams }: { searc
                         <span className="rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">{score.toFixed(1)}</span>
                       </div>
                       <div className="mt-2 text-xs text-slate-600">
-                        {(item.internship.category ?? item.internship.roleCategory ?? 'Uncategorized')} · {item.internship.workMode ?? 'mode n/a'} · {item.internship.term ?? 'term n/a'}
+                        {(item.internship.category ?? item.internship.roleCategory ?? 'Uncategorized')} · {formatWorkMode(item.internship.workMode) || 'mode n/a'} · {item.internship.term ?? 'term n/a'}
                       </div>
                       <div className="mt-2 text-xs text-emerald-800">{item.match.reasons.slice(0, 2).join(' • ') || 'No positive reasons recorded'}</div>
                       <div className="mt-3 flex items-center gap-2">

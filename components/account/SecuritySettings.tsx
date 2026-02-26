@@ -1,11 +1,14 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabase/client'
+import { signOutAndResetClientView } from '@/lib/auth/clientSignOut'
 
 type Props = { email: string }
 
 export default function SecuritySettings({ email }: Props) {
+  const router = useRouter()
   const [sendingReset, setSendingReset] = useState(false)
   const [deletingAccount, setDeletingAccount] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
@@ -47,8 +50,11 @@ export default function SecuritySettings({ email }: Props) {
     }
 
     const supabase = supabaseBrowser()
-    await supabase.auth.signOut()
-    window.location.href = '/?account_deleted=1'
+    await signOutAndResetClientView({
+      supabase,
+      router,
+      redirectTo: '/?account_deleted=1',
+    })
   }
 
   return (

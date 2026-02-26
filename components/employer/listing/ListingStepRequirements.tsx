@@ -18,11 +18,15 @@ type Props = {
   title: string
   category: string
   resumeRequired: boolean
+  restrictByMajor: boolean
+  restrictByYear: boolean
   onRequiredSkillsChange: (labels: string[]) => void
   onPreferredSkillsChange: (labels: string[]) => void
   onMajorLabelsChange: (labels: string[]) => void
   onCourseworkCategoryLabelsChange: (labels: string[]) => void
   onResumeRequiredChange: (value: boolean) => void
+  onRestrictByMajorChange: (value: boolean) => void
+  onRestrictByYearChange: (value: boolean) => void
 }
 
 const CURATED_COURSEWORK_LABELS = [
@@ -140,6 +144,29 @@ export default function ListingStepRequirements(props: Props) {
           Resume required
         </label>
         <input type="hidden" name="resume_required" value={props.resumeRequired ? '1' : '0'} />
+      </div>
+
+      <div className="space-y-2 rounded-md border border-slate-300 bg-white p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Eligibility restrictions</p>
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={props.restrictByMajor}
+            onChange={(event) => props.onRestrictByMajorChange(event.target.checked)}
+          />
+          Enforce major eligibility
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={props.restrictByYear}
+            onChange={(event) => props.onRestrictByYearChange(event.target.checked)}
+          />
+          Enforce graduation year eligibility
+        </label>
+        <p className="text-xs text-slate-500">Off by default. When off, mismatches affect ranking only and do not block apply.</p>
+        <input type="hidden" name="restrict_by_major" value={props.restrictByMajor ? '1' : '0'} />
+        <input type="hidden" name="restrict_by_year" value={props.restrictByYear ? '1' : '0'} />
       </div>
     </div>
   )

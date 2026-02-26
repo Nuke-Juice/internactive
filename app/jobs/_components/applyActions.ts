@@ -27,12 +27,18 @@ type ApplyFromMicroOnboardingResult =
       ok: false
       code: ApplyErrorCode
       missing?: string[]
+      profile_missing?: string[]
+      application_missing?: string[]
+      eligibility_failed?: string[]
     }
 
 export type ApplyFromListingModalState = {
   ok: boolean
   error?: string
   code?: ApplyErrorCode
+  profile_missing?: string[]
+  application_missing?: string[]
+  eligibility_failed?: string[]
   externalApplyUrl?: string | null
   externalApplyRequired?: boolean
   successMessage?: string
@@ -47,6 +53,130 @@ function hasDeadlinePassed(value: string | null | undefined) {
   const deadline = new Date(value)
   if (!Number.isFinite(deadline.getTime())) return false
   return deadline.getTime() < Date.now()
+}
+
+type ApplyGateReasons = {
+  profile_missing: string[]
+  application_missing: string[]
+  eligibility_failed: string[]
+}
+
+function parseTextList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean)
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+  return []
+}
+
+function normalizeGradYear(value: unknown) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function labelProfileField(field: string) {
+  if (field === 'school') return 'School'
+  if (field === 'major') return 'Major'
+  if (field === 'availability_start_month') return 'Availability start month'
+  if (field === 'availability_hours_per_week') return 'Availability hours per week'
+  if (field === 'graduation_year') return 'Graduation year'
+  return field
+}
+
+function profileMissingMessage(fields: string[]) {
+  const labels = fields.map(labelProfileField)
+  if (labels.length === 0) return 'Complete required profile fields before applying.'
+  return `Complete required profile fields before applying: ${labels.join(', ')}.`
+}
+
+function evaluateApplyGate(params: {
+  listing: {
+    majors?: unknown
+    target_graduation_years?: unknown
+    resume_required?: boolean | null
+    restrict_by_major?: boolean | null
+    restrict_by_year?: boolean | null
+  }
+  profile: {
+    school?: string | null
+    university_id?: string | null
+    major_id?: string | null
+    major?: { name?: string | null } | Array<{ name?: string | null }> | null
+    majors?: string[] | string | null
+    year?: string | null
+    availability_start_month?: string | null
+    availability_hours_per_week?: number | string | null
+  } | null
+  hasResume: boolean
+  listingId: string
+  userId: string
+}) {
+  const profileMissing = getMinimumProfileCompleteness(params.profile).missing.map((item) => String(item))
+  const gradYear = normalizeGradYear(params.profile?.year)
+  if (!gradYear && !profileMissing.includes('graduation_year')) {
+    profileMissing.push('graduation_year')
+  }
+  const reasons: ApplyGateReasons = {
+    profile_missing: profileMissing,
+    application_missing: [],
+    eligibility_failed: [],
+  }
+
+  const requiresResume = params.listing.resume_required !== false
+  if (requiresResume && !params.hasResume) {
+    reasons.application_missing.push('resume')
+  }
+
+  const restrictByMajor = params.listing.restrict_by_major === true
+  const restrictByYear = params.listing.restrict_by_year === true
+  const listingMajors = parseTextList(params.listing.majors).map((item) => item.toLowerCase())
+  const canonicalMajor =
+    Array.isArray(params.profile?.major)
+      ? params.profile?.major[0]?.name
+      : params.profile?.major?.name
+  const studentMajors = Array.from(
+    new Set([...parseTextList(params.profile?.majors), typeof canonicalMajor === 'string' ? canonicalMajor : ''])
+  ).map((item) => item.toLowerCase())
+  if (restrictByMajor && listingMajors.length > 0) {
+    const majorMatch = studentMajors.some((major) => listingMajors.includes(major))
+    if (!majorMatch) {
+      reasons.eligibility_failed.push('Major not eligible')
+    }
+  }
+
+  const targetYears = parseTextList(params.listing.target_graduation_years).map(normalizeGradYear).filter(Boolean)
+  if (restrictByYear && targetYears.length > 0 && gradYear && !targetYears.includes(gradYear)) {
+    reasons.eligibility_failed.push('Graduation year not eligible')
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.info('[apply.gate.debug]', {
+      listing_id: params.listingId,
+      user_id: params.userId,
+      profile_missing: reasons.profile_missing,
+      application_missing: reasons.application_missing,
+      eligibility_failed: reasons.eligibility_failed,
+      raw: {
+        profile_year: params.profile?.year ?? null,
+        profile_majors: params.profile?.majors ?? null,
+        listing_majors: params.listing.majors ?? null,
+        listing_target_graduation_years: params.listing.target_graduation_years ?? null,
+        restrict_by_major: params.listing.restrict_by_major ?? false,
+        restrict_by_year: params.listing.restrict_by_year ?? false,
+        resume_required: params.listing.resume_required ?? true,
+      },
+    })
+  }
+
+  return {
+    canApply:
+      reasons.profile_missing.length === 0 &&
+      reasons.application_missing.length === 0 &&
+      reasons.eligibility_failed.length === 0,
+    reasons,
+  }
 }
 
 export async function applyFromMicroOnboardingAction({
@@ -80,25 +210,11 @@ export async function applyFromMicroOnboardingAction({
   const resumePath =
     typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path.trim() : ''
 
-  if (!resumePath) {
-    await trackAnalyticsEvent({
-      eventName: 'apply_recovery_started',
-      userId: user.id,
-      properties: { listing_id: listingId, code: APPLY_ERROR.RESUME_REQUIRED, missing: [] },
-    })
-    await trackAnalyticsEvent({
-      eventName: 'apply_blocked',
-      userId: user.id,
-      properties: { listing_id: listingId, code: APPLY_ERROR.RESUME_REQUIRED, missing: [] },
-    })
-    return { ok: false, code: APPLY_ERROR.RESUME_REQUIRED }
-  }
-
   const [{ data: listing }, { data: userRow }, { data: profile }, courseworkFeatures] = await Promise.all([
     supabase
       .from('internships')
       .select(
-        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, application_cap, applications_count, resume_required, restrict_by_major, restrict_by_year, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
       .eq('is_active', true)
@@ -106,7 +222,7 @@ export async function applyFromMicroOnboardingAction({
     supabase.from('users').select('role').eq('id', user.id).maybeSingle(),
     supabase
       .from('student_profiles')
-      .select('school, major_id, majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week')
+      .select('school, university_id, major_id, major:canonical_majors(name), majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week')
       .eq('user_id', user.id)
       .maybeSingle(),
     getStudentCourseworkFeatures({
@@ -151,19 +267,43 @@ export async function applyFromMicroOnboardingAction({
     return { ok: false, code: APPLY_ERROR.ROLE_NOT_STUDENT }
   }
 
-  const completeness = getMinimumProfileCompleteness(profile)
-  if (!completeness.ok) {
+  const gate = evaluateApplyGate({
+    listing,
+    profile,
+    hasResume: Boolean(resumePath),
+    listingId,
+    userId: user.id,
+  })
+  if (!gate.canApply) {
+    const allMissing = [
+      ...gate.reasons.profile_missing,
+      ...gate.reasons.application_missing,
+      ...gate.reasons.eligibility_failed,
+    ]
+    const code =
+      gate.reasons.profile_missing.length > 0
+        ? APPLY_ERROR.PROFILE_INCOMPLETE
+        : gate.reasons.application_missing.includes('resume')
+          ? APPLY_ERROR.RESUME_REQUIRED
+          : APPLY_ERROR.APPLICATION_INSERT_FAILED
     await trackAnalyticsEvent({
       eventName: 'apply_recovery_started',
       userId: user.id,
-      properties: { listing_id: listingId, code: APPLY_ERROR.PROFILE_INCOMPLETE, missing: completeness.missing },
+      properties: { listing_id: listingId, code, missing: allMissing },
     })
     await trackAnalyticsEvent({
       eventName: 'apply_blocked',
       userId: user.id,
-      properties: { listing_id: listingId, code: APPLY_ERROR.PROFILE_INCOMPLETE, missing: completeness.missing },
+      properties: { listing_id: listingId, code, missing: allMissing },
     })
-    return { ok: false, code: APPLY_ERROR.PROFILE_INCOMPLETE, missing: completeness.missing }
+    return {
+      ok: false,
+      code,
+      missing: allMissing,
+      profile_missing: gate.reasons.profile_missing,
+      application_missing: gate.reasons.application_missing,
+      eligibility_failed: gate.reasons.eligibility_failed,
+    }
   }
 
   const { data: existing } = await supabase
@@ -347,7 +487,7 @@ export async function submitApplicationFromListingModalAction(
     supabase
       .from('internships')
       .select(
-        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, application_cap, applications_count, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
+        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, application_cap, applications_count, resume_required, restrict_by_major, restrict_by_year, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
       )
       .eq('id', listingId)
       .eq('is_active', true)
@@ -378,9 +518,9 @@ export async function submitApplicationFromListingModalAction(
   if (existing?.id) return { ok: false, code: APPLY_ERROR.DUPLICATE_APPLICATION, error: 'You already applied to this internship.' }
 
   const fullProfileSelect =
-    'school, major_id, majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week'
+    'school, university_id, major_id, major:canonical_majors(name), majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week'
   const fallbackProfileSelect =
-    'school, major_id, majors, year, experience_level, coursework, interests, availability_start_month, availability_hours_per_week'
+    'school, university_id, major_id, major:canonical_majors(name), majors, year, experience_level, coursework, interests, availability_start_month, availability_hours_per_week'
   const profileResult = await supabase
     .from('student_profiles')
     .select(fullProfileSelect)
@@ -397,12 +537,56 @@ export async function submitApplicationFromListingModalAction(
         ).data
       : profileResult.data
 
-  const completeness = getMinimumProfileCompleteness(profile)
-  if (!completeness.ok) {
+  const gate = evaluateApplyGate({
+    listing,
+    profile,
+    hasResume: hasUpload || Boolean(typeof user.user_metadata?.resume_path === 'string' && user.user_metadata.resume_path.trim()),
+    listingId,
+    userId: user.id,
+  })
+  if (!gate.canApply) {
+    if (gate.reasons.profile_missing.length > 0) {
+      return {
+        ok: false,
+        code: APPLY_ERROR.PROFILE_INCOMPLETE,
+        profile_missing: gate.reasons.profile_missing,
+        application_missing: gate.reasons.application_missing,
+        eligibility_failed: gate.reasons.eligibility_failed,
+        error: profileMissingMessage(gate.reasons.profile_missing),
+      }
+    }
+    if (gate.reasons.application_missing.length > 0) {
+      const needsResume = gate.reasons.application_missing.includes('resume')
+      return {
+        ok: false,
+        code: needsResume ? APPLY_ERROR.RESUME_REQUIRED : APPLY_ERROR.APPLICATION_INSERT_FAILED,
+        profile_missing: gate.reasons.profile_missing,
+        application_missing: gate.reasons.application_missing,
+        eligibility_failed: gate.reasons.eligibility_failed,
+        error: needsResume ? 'Resume required. Upload a PDF resume to apply.' : 'Complete required application fields before applying.',
+      }
+    }
     return {
       ok: false,
-      code: APPLY_ERROR.PROFILE_INCOMPLETE,
-      error: 'Complete required profile fields before applying.',
+      code: APPLY_ERROR.APPLICATION_INSERT_FAILED,
+      profile_missing: gate.reasons.profile_missing,
+      application_missing: gate.reasons.application_missing,
+      eligibility_failed: gate.reasons.eligibility_failed,
+      error: gate.reasons.eligibility_failed[0] ?? 'You are not eligible for this listing.',
+    }
+  }
+
+  if (!hasUpload) {
+    const existingResume = typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path.trim() : ''
+    if (!existingResume && listing.resume_required !== false) {
+      return {
+        ok: false,
+        code: APPLY_ERROR.RESUME_REQUIRED,
+        application_missing: ['resume'],
+        profile_missing: [],
+        eligibility_failed: [],
+        error: 'Resume required. Upload a PDF resume to apply.',
+      }
     }
   }
 
@@ -431,7 +615,9 @@ export async function submitApplicationFromListingModalAction(
     resumePath = nextPath
   }
 
-  if (!resumePath) return { ok: false, code: APPLY_ERROR.RESUME_REQUIRED, error: 'Upload a resume to apply.' }
+  if (!resumePath && listing.resume_required !== false) {
+    return { ok: false, code: APPLY_ERROR.RESUME_REQUIRED, application_missing: ['resume'], error: 'Resume required. Upload a PDF resume to apply.' }
+  }
 
   const normalizedListingCoursework = normalizeListingCoursework({
     internship_required_course_categories: listing.internship_required_course_categories,

@@ -1,5 +1,7 @@
 'use client'
 
+import { formatWorkMode } from '@/lib/internships/formatWorkMode'
+
 type PreviewProps = {
   title: string
   companyName: string
@@ -32,6 +34,7 @@ function splitBullets(value: string) {
 export default function ListingPreviewPanel(props: PreviewProps) {
   const responsibilities = splitBullets(props.responsibilities)
   const qualifications = splitBullets(props.qualifications)
+  const workModeLabel = formatWorkMode(props.workMode) || 'mode pending'
   const locationLabel =
     props.workMode === 'remote'
       ? 'Remote'
@@ -45,7 +48,7 @@ export default function ListingPreviewPanel(props: PreviewProps) {
       <h3 className="mt-2 text-lg font-semibold text-slate-900">{props.title || 'Untitled internship'}</h3>
       <div className="mt-1 text-sm text-slate-600">{props.companyName || 'Your company'}</div>
       <div className="mt-2 text-xs text-slate-600">
-        {(props.category || 'Category pending') + ' · ' + locationLabel + ' · ' + (props.workMode || 'mode pending')}
+        {(props.category || 'Category pending') + ' · ' + locationLabel + ' · ' + workModeLabel}
       </div>
       <div className="mt-2 text-xs text-slate-600">
         {`$${props.payMin || '?'}-$${props.payMax || '?'} / hr · ${props.hoursMin || '?'}-${props.hoursMax || '?'} hrs/week · ${props.durationWeeks || '?'} weeks`}
