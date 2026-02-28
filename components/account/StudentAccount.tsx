@@ -98,6 +98,7 @@ const applyFieldFocusByKey: Record<MinimumProfileField | 'resume', string> = {
   major: 'major-input',
   availability_start_month: 'start-month-input',
   availability_hours_per_week: 'hours-per-week-input',
+  graduation_year: 'graduation-year-input',
   resume: 'resume-input',
 }
 
@@ -399,11 +400,23 @@ export default function StudentAccount({ userId, initialProfile }: Props) {
   const minimumProfile = useMemo(() => {
     return getMinimumProfileCompleteness({
       school: selectedUniversity?.name ?? universityQuery ?? null,
+      university_id: selectedUniversity?.id ?? null,
+      major_id: selectedMajorId,
       majors: selectedMajorId && major ? [major] : [],
       availability_start_month: availabilityStartMonth,
       availability_hours_per_week: availabilityHoursPerWeek,
+      year: graduationYear,
     })
-  }, [availabilityHoursPerWeek, availabilityStartMonth, major, selectedMajorId, selectedUniversity?.name, universityQuery])
+  }, [
+    availabilityHoursPerWeek,
+    availabilityStartMonth,
+    graduationYear,
+    major,
+    selectedMajorId,
+    selectedUniversity?.id,
+    selectedUniversity?.name,
+    universityQuery,
+  ])
   const minimumProfileReady = minimumProfile.ok
 
   const hasResumeForApply = useMemo(() => {
@@ -1413,9 +1426,12 @@ function addCourseworkItem(value: string) {
     const recoveryReadyAfterSave =
       getMinimumProfileCompleteness({
         school: selectedUniversity.name,
+        university_id: selectedUniversity.id,
+        major_id: selectedMajor.id,
         majors: normalizedMajor ? [normalizedMajor] : [],
         availability_start_month: availabilityStartMonth.trim() || null,
         availability_hours_per_week: Number(availabilityHoursPerWeek),
+        year: graduationYear.trim() || null,
       }).ok && Boolean(resumePath || resumeName || resumeFile)
 
     if (returnTo && recoveryReadyAfterSave) {

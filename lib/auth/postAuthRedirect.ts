@@ -35,7 +35,7 @@ async function isOnboardingComplete(supabase: SupabaseClient, userId: string, ro
   if (role === 'student') {
     const { data: profile } = await supabase
       .from('student_profiles')
-      .select('school, major_id, majors, availability_start_month, availability_hours_per_week')
+      .select('school, university_id, major_id, majors, year, availability_start_month, availability_hours_per_week')
       .eq('user_id', userId)
       .maybeSingle()
 

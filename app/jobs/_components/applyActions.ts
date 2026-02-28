@@ -8,7 +8,12 @@ import {
   type ApplyErrorCode,
 } from '@/lib/applyErrors'
 import { trackAnalyticsEvent } from '@/lib/analytics'
-import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
+import {
+  getMinimumProfileFieldLabel,
+  getMissingProfileFields,
+  normalizeProfileForValidation,
+  type MinimumProfileField,
+} from '@/lib/profileCompleteness'
 import { buildApplicationMatchSnapshot } from '@/lib/applicationMatchSnapshot'
 import { sendEmployerApplicationAlert } from '@/lib/email/employerAlerts'
 import { guardApplicationSubmit, EMAIL_VERIFICATION_ERROR } from '@/lib/auth/verifiedActionGate'
@@ -16,6 +21,8 @@ import { normalizeEmployerAtsDefaultMode, resolveEffectiveAtsConfig, type Employ
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
 import { dispatchInAppNotification } from '@/lib/notifications/dispatcher'
+import { getInternshipById, type InternshipDetailListing } from '@/lib/jobs/getInternshipById'
+import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
 
 type ApplyFromMicroOnboardingInput = {
   listingId: string
@@ -48,6 +55,16 @@ function isSchemaCacheError(message: string | null | undefined) {
   return (message ?? '').toLowerCase().includes('schema cache')
 }
 
+function isProfileSelectFallbackError(message: string | null | undefined) {
+  const normalized = (message ?? '').toLowerCase()
+  return (
+    isSchemaCacheError(message) ||
+    normalized.includes('graduation_year') ||
+    normalized.includes('could not find the relation') ||
+    normalized.includes('foreign key')
+  )
+}
+
 function hasDeadlinePassed(value: string | null | undefined) {
   if (!value) return false
   const deadline = new Date(value)
@@ -77,11 +94,9 @@ function normalizeGradYear(value: unknown) {
 }
 
 function labelProfileField(field: string) {
-  if (field === 'school') return 'School'
-  if (field === 'major') return 'Major'
-  if (field === 'availability_start_month') return 'Availability start month'
-  if (field === 'availability_hours_per_week') return 'Availability hours per week'
-  if (field === 'graduation_year') return 'Graduation year'
+  if (field === 'school' || field === 'major' || field === 'availability_start_month' || field === 'availability_hours_per_week' || field === 'graduation_year') {
+    return getMinimumProfileFieldLabel(field as MinimumProfileField)
+  }
   return field
 }
 
@@ -89,6 +104,102 @@ function profileMissingMessage(fields: string[]) {
   const labels = fields.map(labelProfileField)
   if (labels.length === 0) return 'Complete required profile fields before applying.'
   return `Complete required profile fields before applying: ${labels.join(', ')}.`
+}
+
+function logApplyLookupDebug(input: {
+  listingId: string
+  userId: string
+  viewerRole: 'student' | 'employer' | 'admin' | null
+  access: 'visible' | 'not_found' | 'not_authorized'
+  queryError?: string | null
+}) {
+  if (process.env.NODE_ENV === 'production') return
+  console.info('[apply.lookup.debug]', {
+    listing_id: input.listingId,
+    user_id: input.userId,
+    viewer_role: input.viewerRole,
+    lookup_filters: ['internships.id = listingId', 'visibility = isFeedEligible(is_active/status/deadline)'],
+    access: input.access,
+    result_count: input.access === 'visible' ? 1 : 0,
+    error: input.queryError ?? null,
+  })
+}
+
+async function listingUnavailableReason(listingId: string) {
+  if (!hasSupabaseAdminCredentials()) {
+    return 'Listing unavailable (not published/active).'
+  }
+  const admin = supabaseAdmin()
+  const { data, error } = await admin
+    .from('internships')
+    .select('id, is_active, status, application_deadline')
+    .eq('id', listingId)
+    .maybeSingle()
+  if (error) {
+    return 'Listing unavailable (not published/active).'
+  }
+  if (!data?.id) {
+    return 'Listing not found.'
+  }
+  if (data.is_active !== true) {
+    return 'Listing unavailable (inactive).'
+  }
+  const status = String(data.status ?? '').trim().toLowerCase()
+  if (status === 'archived' || status === 'deleted' || status === 'private' || status === 'hidden') {
+    return `Listing unavailable (${status}).`
+  }
+  if (hasDeadlinePassed(data.application_deadline ?? null)) {
+    return 'Listing unavailable (application deadline passed).'
+  }
+  return 'Listing unavailable (not published/active).'
+}
+
+async function resolveApplyListing(params: {
+  listingId: string
+  userId: string
+  viewerRole: 'student' | 'employer' | 'admin' | null
+}): Promise<
+  | { ok: true; listing: InternshipDetailListing & Record<string, unknown> }
+  | { ok: false; code: ApplyErrorCode; message: string }
+> {
+  const detail = await getInternshipById(params.listingId, {
+    viewerId: params.userId,
+    viewerRole: params.viewerRole,
+  })
+  logApplyLookupDebug({
+    listingId: params.listingId,
+    userId: params.userId,
+    viewerRole: params.viewerRole,
+    access: detail.access,
+    queryError: null,
+  })
+
+  if (detail.access === 'visible' && detail.listing) {
+    return { ok: true, listing: detail.listing as InternshipDetailListing & Record<string, unknown> }
+  }
+  if (detail.access === 'not_found') {
+    return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND, message: 'Listing not found.' }
+  }
+  const unavailableReason = await listingUnavailableReason(params.listingId)
+  return { ok: false, code: APPLY_ERROR.LISTING_UNAVAILABLE, message: unavailableReason }
+}
+
+async function fetchStudentProfileForApply(supabase: Awaited<ReturnType<typeof supabaseServer>>, userId: string) {
+  const fullProfileSelect =
+    'school, university_id, major_id, major:canonical_majors(name), majors, graduation_year, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week'
+  const fallbackProfileSelect =
+    'school, university_id, major_id, major:canonical_majors(name), majors, year, experience_level, coursework, interests, availability_start_month, availability_hours_per_week'
+
+  const fullResult = await supabase.from('student_profiles').select(fullProfileSelect).eq('user_id', userId).maybeSingle()
+  if (fullResult.error && isProfileSelectFallbackError(fullResult.error.message)) {
+    const fallback = await supabase
+      .from('student_profiles')
+      .select(fallbackProfileSelect)
+      .eq('user_id', userId)
+      .maybeSingle()
+    return fallback.data
+  }
+  return fullResult.data
 }
 
 function evaluateApplyGate(params: {
@@ -105,6 +216,7 @@ function evaluateApplyGate(params: {
     major_id?: string | null
     major?: { name?: string | null } | Array<{ name?: string | null }> | null
     majors?: string[] | string | null
+    graduation_year?: number | string | null
     year?: string | null
     availability_start_month?: string | null
     availability_hours_per_week?: number | string | null
@@ -113,11 +225,11 @@ function evaluateApplyGate(params: {
   listingId: string
   userId: string
 }) {
-  const profileMissing = getMinimumProfileCompleteness(params.profile).missing.map((item) => String(item))
-  const gradYear = normalizeGradYear(params.profile?.year)
-  if (!gradYear && !profileMissing.includes('graduation_year')) {
-    profileMissing.push('graduation_year')
-  }
+  const profileMissing = getMissingProfileFields(params.profile).map((item) => String(item))
+  const normalizedProfile = normalizeProfileForValidation(params.profile)
+  const gradYear = normalizeGradYear(
+    normalizedProfile.graduationYear !== null ? String(normalizedProfile.graduationYear) : normalizedProfile.graduationYearRaw
+  )
   const reasons: ApplyGateReasons = {
     profile_missing: profileMissing,
     application_missing: [],
@@ -151,15 +263,22 @@ function evaluateApplyGate(params: {
     reasons.eligibility_failed.push('Graduation year not eligible')
   }
 
-  if (process.env.NODE_ENV !== 'production') {
+  const canApply =
+    reasons.profile_missing.length === 0 &&
+    reasons.application_missing.length === 0 &&
+    reasons.eligibility_failed.length === 0
+
+  if (process.env.NODE_ENV !== 'production' && !canApply) {
     console.info('[apply.gate.debug]', {
       listing_id: params.listingId,
       user_id: params.userId,
       profile_missing: reasons.profile_missing,
       application_missing: reasons.application_missing,
       eligibility_failed: reasons.eligibility_failed,
-      raw: {
+      normalized_profile: normalizedProfile,
+      raw_input: {
         profile_year: params.profile?.year ?? null,
+        profile_graduation_year: (params.profile as { graduation_year?: unknown } | null)?.graduation_year ?? null,
         profile_majors: params.profile?.majors ?? null,
         listing_majors: params.listing.majors ?? null,
         listing_target_graduation_years: params.listing.target_graduation_years ?? null,
@@ -171,10 +290,7 @@ function evaluateApplyGate(params: {
   }
 
   return {
-    canApply:
-      reasons.profile_missing.length === 0 &&
-      reasons.application_missing.length === 0 &&
-      reasons.eligibility_failed.length === 0,
+    canApply,
     reasons,
   }
 }
@@ -210,42 +326,45 @@ export async function applyFromMicroOnboardingAction({
   const resumePath =
     typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path.trim() : ''
 
-  const [{ data: listing }, { data: userRow }, { data: profile }, courseworkFeatures] = await Promise.all([
-    supabase
-      .from('internships')
-      .select(
-        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, application_cap, applications_count, resume_required, restrict_by_major, restrict_by_year, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
-      )
-      .eq('id', listingId)
-      .eq('is_active', true)
-      .maybeSingle(),
+  const [profile, { data: userRow }, courseworkFeatures] = await Promise.all([
+    fetchStudentProfileForApply(supabase, user.id),
     supabase.from('users').select('role').eq('id', user.id).maybeSingle(),
-    supabase
-      .from('student_profiles')
-      .select('school, university_id, major_id, major:canonical_majors(name), majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week')
-      .eq('user_id', user.id)
-      .maybeSingle(),
     getStudentCourseworkFeatures({
       supabase,
       studentId: user.id,
     }),
   ])
 
-  if (!listing?.id) {
+  if (!userRow || userRow.role !== 'student') {
     await trackAnalyticsEvent({
       eventName: 'apply_blocked',
       userId: user.id,
-      properties: { listing_id: listingId, code: APPLY_ERROR.LISTING_NOT_FOUND, missing: [] },
+      properties: { listing_id: listingId, code: APPLY_ERROR.ROLE_NOT_STUDENT, missing: [] },
     })
-    return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND }
+    return { ok: false, code: APPLY_ERROR.ROLE_NOT_STUDENT }
   }
+
+  const listingLookup = await resolveApplyListing({
+    listingId,
+    userId: user.id,
+    viewerRole: 'student',
+  })
+  if (!listingLookup.ok) {
+    await trackAnalyticsEvent({
+      eventName: 'apply_blocked',
+      userId: user.id,
+      properties: { listing_id: listingId, code: listingLookup.code, missing: [] },
+    })
+    return { ok: false, code: listingLookup.code }
+  }
+  const listing = listingLookup.listing as any
   if (hasDeadlinePassed(listing.application_deadline ?? null)) {
     await trackAnalyticsEvent({
       eventName: 'apply_blocked',
       userId: user.id,
-      properties: { listing_id: listingId, code: APPLY_ERROR.LISTING_NOT_FOUND, missing: ['deadline_passed'] },
+      properties: { listing_id: listingId, code: APPLY_ERROR.LISTING_UNAVAILABLE, missing: ['deadline_passed'] },
     })
-    return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND }
+    return { ok: false, code: APPLY_ERROR.LISTING_UNAVAILABLE }
   }
   const applicationCap = typeof listing.application_cap === 'number' ? listing.application_cap : 60
   const applicationsCount = typeof listing.applications_count === 'number' ? listing.applications_count : 0
@@ -256,15 +375,6 @@ export async function applyFromMicroOnboardingAction({
       properties: { listing_id: listingId, code: APPLY_ERROR.CAP_REACHED, missing: [] },
     })
     return { ok: false, code: APPLY_ERROR.CAP_REACHED }
-  }
-
-  if (!userRow || userRow.role !== 'student') {
-    await trackAnalyticsEvent({
-      eventName: 'apply_blocked',
-      userId: user.id,
-      properties: { listing_id: listingId, code: APPLY_ERROR.ROLE_NOT_STUDENT, missing: [] },
-    })
-    return { ok: false, code: APPLY_ERROR.ROLE_NOT_STUDENT }
   }
 
   const gate = evaluateApplyGate({
@@ -285,7 +395,7 @@ export async function applyFromMicroOnboardingAction({
         ? APPLY_ERROR.PROFILE_INCOMPLETE
         : gate.reasons.application_missing.includes('resume')
           ? APPLY_ERROR.RESUME_REQUIRED
-          : APPLY_ERROR.APPLICATION_INSERT_FAILED
+          : APPLY_ERROR.ELIGIBILITY_FAILED
     await trackAnalyticsEvent({
       eventName: 'apply_recovery_started',
       userId: user.id,
@@ -483,24 +593,21 @@ export async function submitApplicationFromListingModalAction(
     return { ok: false, code, error: code === APPLY_ERROR.EMAIL_NOT_VERIFIED ? 'Verify your email before applying.' : 'Please sign in to apply.' }
   }
 
-  const [{ data: listing }, { data: userRow }] = await Promise.all([
-    supabase
-      .from('internships')
-      .select(
-        'id, employer_id, title, majors, target_graduation_years, experience_level, hours_per_week, location, description, work_mode, term, start_date, application_deadline, role_category, required_skills, preferred_skills, recommended_coursework, apply_mode, ats_stage_mode, external_apply_url, use_employer_ats_defaults, application_cap, applications_count, resume_required, restrict_by_major, restrict_by_year, internship_required_course_categories(category_id, category:canonical_course_categories(name, slug)), internship_coursework_category_links(category_id, category:coursework_categories(name))'
-      )
-      .eq('id', listingId)
-      .eq('is_active', true)
-      .maybeSingle(),
-    supabase.from('users').select('role').eq('id', user.id).maybeSingle(),
-  ])
-
-  if (!listing?.id) return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND, error: 'Listing not found.' }
-  if (hasDeadlinePassed(listing.application_deadline ?? null)) {
-    return { ok: false, code: APPLY_ERROR.LISTING_NOT_FOUND, error: 'Applications are closed for this listing.' }
-  }
+  const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle()
   if (!userRow || userRow.role !== 'student') {
     return { ok: false, code: APPLY_ERROR.ROLE_NOT_STUDENT, error: 'Use a student account to apply.' }
+  }
+  const listingLookup = await resolveApplyListing({
+    listingId,
+    userId: user.id,
+    viewerRole: 'student',
+  })
+  if (!listingLookup.ok) {
+    return { ok: false, code: listingLookup.code, error: listingLookup.message }
+  }
+  const listing = listingLookup.listing as any
+  if (hasDeadlinePassed(listing.application_deadline ?? null)) {
+    return { ok: false, code: APPLY_ERROR.LISTING_UNAVAILABLE, error: 'Listing unavailable (application deadline passed).' }
   }
 
   const applicationCap = typeof listing.application_cap === 'number' ? listing.application_cap : 60
@@ -517,25 +624,7 @@ export async function submitApplicationFromListingModalAction(
     .maybeSingle()
   if (existing?.id) return { ok: false, code: APPLY_ERROR.DUPLICATE_APPLICATION, error: 'You already applied to this internship.' }
 
-  const fullProfileSelect =
-    'school, university_id, major_id, major:canonical_majors(name), majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week'
-  const fallbackProfileSelect =
-    'school, university_id, major_id, major:canonical_majors(name), majors, year, experience_level, coursework, interests, availability_start_month, availability_hours_per_week'
-  const profileResult = await supabase
-    .from('student_profiles')
-    .select(fullProfileSelect)
-    .eq('user_id', user.id)
-    .maybeSingle()
-  const profile =
-    profileResult.error && isSchemaCacheError(profileResult.error.message)
-      ? (
-          await supabase
-            .from('student_profiles')
-            .select(fallbackProfileSelect)
-            .eq('user_id', user.id)
-            .maybeSingle()
-        ).data
-      : profileResult.data
+  const profile = await fetchStudentProfileForApply(supabase, user.id)
 
   const gate = evaluateApplyGate({
     listing,
@@ -559,7 +648,7 @@ export async function submitApplicationFromListingModalAction(
       const needsResume = gate.reasons.application_missing.includes('resume')
       return {
         ok: false,
-        code: needsResume ? APPLY_ERROR.RESUME_REQUIRED : APPLY_ERROR.APPLICATION_INSERT_FAILED,
+        code: needsResume ? APPLY_ERROR.RESUME_REQUIRED : APPLY_ERROR.ELIGIBILITY_FAILED,
         profile_missing: gate.reasons.profile_missing,
         application_missing: gate.reasons.application_missing,
         eligibility_failed: gate.reasons.eligibility_failed,
@@ -568,7 +657,7 @@ export async function submitApplicationFromListingModalAction(
     }
     return {
       ok: false,
-      code: APPLY_ERROR.APPLICATION_INSERT_FAILED,
+      code: APPLY_ERROR.ELIGIBILITY_FAILED,
       profile_missing: gate.reasons.profile_missing,
       application_missing: gate.reasons.application_missing,
       eligibility_failed: gate.reasons.eligibility_failed,

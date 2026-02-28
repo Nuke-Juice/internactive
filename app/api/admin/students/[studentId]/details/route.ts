@@ -61,7 +61,7 @@ export async function GET(_request: Request, { params }: Params) {
     admin
       .from('student_profiles')
       .select(
-        'user_id, school, majors, year, experience_level, availability_start_month, availability_hours_per_week, interests, coursework, coursework_unverified'
+        'user_id, school, university_id, major_id, majors, year, experience_level, availability_start_month, availability_hours_per_week, interests, coursework, coursework_unverified'
       )
       .eq('user_id', studentId)
       .maybeSingle(),
