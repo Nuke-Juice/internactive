@@ -1,9 +1,11 @@
 'use client'
 
+import CookieNoticeBanner from '@/components/CookieNoticeBanner'
 import GlobalErrorToasts from '@/components/feedback/GlobalErrorToasts'
 import RouteFeedbackToasts from '@/components/feedback/RouteFeedbackToasts'
 import { ToastProvider } from '@/components/feedback/ToastProvider'
 import SiteHeader from '@/components/layout/SiteHeader'
+import SiteFooter from '@/components/layout/SiteFooter'
 import type { UserRole } from '@/lib/auth/roles'
 import type { EmployerPlanId } from '@/lib/billing/plan'
 
@@ -51,6 +53,8 @@ export default function AppShellClient({
         employerPlanId={employerPlanId}
       />
       {children}
+      <SiteFooter />
+      <CookieNoticeBanner />
     </ToastProvider>
   )
 }

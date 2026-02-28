@@ -2,10 +2,12 @@ import { NextResponse } from 'next/server'
 import { buildVerifyRequiredHref } from '@/lib/auth/emailVerification'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
 import { resolvePostAuthRedirect } from '@/lib/auth/postAuthRedirect'
+import { recordLegalAcceptance } from '@/lib/legal/acceptance'
 import { supabaseServer } from '@/lib/supabase/server'
 import { normalizeAuthError } from '@/lib/auth/normalizeAuthError'
 import { normalizeNextPathOrDefault } from '@/lib/auth/nextPath'
 import { isUserRole } from '@/lib/auth/roles'
+import { PRIVACY_VERSION, TERMS_VERSION } from '@/src/lib/legalVersions'
 
 function isOtpType(value: string | null): value is 'signup' | 'email' | 'recovery' | 'invite' | 'email_change' | 'magiclink' {
   return (
@@ -46,6 +48,15 @@ function readRoleHint(nextUrl: string, userMetadata: Record<string, unknown> | n
 function safeProvider(value: string | null) {
   if (value === 'google' || value === 'linkedin' || value === 'linkedin_oidc') return value
   return null
+}
+
+function shouldRecordLegalAcceptance(nextUrl: string, userMetadata: Record<string, unknown> | null) {
+  const next = new URL(nextUrl, 'https://app.local')
+  if (next.searchParams.get('legal_acceptance') === 'signup') return true
+  return (
+    typeof userMetadata?.legal_acceptance_source === 'string' &&
+    userMetadata.legal_acceptance_source === 'signup'
+  )
 }
 
 function loginRedirect(params: {
@@ -165,6 +176,21 @@ export async function GET(request: Request) {
           next: nextUrl,
         })
       }
+    }
+
+    if (shouldRecordLegalAcceptance(nextUrl, metadata)) {
+      await recordLegalAcceptance({
+        userId: authUser.id,
+        source: 'signup',
+        termsVersion:
+          typeof metadata.terms_version === 'string' && metadata.terms_version.trim().length > 0
+            ? metadata.terms_version
+            : TERMS_VERSION,
+        privacyVersion:
+          typeof metadata.privacy_version === 'string' && metadata.privacy_version.trim().length > 0
+            ? metadata.privacy_version
+            : PRIVACY_VERSION,
+      })
     }
   }
 

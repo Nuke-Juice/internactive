@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
+import LegalAgreementField from '@/components/auth/LegalAgreementField'
 import TurnstileWidget from '@/components/security/TurnstileWidget'
 import OAuthButtons from '@/components/auth/OAuthButtons'
 import PressRevealPasswordField from '@/components/forms/PressRevealPasswordField'
@@ -38,6 +39,7 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
   const [error, setError] = useState<string | null>(null)
   const [devErrorDetails, setDevErrorDetails] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [acceptedLegal, setAcceptedLegal] = useState(false)
 
   const roleStep2Path = '/signup/student/details'
   const verifyNextPath = requestedNextPath ?? roleStep2Path
@@ -49,6 +51,9 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
 
     if (!email.trim() || !password) {
       return setError('Email, password, and confirm password are required.')
+    }
+    if (!acceptedLegal) {
+      return setError('Accept the Terms of Service and Privacy Policy to create an account.')
     }
 
     const passwordError = getPasswordError(password)
@@ -94,6 +99,7 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
         nextPath: verifyNextPath,
         authMethod: 'password',
         appOrigin,
+        acceptedLegal,
       }),
     })
 
@@ -129,7 +135,13 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
 
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-sm font-semibold text-slate-900">Account</h2>
-          <OAuthButtons roleHint="student" nextPath={requestedNextPath ?? undefined} className="mt-4" />
+          <OAuthButtons
+            roleHint="student"
+            nextPath={`${verifyNextPath}${verifyNextPath.includes('?') ? '&' : '?'}legal_acceptance=signup`}
+            className="mt-4"
+            canContinue={acceptedLegal}
+            blockedMessage="Accept the Terms of Service and Privacy Policy to continue with Google or LinkedIn."
+          />
           <div className="mt-4 border-t border-slate-200 pt-4">
             <p className="text-xs text-slate-500">Or continue with email and password.</p>
           </div>
@@ -170,6 +182,12 @@ export default function StudentSignupForm({ queryError, requestedNextPath }: Pro
               />
             </div>
           </div>
+
+          <LegalAgreementField
+            id="student-signup-legal"
+            checked={acceptedLegal}
+            onChange={setAcceptedLegal}
+          />
 
           {queryError ? <p className="mt-4 text-sm text-amber-700">{queryError}</p> : null}
           {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}

@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server'
 import { supabaseServer } from '@/lib/supabase/server'
 import { normalizeNextPathOrDefault } from '@/lib/auth/nextPath'
 import { mapSignupError, normalizeSignupEmail, extractEmailDomain, isValidEmailFormat, interpretSignupResult } from '@/lib/auth/signup'
+import { recordLegalAcceptance } from '@/lib/legal/acceptance'
 import { resolveServerAppOrigin } from '@/lib/url/origin'
+import { PRIVACY_VERSION, TERMS_VERSION } from '@/src/lib/legalVersions'
 
 type SignupPayload = {
   email?: unknown
@@ -10,6 +12,7 @@ type SignupPayload = {
   roleHint?: unknown
   nextPath?: unknown
   authMethod?: unknown
+  acceptedLegal?: unknown
 }
 
 export async function POST(request: Request) {
@@ -25,11 +28,15 @@ export async function POST(request: Request) {
   const password = typeof payload.password === 'string' ? payload.password : ''
   const roleHint = payload.roleHint === 'employer' ? 'employer' : 'student'
   const authMethod = typeof payload.authMethod === 'string' ? payload.authMethod : 'password'
+  const acceptedLegal = payload.acceptedLegal === true
   const nextPath = normalizeNextPathOrDefault(typeof payload.nextPath === 'string' ? payload.nextPath : null, roleHint === 'employer' ? '/signup/employer/details' : '/signup/student/details')
   const emailDomain = extractEmailDomain(normalizedEmail)
 
   if (!normalizedEmail || !password) {
     return NextResponse.json({ error: 'Email and password are required.' }, { status: 400 })
+  }
+  if (!acceptedLegal) {
+    return NextResponse.json({ error: 'You must accept the Terms of Service and Privacy Policy.' }, { status: 400 })
   }
   if (!isValidEmailFormat(normalizedEmail)) {
     return NextResponse.json(
@@ -70,6 +77,9 @@ export async function POST(request: Request) {
       emailRedirectTo: redirectTo,
       data: {
         role_hint: roleHint,
+        terms_version: TERMS_VERSION,
+        privacy_version: PRIVACY_VERSION,
+        legal_acceptance_source: 'signup',
       },
     },
   })
@@ -124,6 +134,15 @@ export async function POST(request: Request) {
       },
       { status: interpreted.statusCode }
     )
+  }
+
+  if (data.user?.id) {
+    await recordLegalAcceptance({
+      userId: data.user.id,
+      source: 'signup',
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+    })
   }
 
   const verifyRequiredPath = `/verify-required?next=${encodeURIComponent(nextPath)}&action=signup_profile_completion&email=${encodeURIComponent(normalizedEmail.toLowerCase())}`

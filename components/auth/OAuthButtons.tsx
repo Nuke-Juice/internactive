@@ -12,6 +12,8 @@ type Props = {
   nextPath?: string
   className?: string
   showHelperText?: boolean
+  canContinue?: boolean
+  blockedMessage?: string
 }
 
 function providerLabel(provider: OAuthProvider) {
@@ -57,12 +59,23 @@ function LinkedInMark() {
   )
 }
 
-export default function OAuthButtons({ roleHint, nextPath, className, showHelperText = true }: Props) {
+export default function OAuthButtons({
+  roleHint,
+  nextPath,
+  className,
+  showHelperText = true,
+  canContinue = true,
+  blockedMessage = 'Complete the required step before continuing.',
+}: Props) {
   const [loadingProvider, setLoadingProvider] = useState<OAuthProvider | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function continueWith(provider: OAuthProvider) {
     setError(null)
+    if (!canContinue) {
+      setError(blockedMessage)
+      return
+    }
     setLoadingProvider(provider)
 
     const supabase = supabaseBrowser()
