@@ -1,6 +1,3 @@
-import Link from 'next/link'
-import { ShieldCheck } from 'lucide-react'
-
 type TrendPoint = {
   label: string
   count: number
@@ -18,7 +15,6 @@ type ResumeKeyword = {
 }
 
 type Props = {
-  isPremiumActive: boolean
   shouldShowDataWarning: boolean
   interviewRate: number
   viewRate: number
@@ -33,7 +29,6 @@ function formatPercent(value: number) {
 }
 
 export default function StudentPremiumUpsellCard({
-  isPremiumActive,
   shouldShowDataWarning,
   interviewRate,
   viewRate,
@@ -42,42 +37,9 @@ export default function StudentPremiumUpsellCard({
   topKeywords,
   topCourseStrategies,
 }: Props) {
-  if (!isPremiumActive) {
-    return (
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-slate-900">Unlock premium insights</h2>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">Premium</span>
-        </div>
-
-        <ul className="mt-3 space-y-2 text-sm text-slate-700">
-          <li className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
-            <span>Advanced analytics (interview rate, view rate)</span>
-          </li>
-          <li className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
-            <span>Resume review (keywords + suggestions)</span>
-          </li>
-          <li className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
-            <span>Course strategy (which coursework improves match coverage)</span>
-          </li>
-        </ul>
-
-        <Link
-          href="/student/upgrade"
-          className="mt-3 inline-flex rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          Upgrade
-        </Link>
-      </section>
-    )
-  }
-
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-semibold text-slate-900">Premium insights</h2>
+      <h2 className="text-sm font-semibold text-slate-900">Actionable insights</h2>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-3">
         <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -103,7 +65,7 @@ export default function StudentPremiumUpsellCard({
         </article>
 
         <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Resume review</p>
+          <p className="text-xs uppercase tracking-wide text-slate-500">Resume signals</p>
           <ul className="mt-2 space-y-1 text-xs text-slate-700">
             {(analysisSuggestions.length > 0 ? analysisSuggestions : ['Upload a PDF resume to generate your first analysis.'])
               .slice(0, 3)

@@ -14,6 +14,7 @@ import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCoursew
 import { formatCompleteness } from '@/src/profile/profileCompleteness'
 import { getStudentProfileCompleteness } from '@/src/profile/getStudentProfileCompleteness'
 import { getInternshipById } from '@/lib/jobs/getInternshipById'
+import { syncStudentResumeFromApplications } from '@/lib/student/profileResume'
 import ApplyModalLauncher from '../_components/ApplyModalLauncher'
 
 function formatMajors(value: string[] | string | null) {
@@ -182,15 +183,6 @@ export default async function JobDetailPage({
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  const authMetadata = (user?.user_metadata ?? {}) as {
-    resume_path?: string
-    resume_file_name?: string
-  }
-  const hasSavedResume = typeof authMetadata.resume_path === 'string' && authMetadata.resume_path.trim().length > 0
-  const savedResumeFileName =
-    typeof authMetadata.resume_file_name === 'string' && authMetadata.resume_file_name.trim().length > 0
-      ? authMetadata.resume_file_name.trim()
-      : null
   let userRole: 'student' | 'employer' | 'admin' | null = null
 
   if (user) {
@@ -199,6 +191,18 @@ export default async function JobDetailPage({
       userRole = userRow.role
     }
   }
+
+  const syncedResume =
+    user && userRole === 'student'
+      ? await syncStudentResumeFromApplications({
+          supabase,
+          userId: user.id,
+          currentMetadata: (user.user_metadata ?? {}) as Record<string, unknown>,
+        })
+      : null
+  const syncedResumePath = syncedResume?.profile.resumePath ?? null
+  const hasSavedResume = Boolean(syncedResume?.profile.resumePath)
+  const savedResumeFileName = syncedResume?.profile.resumeFileName ?? null
 
   const detailResult = await getInternshipById(id, {
     viewerId: user?.id ?? null,
@@ -328,7 +332,7 @@ export default async function JobDetailPage({
       userId: user.id,
       preloaded: {
         profile: profile ?? null,
-        resumePath: typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path : null,
+        resumePath: syncedResumePath ?? (typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path : null),
         skillsCount: combinedProfileSkills.length,
         courseworkFeatures: {
           courseCount: coursework.length,

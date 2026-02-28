@@ -47,6 +47,8 @@ type MessageRow = {
   created_at: string | null
 }
 
+type ApplicationFilter = 'submitted' | 'viewed' | 'reviewing' | 'interview' | 'accepted'
+
 function asStatus(value: string | null | undefined): Status {
   const normalized = (value ?? '').trim().toLowerCase()
   if (normalized === 'reviewing' || normalized === 'interview' || normalized === 'accepted' || normalized === 'rejected' || normalized === 'withdrawn' || normalized === 'viewed') return normalized
@@ -66,7 +68,27 @@ function normalizeInviteStatus(value: string | null | undefined) {
   return 'not_invited'
 }
 
-export default async function ApplicationsPage() {
+function normalizeApplicationFilter(value: string | null | undefined): ApplicationFilter | null {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized === 'submitted' || normalized === 'viewed' || normalized === 'reviewing' || normalized === 'interview' || normalized === 'accepted') {
+    return normalized
+  }
+  return null
+}
+
+function matchesApplicationFilter(application: ApplicationRow, filter: ApplicationFilter | null) {
+  if (!filter) return true
+  if (filter === 'viewed') {
+    return application.status === 'reviewing' || application.employer_viewed_at !== null
+  }
+  return asStatus(application.status) === filter
+}
+
+export default async function ApplicationsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ status?: string; application?: string }>
+}) {
   async function markExternalComplete(formData: FormData) {
     'use server'
 
@@ -188,6 +210,9 @@ export default async function ApplicationsPage() {
 
   const { user } = await requireRole('student', { requestedPath: '/applications' })
   const supabase = await supabaseServer()
+  const resolvedSearchParams = searchParams ? await searchParams : undefined
+  const activeFilter = normalizeApplicationFilter(resolvedSearchParams?.status)
+  const selectedApplicationId = String(resolvedSearchParams?.application ?? '').trim()
 
   const { data: rawApplications } = await supabase
     .from('applications')
@@ -254,13 +279,69 @@ export default async function ApplicationsPage() {
       !application.external_apply_completed_at &&
       Boolean(effectiveAts.externalApplyUrl)
   })
+  const submittedCount = applications.filter((application) => asStatus(application.status) === 'submitted').length
+  const reviewingCount = applications.filter((application) => asStatus(application.status) === 'reviewing').length
+  const interviewCount = applications.filter((application) => asStatus(application.status) === 'interview').length
+  const acceptedCount = applications.filter((application) => asStatus(application.status) === 'accepted').length
+  const filteredApplications = applications.filter((application) => matchesApplicationFilter(application, activeFilter))
 
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-4xl space-y-6">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Applications</h1>
-          <p className="mt-2 text-slate-600">Track status and ATS invites.</p>
+          <p className="mt-2 text-slate-600">Track your application status, ATS invites, and messages in one place.</p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: 'Submitted', count: submittedCount, href: '/applications?status=submitted' },
+            { label: 'Reviewing', count: reviewingCount, href: '/applications?status=reviewing' },
+            { label: 'Interview', count: interviewCount, href: '/applications?status=interview' },
+            { label: 'Accepted', count: acceptedCount, href: '/applications?status=accepted' },
+          ].map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
+              className="rounded-xl border border-slate-200 bg-slate-50 p-4 transition-colors hover:bg-slate-100"
+            >
+              <div className="text-xs uppercase tracking-wide text-slate-500">{item.label}</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">{item.count}</div>
+            </Link>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/applications"
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${activeFilter === null ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+          >
+            All applications
+          </Link>
+          <Link
+            href="/applications?status=submitted"
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${activeFilter === 'submitted' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+          >
+            Submitted
+          </Link>
+          <Link
+            href="/applications?status=viewed"
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${activeFilter === 'viewed' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+          >
+            Viewed / Reviewing
+          </Link>
+          <Link
+            href="/applications?status=interview"
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${activeFilter === 'interview' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+          >
+            Interview
+          </Link>
+          <Link
+            href="/applications?status=accepted"
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${activeFilter === 'accepted' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+          >
+            Accepted
+          </Link>
         </div>
 
         {pendingInvites.length > 0 ? (
@@ -314,16 +395,34 @@ export default async function ApplicationsPage() {
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-sm text-slate-600">
             You have not submitted any applications yet.
           </div>
+        ) : filteredApplications.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-sm text-slate-600">
+            No applications match this filter. <Link href="/applications" className="font-medium text-slate-900 underline-offset-2 hover:underline">View all</Link>
+          </div>
         ) : (
           <div className="space-y-4">
-            {applications.map((application) => {
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-slate-900">Application threads</h2>
+              <div className="text-xs text-slate-500">
+                {filteredApplications.length}
+                {activeFilter ? ' shown' : ' total'}
+              </div>
+            </div>
+            {filteredApplications.map((application) => {
               const status = asStatus(application.status)
               const inviteStatus = normalizeInviteStatus(application.ats_invite_status)
               const messages = messagesByApplicationId.get(application.id) ?? []
               const listingId = String(application.internship?.id ?? application.internship_id)
+              const isSelected = selectedApplicationId === application.id
 
               return (
-                <div key={application.id} className="rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-5 shadow-sm">
+                <div
+                  key={application.id}
+                  id={`application-${application.id}`}
+                  className={`rounded-2xl border bg-gradient-to-b from-white to-slate-50 p-5 shadow-sm ${
+                    isSelected ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'
+                  }`}
+                >
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="text-lg font-semibold text-slate-900">{application.internship?.title || 'Internship'}</div>
@@ -349,7 +448,7 @@ export default async function ApplicationsPage() {
                   </div>
 
                   <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
-                    <details open={messages.length > 0} className="group">
+                    <details open={messages.length > 0 || isSelected} className="group">
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         <span>Messages ({messages.length})</span>
                         <span className="text-[11px] normal-case text-slate-500 group-open:hidden">Open</span>

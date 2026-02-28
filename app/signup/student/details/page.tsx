@@ -708,7 +708,7 @@ export default function StudentSignupDetailsPage() {
       }
 
       const sanitizedFileName = resumeFile.name.replace(/[^a-zA-Z0-9._-]/g, '-')
-      const resumePathForStorage = `profiles/${user.id}/resume-${Date.now()}-${sanitizedFileName}`
+      const resumePathForStorage = `resumes/${user.id}/profile/resume-${Date.now()}-${sanitizedFileName}`
       const { error: resumeUploadError } = await supabase.storage
         .from('resumes')
         .upload(resumePathForStorage, resumeFile, { contentType: 'application/pdf', upsert: true })

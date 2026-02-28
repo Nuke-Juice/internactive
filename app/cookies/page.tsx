@@ -47,6 +47,21 @@ export default function CookiesPage() {
             abusive traffic, and improve the platform. Those events may rely on request metadata such as IP address,
             browser details, and interaction history, even when they are not stored as browser cookies.
           </p>
+          <p>
+            If analytics tools are enabled, they may use cookies or similar technologies to help us understand product
+            performance and usage patterns.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Third-Party Cookies</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            Some third-party providers we use to support authentication, payments, infrastructure, or analytics may set
+            cookies or similar technologies when their services are active. Those providers manage their own technologies
+            under their own terms and notices.
+          </p>
         </div>
       </section>
 

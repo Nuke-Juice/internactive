@@ -23,6 +23,7 @@ import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCoursew
 import { dispatchInAppNotification } from '@/lib/notifications/dispatcher'
 import { getInternshipById, type InternshipDetailListing } from '@/lib/jobs/getInternshipById'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
+import { syncStudentResumeFromApplications } from '@/lib/student/profileResume'
 
 type ApplyFromMicroOnboardingInput = {
   listingId: string
@@ -542,6 +543,14 @@ export async function applyFromMicroOnboardingAction({
   })
 
   if (insertedApplicationId) {
+    await syncStudentResumeFromApplications({
+      supabase,
+      userId: user.id,
+      currentMetadata: (user.user_metadata ?? {}) as Record<string, unknown>,
+      preferredResumePath: resumePath,
+      preferredResumeUploadedAt: new Date().toISOString(),
+    })
+
     try {
       await sendEmployerApplicationAlert({ applicationId: insertedApplicationId })
     } catch {
@@ -791,6 +800,15 @@ export async function submitApplicationFromListingModalAction(
   })
 
   if (insertedApplicationId) {
+    await syncStudentResumeFromApplications({
+      supabase,
+      userId: user.id,
+      currentMetadata: (user.user_metadata ?? {}) as Record<string, unknown>,
+      preferredResumePath: resumePath,
+      preferredResumeFileName: hasUpload && resumeFile ? resumeFile.name : null,
+      preferredResumeUploadedAt: new Date().toISOString(),
+    })
+
     try {
       await sendEmployerApplicationAlert({ applicationId: insertedApplicationId })
     } catch {

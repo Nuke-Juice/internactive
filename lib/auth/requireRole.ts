@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { supabaseServer } from '@/lib/supabase/server'
 import { type UserRole } from '@/lib/auth/roles'
 import { normalizeNextPath } from '@/lib/auth/nextPath'
+import { syncStudentResumeFromApplications } from '@/lib/student/profileResume'
 
 export async function requireRole<T extends UserRole>(
   role: T,
@@ -29,6 +30,12 @@ export async function requireRole<T extends UserRole>(
       .update({ last_seen_at: new Date().toISOString() })
       .eq('id', data.user.id)
       .eq('role', 'student')
+
+    await syncStudentResumeFromApplications({
+      supabase,
+      userId: data.user.id,
+      currentMetadata: (data.user.user_metadata ?? {}) as Record<string, unknown>,
+    })
   }
 
   return { user: data.user, role: userRow.role as T }

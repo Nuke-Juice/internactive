@@ -72,7 +72,7 @@ export default async function UpgradePage({
 
   const { data: userRow } = await supabase.from('users').select('role').eq('id', user.id).maybeSingle()
   if (userRow?.role === 'student') {
-    redirect('/student/upgrade')
+    redirect('/student/dashboard')
   }
   if (userRow?.role !== 'employer') {
     return (

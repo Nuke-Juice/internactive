@@ -7,6 +7,7 @@ import { parseSponsoredInternshipIds, splitSponsoredListings } from '@/lib/jobs/
 import { normalizeInternshipBrowseParams, type InternshipBrowseSortMode } from '@/lib/jobs/browseParams'
 import { normalizeStateCode } from '@/lib/locations/usLocationCatalog'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
+import { syncStudentResumeFromApplications } from '@/lib/student/profileResume'
 import { normalizeSeason } from '@/lib/availability/normalizeSeason'
 import {
   formatCompleteness,
@@ -249,24 +250,15 @@ export function JobsViewSkeleton() {
           <div className="flex items-center gap-2">
             <div className="h-7 w-24 animate-pulse rounded-md bg-slate-200" />
             <div className="h-7 w-20 animate-pulse rounded-md bg-slate-200" />
+            <div className="h-9 w-24 animate-pulse rounded-md bg-slate-200" />
             <div className="h-4 w-16 animate-pulse rounded bg-slate-200" />
           </div>
         </div>
 
-        <div className="mt-3 grid gap-4 lg:grid-cols-[220px_1fr]">
-          <aside className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-            <div className="h-9 w-full animate-pulse rounded-md bg-slate-100" />
-            <div className="mt-2 space-y-2">
-              <div className="h-8 animate-pulse rounded-md bg-slate-100" />
-              <div className="h-8 animate-pulse rounded-md bg-slate-100" />
-            </div>
-          </aside>
-
-          <div className="space-y-4">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <JobCardSkeleton key={index} />
-            ))}
-          </div>
+        <div className="mt-4 space-y-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <JobCardSkeleton key={index} />
+          ))}
         </div>
       </section>
     </>
@@ -378,6 +370,7 @@ export default async function JobsView({
   const commuteMinutesById = new Map<string, number>()
   const employerAvatarById = new Map<string, string | null>()
   let role: 'student' | 'employer' | undefined
+  let syncedResumePath: string | null = null
   let profileCompletionPercent = 0
   let profileCompletionMissingLabels: string[] = []
 
@@ -389,6 +382,15 @@ export default async function JobsView({
       .maybeSingle()
     if (userRow?.role === 'student' || userRow?.role === 'employer') {
       role = userRow.role
+    }
+
+    if (userRow?.role === 'student') {
+      const syncedResume = await syncStudentResumeFromApplications({
+        supabase,
+        userId: user.id,
+        currentMetadata: (user.user_metadata ?? {}) as Record<string, unknown>,
+      })
+      syncedResumePath = syncedResume.profile.resumePath
     }
 
     const fullProfileSelect =
@@ -506,7 +508,7 @@ export default async function JobsView({
         supabase,
         userId: user.id,
         preloaded: {
-          resumePath: typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path : null,
+          resumePath: syncedResumePath ?? (typeof user.user_metadata?.resume_path === 'string' ? user.user_metadata.resume_path : null),
         },
       })
       profileCompletionPercent = formatCompleteness(completion.percent)
@@ -861,34 +863,58 @@ export default async function JobsView({
           <div>
             <h2 className="text-2xl font-semibold text-slate-900">{listingsTitle}</h2>
           </div>
-          <div className="text-xs font-medium text-slate-500 sm:text-right">
-            {isStudent ? (
-              <div className="flex items-center gap-2 sm:justify-end">
-                <Link
-                  href={bestMatchHref}
-                  prefetch={false}
-                  className={`inline-flex items-center rounded-md border px-2.5 py-1 ${
-                    activeSortMode === 'best_match'
-                      ? 'border-blue-300 bg-blue-50 text-blue-700'
-                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  Best match {activeSortMode === 'best_match' ? '✓' : ''}
-                </Link>
-                <Link
-                  href={newestHref}
-                  prefetch={false}
-                  className={`inline-flex items-center rounded-md border px-2.5 py-1 ${
-                    activeSortMode === 'newest'
-                      ? 'border-blue-300 bg-blue-50 text-blue-700'
-                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  Newest {activeSortMode === 'newest' ? '✓' : ''}
-                </Link>
-              </div>
-            ) : null}
-            <div className="mt-1 flex items-center gap-1 sm:justify-end">
+          <div className="flex flex-col gap-2 text-xs font-medium text-slate-500 sm:items-end">
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              {isStudent ? (
+                <>
+                  <Link
+                    href={bestMatchHref}
+                    prefetch={false}
+                    className={`inline-flex items-center rounded-md border px-2.5 py-1 ${
+                      activeSortMode === 'best_match'
+                        ? 'border-blue-300 bg-blue-50 text-blue-700'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Best match {activeSortMode === 'best_match' ? '✓' : ''}
+                  </Link>
+                  <Link
+                    href={newestHref}
+                    prefetch={false}
+                    className={`inline-flex items-center rounded-md border px-2.5 py-1 ${
+                      activeSortMode === 'newest'
+                        ? 'border-blue-300 bg-blue-50 text-blue-700'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Newest {activeSortMode === 'newest' ? '✓' : ''}
+                  </Link>
+                </>
+              ) : null}
+              <FiltersPanel
+                categories={categoryTiles}
+                state={{
+                  sort: activeSortMode,
+                  searchQuery,
+                  category: activeCategory,
+                  payMin,
+                  remoteOnly,
+                  experience: selectedExperience,
+                  hoursMin,
+                  hoursMax,
+                  locationCity,
+                  locationState,
+                  radius,
+                }}
+                noMatchesHint={noMatchesHint}
+                basePath={basePath}
+                anchorId={anchorId}
+                isSignedIn={Boolean(user)}
+                userRole={role ?? null}
+                compact
+              />
+            </div>
+            <div className="flex items-center gap-1 sm:justify-end">
               <span>Sorted by: {sortedByLabel}</span>
               {activeSortMode === 'best_match' ? (
                 <span
@@ -913,33 +939,7 @@ export default async function JobsView({
           </div>
         </div>
 
-        <div className="mt-3 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-          <aside className="lg:sticky lg:top-24 lg:self-start">
-            <FiltersPanel
-              categories={categoryTiles}
-              state={{
-                sort: activeSortMode,
-                searchQuery,
-                category: activeCategory,
-                payMin,
-                remoteOnly,
-                experience: selectedExperience,
-                hoursMin,
-                hoursMax,
-                locationCity,
-                locationState,
-                radius,
-              }}
-              noMatchesHint={noMatchesHint}
-              basePath={basePath}
-              anchorId={anchorId}
-              isSignedIn={Boolean(user)}
-              userRole={role ?? null}
-              compact
-            />
-          </aside>
-
-          <div className="min-w-0 space-y-4">
+        <div className="mt-4 min-w-0 space-y-4">
             {sponsoredInternships.length > 0 ? (
               <section className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-amber-900">Sponsored</h3>
@@ -1128,7 +1128,6 @@ export default async function JobsView({
                 </Link>
               </div>
             ) : null}
-          </div>
         </div>
       </section>
     </>

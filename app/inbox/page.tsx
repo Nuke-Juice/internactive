@@ -1,17 +1,9 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { supabaseServer } from '@/lib/supabase/server'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
 
 type AppRole = 'student' | 'employer' | 'ops_admin' | 'super_admin' | 'support' | null
-
-type StudentApplicationRow = {
-  id: string
-  internship_id: string
-  created_at: string | null
-  reviewed_at: string | null
-  status: string | null
-  internship?: { title?: string | null; company_name?: string | null } | Array<{ title?: string | null; company_name?: string | null }> | null
-}
 
 type EmployerInternshipRow = {
   id: string
@@ -60,29 +52,11 @@ function roleCopy(role: AppRole) {
   }
 }
 
-function parseInternshipRef(value: StudentApplicationRow['internship']) {
-  if (!value) return { title: 'Internship', company: 'Company' }
-  const first = Array.isArray(value) ? value[0] : value
-  return {
-    title: typeof first?.title === 'string' && first.title.trim() ? first.title : 'Internship',
-    company: typeof first?.company_name === 'string' && first.company_name.trim() ? first.company_name : 'Company',
-  }
-}
-
 function formatRelativeDate(value: string | null | undefined) {
   if (!value) return 'Date n/a'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Date n/a'
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function statusPill(status: string | null | undefined) {
-  const normalized = (status ?? '').trim().toLowerCase()
-  if (normalized === 'accepted') return 'border-emerald-300 bg-emerald-50 text-emerald-700'
-  if (normalized === 'interview') return 'border-blue-300 bg-blue-50 text-blue-700'
-  if (normalized === 'reviewing') return 'border-amber-300 bg-amber-50 text-amber-700'
-  if (normalized === 'rejected') return 'border-red-300 bg-red-50 text-red-700'
-  return 'border-slate-300 bg-slate-100 text-slate-700'
 }
 
 export default async function InboxPage() {
@@ -129,81 +103,7 @@ export default async function InboxPage() {
   }
 
   if (role === 'student') {
-    const { data: applicationsData } = await supabase
-      .from('applications')
-      .select('id, internship_id, created_at, reviewed_at, status, internship:internships(title, company_name)')
-      .eq('student_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(12)
-
-    const applications = (applicationsData ?? []) as StudentApplicationRow[]
-    const submittedCount = applications.filter((item) => (item.status ?? 'submitted') === 'submitted').length
-    const reviewingCount = applications.filter((item) => item.status === 'reviewing').length
-    const interviewCount = applications.filter((item) => item.status === 'interview').length
-    const acceptedCount = applications.filter((item) => item.status === 'accepted').length
-
-    return (
-      <main className="min-h-screen bg-slate-50 px-6 py-10">
-        <section className="mx-auto max-w-5xl space-y-6">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">{copy.title}</h1>
-            <p className="mt-2 text-sm text-slate-600">{copy.subtitle}</p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              ['Submitted', submittedCount],
-              ['Reviewing', reviewingCount],
-              ['Interview', interviewCount],
-              ['Accepted', acceptedCount],
-            ].map(([label, count]) => (
-              <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-                <div className="mt-1 text-2xl font-semibold text-slate-900">{count}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-slate-900">Recent application threads</h2>
-              <Link href="/applications" className="text-sm font-medium text-blue-700 hover:underline">
-                View all applications
-              </Link>
-            </div>
-
-            {applications.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-600">No threads yet. Apply to internships and updates will appear here.</p>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {applications.map((item) => {
-                  const internship = parseInternshipRef(item.internship)
-                  return (
-                    <article key={item.id} className="rounded-lg border border-slate-200 px-3 py-3">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-medium text-slate-900">{internship.title}</div>
-                          <div className="text-xs text-slate-600">{internship.company}</div>
-                        </div>
-                        <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusPill(item.status)}`}>
-                          {item.status ?? 'submitted'}
-                        </span>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-600">
-                        <span>Applied {formatRelativeDate(item.created_at)}</span>
-                        <Link href={`/jobs/${item.internship_id}`} className="font-medium text-blue-700 hover:underline">
-                          View internship
-                        </Link>
-                      </div>
-                    </article>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </section>
-      </main>
-    )
+    redirect('/applications')
   }
 
   if (role === 'employer') {

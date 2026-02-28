@@ -18,7 +18,6 @@ type Props = {
   isEmailVerified?: boolean
   showFinishProfilePrompt?: boolean
   finishProfileHref?: string | null
-  showInboxNotificationDot?: boolean
   showNotificationsDot?: boolean
   employerPlanId?: EmployerPlanId | null
 }
@@ -32,7 +31,6 @@ export default function AppShellClient({
   isEmailVerified,
   showFinishProfilePrompt = false,
   finishProfileHref = null,
-  showInboxNotificationDot = false,
   showNotificationsDot = false,
   employerPlanId = null,
 }: Props) {
@@ -48,7 +46,6 @@ export default function AppShellClient({
         isEmailVerified={isEmailVerified}
         showFinishProfilePrompt={showFinishProfilePrompt}
         finishProfileHref={finishProfileHref}
-        showInboxNotificationDot={showInboxNotificationDot}
         showNotificationsDot={showNotificationsDot}
         employerPlanId={employerPlanId}
       />

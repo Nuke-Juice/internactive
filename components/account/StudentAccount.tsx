@@ -1019,7 +1019,7 @@ function addCourseworkItem(value: string) {
 
     if (resumeFile) {
       const sanitizedFileName = resumeFile.name.replace(/[^a-zA-Z0-9._-]/g, '-')
-      const resumePathForStorage = `profiles/${userId}/resume-${Date.now()}-${sanitizedFileName}`
+      const resumePathForStorage = `resumes/${userId}/profile/resume-${Date.now()}-${sanitizedFileName}`
       const { error: resumeUploadError } = await supabase.storage
         .from('resumes')
         .upload(resumePathForStorage, resumeFile, { contentType: 'application/pdf', upsert: true })

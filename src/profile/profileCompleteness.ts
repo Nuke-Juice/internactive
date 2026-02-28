@@ -120,7 +120,7 @@ export function computeProfileCompleteness(
       label: 'Resume upload',
       isComplete: hasResume,
       weight: WEIGHTS.resume,
-      ctaHref: '/account#resume',
+      ctaHref: '/student/resume',
       details: hasResume ? undefined : 'Upload a resume PDF to improve ranking.',
     },
     {

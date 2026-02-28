@@ -97,6 +97,34 @@ export default function TermsPage() {
       </section>
 
       <section>
+        <h2 className="text-lg font-semibold text-slate-900">No Reliance on Matching or Listings</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            Match scores, recommendations, rankings, and listing details are informational tools only. They are not
+            guarantees of fit, eligibility, legitimacy, hiring outcome, compensation, or employer response.
+          </p>
+          <p>
+            You are responsible for your own diligence before relying on a listing, applying to a role, or taking any
+            action based on content shown through the service.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Third-Party ATS and External Application Links</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            Employers may require applicants to complete additional steps through a third-party applicant tracking system
+            or other external application flow.
+          </p>
+          <p>
+            Internactive is not responsible for the performance, availability, security, or policies of those external
+            systems, and we do not control how third parties process applications after a user leaves our platform.
+          </p>
+        </div>
+      </section>
+
+      <section>
         <h2 className="text-lg font-semibold text-slate-900">Paid Plans and Payments</h2>
         <div className="mt-3 space-y-3">
           <p>
@@ -107,6 +135,20 @@ export default function TermsPage() {
           <p>
             We do not state final pricing in these Terms. Pricing, billing intervals, included features, renewal rules,
             and cancellation terms may change and will be shown at the point of purchase.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Fees, Renewals, Cancellations, and Refunds</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            If subscriptions or recurring plans are offered, they will renew automatically until cancelled. Unless stated
+            otherwise at checkout, cancellation will take effect at the end of the current billing period.
+          </p>
+          <p>
+            Fees are generally non-refundable except where required by law or where we expressly state otherwise at
+            checkout or in a plan-specific offer.
           </p>
         </div>
       </section>
@@ -134,6 +176,41 @@ export default function TermsPage() {
             You may stop using the service at any time. We may suspend or terminate accounts, remove listings, or limit
             access if we believe these Terms have been violated, the platform is being misused, or continued access would
             create legal, security, or operational risk.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Indemnification</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            You agree to defend, indemnify, and hold harmless Internactive LLC and its affiliates, officers, employees,
+            and agents from claims, liabilities, damages, losses, and expenses arising out of your content, your misuse
+            of the service, your violation of these Terms, or your violation of law or third-party rights.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Third-Party Links</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            The service may contain links to third-party websites, ATS tools, payment pages, or external content. We do
+            not control and are not responsible for third-party sites, services, content, terms, or privacy practices.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">DMCA / Copyright Complaints</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            If you believe content on Internactive infringes your copyright, email{' '}
+            <a className="font-medium text-blue-700 hover:underline" href={`mailto:${LEGAL_CONTACT_EMAIL}`}>
+              {LEGAL_CONTACT_EMAIL}
+            </a>{' '}
+            with a description of the work, the allegedly infringing material, your contact information, and the basis
+            for your claim.
           </p>
         </div>
       </section>

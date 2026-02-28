@@ -2,8 +2,6 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { ArrowLeft, BarChart3, Briefcase, FileText, LayoutDashboard, ShieldCheck, Star } from 'lucide-react'
 import { requireRole } from '@/lib/auth/requireRole'
-import { getStudentEntitlements, maybeExpireTrial } from '@/lib/student/entitlements'
-import PremiumLockedOverlay from '@/components/student/PremiumLockedOverlay'
 import { supabaseServer } from '@/lib/supabase/server'
 import { getStudentProfileCompleteness } from '@/src/profile/getStudentProfileCompleteness'
 
@@ -86,8 +84,6 @@ export default async function StudentDashboardSectionPage({
 
   const { user } = await requireRole('student', { requestedPath: `/student/dashboard/${section}` })
   const supabase = await supabaseServer()
-  await maybeExpireTrial(user.id, { supabase })
-  const entitlements = await getStudentEntitlements(user.id, { supabase })
 
   const [applicationsResult, latestAnalysisResult, studentCategoriesResult, internshipsResult] = await Promise.all([
     supabase
@@ -240,16 +236,10 @@ export default async function StudentDashboardSectionPage({
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Interview: <span className="font-semibold">{interviewCount}</span></div>
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Accepted: <span className="font-semibold">{acceptedCount}</span></div>
               </div>
-              <PremiumLockedOverlay
-                locked={!entitlements.isPremiumActive}
-                title="Premium analytics"
-                description="Advanced analytics are premium. Application tracking always stays free."
-              >
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
-                  <p>Interview rate: <span className="font-semibold">{formatPercent(interviewRate)}</span></p>
-                  <p>View rate: <span className="font-semibold">{formatPercent(viewRate)}</span></p>
-                </div>
-              </PremiumLockedOverlay>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+                <p>Interview rate: <span className="font-semibold">{formatPercent(interviewRate)}</span></p>
+                <p>View rate: <span className="font-semibold">{formatPercent(viewRate)}</span></p>
+              </div>
             </div>
           ) : null}
 
@@ -258,75 +248,57 @@ export default async function StudentDashboardSectionPage({
               <p className="text-sm text-slate-700">
                 Resume uploaded: <span className="font-semibold text-slate-900">{hasResumeOnFile ? 'Yes' : 'No'}</span>
               </p>
-              <PremiumLockedOverlay
-                locked={!entitlements.isPremiumActive}
-                title="Premium resume review"
-                description="Unlock score details, suggestions, and keyword coverage."
-              >
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-3xl font-semibold text-slate-900">{typeof latestAnalysis?.resume_score === 'number' ? latestAnalysis.resume_score : 'n/a'}</p>
-                  <ul className="mt-3 space-y-1 text-sm text-slate-700">
-                    {(analysisSuggestions.length > 0 ? analysisSuggestions : ['Upload a PDF resume to generate your first analysis.']).slice(0, 8).map((item) => (
-                      <li key={item}>• {item}</li>
-                    ))}
-                  </ul>
-                  {keywordList.length > 0 ? <p className="mt-3 text-xs text-slate-600">Keywords: {keywordList.slice(0, 15).join(', ')}</p> : null}
-                </div>
-              </PremiumLockedOverlay>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="text-3xl font-semibold text-slate-900">{typeof latestAnalysis?.resume_score === 'number' ? latestAnalysis.resume_score : 'n/a'}</p>
+                <ul className="mt-3 space-y-1 text-sm text-slate-700">
+                  {(analysisSuggestions.length > 0 ? analysisSuggestions : ['Upload a PDF resume to generate your first analysis.']).slice(0, 8).map((item) => (
+                    <li key={item}>• {item}</li>
+                  ))}
+                </ul>
+                {keywordList.length > 0 ? <p className="mt-3 text-xs text-slate-600">Keywords: {keywordList.slice(0, 15).join(', ')}</p> : null}
+              </div>
             </div>
           ) : null}
 
           {section === 'course-strategy' ? (
             <div className="space-y-4">
               <p className="text-sm text-slate-700">Current coursework categories: <span className="font-semibold">{courseworkCategoryCount}</span></p>
-              <PremiumLockedOverlay
-                locked={!entitlements.isPremiumActive}
-                title="Premium course strategy"
-                description="Unlock coursework recommendations with estimated impact."
-              >
-                <div className="space-y-2">
-                  {topCourseStrategies.length > 0 ? (
-                    topCourseStrategies.map((item) => (
-                      <div key={item.name} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-                        <p className="font-medium text-slate-900">{item.name}</p>
-                        <p className="text-xs text-slate-600">Estimated impact: {item.count} internship requirement matches.</p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                      Not enough data yet. Add coursework and we will expand recommendations.
-                    </p>
-                  )}
-                </div>
-              </PremiumLockedOverlay>
+              <div className="space-y-2">
+                {topCourseStrategies.length > 0 ? (
+                  topCourseStrategies.map((item) => (
+                    <div key={item.name} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                      <p className="font-medium text-slate-900">{item.name}</p>
+                      <p className="text-xs text-slate-600">Estimated impact: {item.count} internship requirement matches.</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    Not enough data yet. Add coursework and we will expand recommendations.
+                  </p>
+                )}
+              </div>
             </div>
           ) : null}
 
           {section === 'match-optimization' ? (
             <div className="space-y-4">
-              <PremiumLockedOverlay
-                locked={!entitlements.isPremiumActive}
-                title="Premium optimization"
-                description="See where you almost matched and get specific next-step improvements."
-              >
-                <div className="space-y-2">
-                  {nearMisses.length > 0 ? (
-                    nearMisses.map((item) => (
-                      <div key={`${item.title}-${item.company}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-                        <p className="font-medium text-slate-900">{item.title}</p>
-                        <p className="text-xs text-slate-600">
-                          {item.company} • Match {item.score}%
-                        </p>
-                        <p className="mt-1 text-xs text-slate-700">{item.reason}</p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                      Not enough near-miss data yet. Apply to more roles and we will surface targeted opportunities.
-                    </p>
-                  )}
-                </div>
-              </PremiumLockedOverlay>
+              <div className="space-y-2">
+                {nearMisses.length > 0 ? (
+                  nearMisses.map((item) => (
+                    <div key={`${item.title}-${item.company}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                      <p className="font-medium text-slate-900">{item.title}</p>
+                      <p className="text-xs text-slate-600">
+                        {item.company} • Match {item.score}%
+                      </p>
+                      <p className="mt-1 text-xs text-slate-700">{item.reason}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    Not enough near-miss data yet. Apply to more roles and we will surface targeted opportunities.
+                  </p>
+                )}
+              </div>
             </div>
           ) : null}
         </article>

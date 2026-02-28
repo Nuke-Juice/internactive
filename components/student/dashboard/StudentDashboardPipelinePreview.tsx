@@ -6,6 +6,7 @@ type ApplicationPreviewRow = {
   company: string
   status: string
   createdAt: string
+  href: string
 }
 
 type Props = {
@@ -51,7 +52,11 @@ export default function StudentDashboardPipelinePreview({ applications }: Props)
           {applications.map((application) => {
             const pill = getStatusPill(application.status)
             return (
-              <div key={application.id} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <Link
+                key={application.id}
+                href={application.href}
+                className="flex flex-col gap-2 px-3 py-3 transition-colors hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
+              >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-slate-900">{application.title}</p>
                   <p className="truncate text-xs text-slate-600">{application.company}</p>
@@ -60,7 +65,7 @@ export default function StudentDashboardPipelinePreview({ applications }: Props)
                   <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${pill.className}`}>{pill.label}</span>
                   <span className="text-xs text-slate-500">Applied {formatAppliedDate(application.createdAt)}</span>
                 </div>
-              </div>
+              </Link>
             )
           })}
         </div>

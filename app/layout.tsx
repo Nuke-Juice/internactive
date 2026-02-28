@@ -32,7 +32,6 @@ export default async function RootLayout({
   let email: string | null = null
   let avatarUrl: string | null = null
   let isEmailVerified = true
-  let showInboxNotificationDot = false
   let showNotificationsDot = false
   let employerPlanId: EmployerPlanId | null = null
   if (user) {
@@ -62,7 +61,6 @@ export default async function RootLayout({
           .in('internship_id', internshipIds)
           .is('employer_viewed_at', null)
         const hasUnseenApplicants = (count ?? 0) > 0
-        showInboxNotificationDot = hasUnseenApplicants
         showNotificationsDot = hasUnseenApplicants
       }
     }
@@ -80,7 +78,6 @@ export default async function RootLayout({
           isEmailVerified={isEmailVerified}
           showFinishProfilePrompt={false}
           finishProfileHref={null}
-          showInboxNotificationDot={showInboxNotificationDot}
           showNotificationsDot={showNotificationsDot}
           employerPlanId={employerPlanId}
         >

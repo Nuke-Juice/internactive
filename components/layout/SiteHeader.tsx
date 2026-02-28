@@ -4,7 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, FileText, LogIn, Mail, Menu, ShieldCheck, User, X } from 'lucide-react'
+import { Bell, FileText, LogIn, Menu, ShieldCheck, User, X } from 'lucide-react'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { isAdminRole, type UserRole } from '@/lib/auth/roles'
 import type { EmployerPlanId } from '@/lib/billing/plan'
@@ -20,7 +20,6 @@ type SiteHeaderProps = {
   isEmailVerified?: boolean
   showFinishProfilePrompt?: boolean
   finishProfileHref?: string | null
-  showInboxNotificationDot?: boolean
   showNotificationsDot?: boolean
   employerPlanId?: EmployerPlanId | null
 }
@@ -67,7 +66,6 @@ export default function SiteHeader({
   avatarUrl = null,
   isEmailVerified = true,
   showFinishProfilePrompt = false,
-  showInboxNotificationDot = false,
   showNotificationsDot = false,
   employerPlanId = null,
 }: SiteHeaderProps) {
@@ -90,15 +88,10 @@ export default function SiteHeader({
     matchPath(pathname ?? '/', [{ id: 'home', href: '/', match: 'exact', activeOn: ['/jobs'] }]) === 'home'
   const notificationsActive =
     matchPath(pathname ?? '/', [{ id: 'notifications', href: '/notifications', match: 'prefix' }]) === 'notifications'
-  const inboxActive = matchPath(pathname ?? '/', [{ id: 'inbox', href: '/inbox', match: 'prefix' }]) === 'inbox'
   const profileActive = matchPath(pathname ?? '/', [{ id: 'account', href: '/account', match: 'prefix' }]) === 'account'
   const profilePageActive = matchPath(pathname ?? '/', [{ id: 'profile', href: '/profile', match: 'prefix' }]) === 'profile'
-  const adminActive = matchPath(pathname ?? '/', [{ id: 'admin', href: '/admin', match: 'prefix' }]) === 'admin'
   const applicationsActive =
     matchPath(pathname ?? '/', [{ id: 'applications', href: '/applications', match: 'prefix' }]) === 'applications'
-  const employersActive =
-    matchPath(pathname ?? '/', [{ id: 'for-employers', href: '/for-employers', match: 'prefix', activeOn: ['/signup/employer'] }]) ===
-    'for-employers'
   const loginActive = matchPath(pathname ?? '/', [{ id: 'login', href: '/login', match: 'prefix' }]) === 'login'
   const isAdmin = isAdminRole(role)
   const showVerificationBanner = effectiveIsAuthenticated && !isEmailVerified
@@ -141,14 +134,13 @@ export default function SiteHeader({
           activeOn: ['/dashboard/student'],
           order: 10,
         },
-        { id: 'student-upgrade', label: 'Upgrade', href: '/student/upgrade', match: 'prefix', order: 20, icon: ShieldCheck },
         {
           id: 'for-employers',
           label: 'For Employers',
           href: '/for-employers',
           match: 'prefix',
           activeOn: ['/signup/employer'],
-          order: 30,
+          order: 20,
         },
       ]
     }
@@ -488,16 +480,6 @@ export default function SiteHeader({
                     <FileText className="h-5 w-5" />
                   </Link>
                 ) : null}
-                {effectiveIsAuthenticated && role === 'student' ? (
-                  <div className="relative">
-                    <Link href="/inbox" className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
-                      <Mail className="h-5 w-5" />
-                    </Link>
-                    {showInboxNotificationDot ? (
-                      <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
-                    ) : null}
-                  </div>
-                ) : null}
                 <div className="relative">
                   <Link
                     href="/notifications"
@@ -552,16 +534,6 @@ export default function SiteHeader({
                 <Link href="/applications" className={iconNavClasses(applicationsActive)} aria-label="Applications" title="Applications">
                   <FileText className="h-5 w-5" />
                 </Link>
-              ) : null}
-              {effectiveIsAuthenticated && role === 'student' ? (
-                <div className="relative">
-                  <Link href="/inbox" className={iconNavClasses(inboxActive)} aria-label="Inbox" title="Inbox">
-                    <Mail className="h-5 w-5" />
-                  </Link>
-                  {showInboxNotificationDot ? (
-                    <span className="absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-red-100 bg-red-500" aria-hidden />
-                  ) : null}
-                </div>
               ) : null}
               <div className="relative">
                 <Link

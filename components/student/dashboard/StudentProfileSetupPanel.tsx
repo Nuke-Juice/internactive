@@ -1,75 +1,69 @@
 import Link from 'next/link'
-import { ChevronDown } from 'lucide-react'
+
+type ChecklistItem = {
+  label: string
+  href: string
+  done: boolean
+}
 
 type Props = {
   profileStrengthPercent: number
-  missingLabels: string[]
-  completedChecklist: string[]
-  missingChecklist: string[]
+  checklistItems: ChecklistItem[]
   courseworkCourseCount: number
   courseworkCategoryCount: number
-  nextBestAction: string
+  nextBestActionLabel: string
+  nextBestActionHref: string
 }
 
 export default function StudentProfileSetupPanel({
   profileStrengthPercent,
-  missingLabels,
-  completedChecklist,
-  missingChecklist,
+  checklistItems,
   courseworkCourseCount,
   courseworkCategoryCount,
-  nextBestAction,
+  nextBestActionLabel,
+  nextBestActionHref,
 }: Props) {
-  const missingSummary = missingLabels.length > 0 ? missingLabels.slice(0, 2).join(', ') : 'Nothing missing'
+  const missingCount = checklistItems.filter((item) => !item.done).length
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <details>
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-slate-900">Profile setup: {profileStrengthPercent}%</p>
-            <p className="mt-1 text-xs text-slate-600">Missing: {missingSummary}</p>
-          </div>
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-600">
-            Details
-            <ChevronDown className="h-4 w-4" />
-          </span>
-        </summary>
-
-        <div className="mt-3 space-y-3 border-t border-slate-200 pt-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Complete</p>
-              <ul className="mt-2 space-y-1 text-xs text-slate-700">
-                {completedChecklist.length > 0 ? completedChecklist.map((item) => <li key={item}>• {item}</li>) : <li>• Nothing complete yet</li>}
-              </ul>
-            </div>
-
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Missing</p>
-              <ul className="mt-2 space-y-1 text-xs text-slate-700">
-                {missingChecklist.length > 0 ? missingChecklist.map((item) => <li key={item}>• {item}</li>) : <li>• No missing items</li>}
-              </ul>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-700">
-            <p>
-              Courses added: <span className="font-semibold text-slate-900">{courseworkCourseCount}</span>
-            </p>
-            <p>
-              Coursework categories: <span className="font-semibold text-slate-900">{courseworkCategoryCount}</span>
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-xs text-slate-700">Next best action: {nextBestAction}</p>
-            <Link href="/account" className="text-xs font-medium text-slate-700 underline-offset-2 hover:underline">
-              Edit profile
-            </Link>
-          </div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">Profile checklist</p>
+          <p className="mt-1 text-xs text-slate-600">
+            {profileStrengthPercent}% complete • {missingCount === 0 ? 'Everything important is in place.' : `${missingCount} item${missingCount === 1 ? '' : 's'} still need attention.`}
+          </p>
         </div>
-      </details>
+        <Link href={nextBestActionHref} className="text-xs font-medium text-slate-700 underline-offset-2 hover:underline">
+          {nextBestActionLabel}
+        </Link>
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {checklistItems.map((item) => (
+          <Link
+            key={item.label}
+            href={item.href}
+            className={`rounded-lg border px-3 py-3 transition-colors ${
+              item.done
+                ? 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100/70'
+                : 'border-amber-200 bg-amber-50 hover:bg-amber-100/70'
+            }`}
+          >
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.done ? 'Done' : 'Needs attention'}</div>
+            <div className="mt-1 text-sm font-medium text-slate-900">{item.label}</div>
+          </Link>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-slate-700">
+        <p>
+          Courses added: <span className="font-semibold text-slate-900">{courseworkCourseCount}</span>
+        </p>
+        <p>
+          Coursework categories: <span className="font-semibold text-slate-900">{courseworkCategoryCount}</span>
+        </p>
+      </div>
     </section>
   )
 }

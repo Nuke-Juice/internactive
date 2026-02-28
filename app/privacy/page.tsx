@@ -106,8 +106,8 @@ export default function PrivacyPage() {
             obligations.
           </p>
           <p>
-            If you want your account deleted, you can use the account deletion controls in the product where available or
-            contact{' '}
+            You can update your account and profile information in settings. To request deletion of your account or
+            personal information, contact{' '}
             <a className="font-medium text-blue-700 hover:underline" href={`mailto:${LEGAL_CONTACT_EMAIL}`}>
               {LEGAL_CONTACT_EMAIL}
             </a>
@@ -130,6 +130,49 @@ export default function PrivacyPage() {
               {LEGAL_CONTACT_EMAIL}
             </a>
             . We will review requests in light of applicable law and the operational needs of the service.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Security</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            We use reasonable administrative, technical, and organizational safeguards designed to protect personal
+            information and support the security of the platform.
+          </p>
+          <p>
+            No method of transmission over the internet or electronic storage is completely secure, and we cannot
+            guarantee absolute security.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">Third-Party Services and Links</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            Internactive may include links to employer websites, applicant tracking systems, payment processors, or
+            other third-party services. When you leave our platform or interact with an external service, that third
+            party’s terms and privacy practices apply.
+          </p>
+          <p>
+            We are not responsible for the privacy, security, availability, or content practices of third-party sites or
+            services.
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">U.S. Focus</h2>
+        <div className="mt-3 space-y-3">
+          <p>
+            Internactive is currently intended for users in the United States. We operate the service with a U.S.-focused
+            product and legal framework.
+          </p>
+          <p>
+            We do not make jurisdiction-specific commitments for GDPR or other international privacy regimes at this
+            time. If our geographic scope changes, we may update this policy accordingly.
           </p>
         </div>
       </section>
