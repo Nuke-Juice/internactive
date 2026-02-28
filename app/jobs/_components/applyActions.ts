@@ -46,6 +46,7 @@ export type ApplyFromListingModalState = {
   profile_missing?: string[]
   application_missing?: string[]
   eligibility_failed?: string[]
+  applicationId?: string
   externalApplyUrl?: string | null
   externalApplyRequired?: boolean
   successMessage?: string
@@ -814,6 +815,7 @@ export async function submitApplicationFromListingModalAction(
 
   return {
     ok: true,
+    applicationId: insertedApplicationId ?? undefined,
     externalApplyRequired: shouldRequireImmediateAts,
     externalApplyUrl: shouldRequireImmediateAts ? (effectiveAts.externalApplyUrl || null) : null,
     successMessage: shouldRequireImmediateAts

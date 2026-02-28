@@ -1154,15 +1154,16 @@ export default async function JobDetailPage({
 
               <div className="mt-3">
                 <ApplyModalLauncher
-                listingId={listing.id}
-                companyName={listing.company_name || 'this company'}
-                isAuthenticated={Boolean(user)}
-                userRole={userRole === 'admin' ? null : userRole}
-                isClosed={capReached || deadlinePassed}
-                screeningQuestion={screeningQuestion}
-                hasSavedResume={hasSavedResume}
-                savedResumeFileName={savedResumeFileName}
-              />
+                  listingId={listing.id}
+                  listingTitle={listing.title || 'Internship'}
+                  companyName={listing.company_name || 'this company'}
+                  isAuthenticated={Boolean(user)}
+                  userRole={userRole === 'admin' ? null : userRole}
+                  isClosed={capReached || deadlinePassed}
+                  screeningQuestion={screeningQuestion}
+                  hasSavedResume={hasSavedResume}
+                  savedResumeFileName={savedResumeFileName}
+                />
               </div>
               {capReached ? (
                 <p className="mt-2 text-xs text-slate-700">Applications closed ({applicationCap} applicants).</p>
