@@ -10,6 +10,7 @@ import { isAdminRole, type UserRole } from '@/lib/auth/roles'
 import type { EmployerPlanId } from '@/lib/billing/plan'
 import { useToast } from '@/components/feedback/ToastProvider'
 import AppNav, { type AppNavItem } from '@/components/navigation/AppNav'
+import { isPilotMode } from '@/lib/pilotMode'
 import { matchPath } from '@/src/navigation/matchPath'
 
 type SiteHeaderProps = {
@@ -83,9 +84,11 @@ export default function SiteHeader({
   const authStateRef = useRef(isAuthenticated)
   const { showToast } = useToast()
   const effectiveIsAuthenticated = clientIsAuthenticated
+  const pilotMode = isPilotMode()
+  const isPilotStudent = pilotMode && role === 'student'
 
   const homeActive =
-    matchPath(pathname ?? '/', [{ id: 'home', href: '/', match: 'exact', activeOn: ['/jobs'] }]) === 'home'
+    matchPath(pathname ?? '/', [{ id: 'home', href: '/', match: 'exact', activeOn: isPilotStudent ? undefined : pilotMode ? ['/jobs'] : undefined }]) === 'home'
   const notificationsActive =
     matchPath(pathname ?? '/', [{ id: 'notifications', href: '/notifications', match: 'prefix' }]) === 'notifications'
   const profileActive = matchPath(pathname ?? '/', [{ id: 'account', href: '/account', match: 'prefix' }]) === 'account'
@@ -127,14 +130,6 @@ export default function SiteHeader({
     if (role === 'student') {
       return [
         {
-          id: 'student-dashboard',
-          label: 'Dashboard',
-          href: '/student/dashboard',
-          match: 'prefix',
-          activeOn: ['/dashboard/student'],
-          order: 10,
-        },
-        {
           id: 'for-employers',
           label: 'For Employers',
           href: '/for-employers',
@@ -142,11 +137,23 @@ export default function SiteHeader({
           activeOn: ['/signup/employer'],
           order: 20,
         },
+        ...(isPilotStudent
+          ? []
+          : [
+              {
+                id: 'student-dashboard',
+                label: 'Dashboard',
+                href: '/student/dashboard',
+                match: 'prefix' as const,
+                activeOn: ['/dashboard/student'],
+                order: 10,
+              },
+            ]),
       ]
     }
 
     return []
-  }, [effectiveIsAuthenticated, employerPlanId, isAdmin, role])
+  }, [effectiveIsAuthenticated, employerPlanId, isAdmin, isPilotStudent, role])
   useEffect(() => {
     if (resendCooldown <= 0) return
     const timer = setTimeout(() => {
@@ -417,6 +424,11 @@ export default function SiteHeader({
               <Link href="/" className={`hidden md:inline ${textLinkClasses(homeActive)}`}>
                 Home
               </Link>
+              {!isPilotStudent ? (
+                <Link href="/jobs" className={`hidden md:inline ${textLinkClasses(pathname === '/jobs' || pathname?.startsWith('/jobs/'))}`}>
+                  Browse
+                </Link>
+              ) : null}
             </div>
 
             <nav className="hidden items-center gap-2 md:flex">
@@ -574,6 +586,11 @@ export default function SiteHeader({
                 <Link href="/" className={navClasses(homeActive)}>
                   Home
                 </Link>
+                {!isPilotStudent ? (
+                  <Link href="/jobs" className={navClasses(pathname === '/jobs' || pathname?.startsWith('/jobs/'))}>
+                    Browse
+                  </Link>
+                ) : null}
                 {!effectiveIsAuthenticated ? (
                   <Link href="/login" className={primaryButtonClasses(loginActive)}>
                     <LogIn className="h-4 w-4" />

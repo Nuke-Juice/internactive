@@ -16,7 +16,10 @@ type Params = Promise<{ id: string }>
 type SearchParams = Promise<{
   q?: string
   status?: string
+  sort?: string
+  shortlisted?: string
   updated?: string
+  shortlistedUpdated?: string
   summarySent?: string
   claimSent?: string
   claimResent?: string
@@ -37,6 +40,7 @@ type ApplicationRow = {
   match_reasons: unknown
   resume_url: string | null
   status: string | null
+  pilot_tags: string[] | null
 }
 
 type StudentProfileRow = {
@@ -95,10 +99,68 @@ function formatDate(value: string | null) {
   }
 }
 
+function normalizeSort(value: string | undefined) {
+  return value === 'recent' ? 'recent' : 'match'
+}
+
+function isShortlisted(pilotTags: string[] | null | undefined) {
+  return Array.isArray(pilotTags) && pilotTags.some((tag) => tag.trim().toLowerCase() === 'shortlisted')
+}
+
+function toggleShortlistTag(pilotTags: string[] | null | undefined, nextShortlisted: boolean) {
+  const normalized = Array.isArray(pilotTags)
+    ? pilotTags.map((tag) => tag.trim()).filter(Boolean)
+    : []
+  const withoutShortlisted = normalized.filter((tag) => tag.toLowerCase() !== 'shortlisted')
+  return nextShortlisted ? ['shortlisted', ...withoutShortlisted] : withoutShortlisted
+}
+
+function formatClaimStatusLabel(input: ReturnType<typeof buildEmployerClaimStatus>) {
+  if (input.lastClaimedAt) return 'Claimed'
+  if (input.pendingCount > 0) return 'Pending'
+  return 'Not sent'
+}
+
+function compactReasonLabel(reason: string) {
+  const cleaned = reason.replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim()
+  if (!cleaned) return ''
+  const scoreMatch = cleaned.match(/([+-]\d+(?:\.\d+)?)/)
+  const scoreSuffix = scoreMatch ? ` ${scoreMatch[1]}` : ''
+  const lower = cleaned.toLowerCase()
+
+  if (lower.includes('coursework')) return `Coursework fit${scoreSuffix}`.trim()
+  if (lower.includes('availability') || lower.includes('hours/week') || lower.includes('hours per week')) {
+    return `Availability fit${scoreSuffix}`.trim()
+  }
+  if (lower.includes('major')) return `Major fit${scoreSuffix}`.trim()
+  if (lower.includes('skill')) return `Skill fit${scoreSuffix}`.trim()
+  if (lower.includes('location') || lower.includes('remote')) return `Location fit${scoreSuffix}`.trim()
+  if (lower.includes('experience')) return `Experience fit${scoreSuffix}`.trim()
+  if (lower.includes('term') || lower.includes('march') || lower.includes('april') || lower.includes('may') || lower.includes('summer')) {
+    return `Timing fit${scoreSuffix}`.trim()
+  }
+
+  const stripped = cleaned
+    .replace(/\s*\+\d+(?:\.\d+)?/g, '')
+    .replace(/\s*-\d+(?:\.\d+)?/g, '')
+    .trim()
+  return `${stripped.replace(/[.]+$/, '')}${scoreSuffix}`.trim()
+}
+
+function compactReasons(value: unknown) {
+  return parseReasons(value)
+    .map(compactReasonLabel)
+    .filter(Boolean)
+    .slice(0, 2)
+}
+
 function encodeParams(input: {
   q: string
   status: ApplicationStatus | 'all'
+  sort?: 'match' | 'recent'
+  shortlisted?: boolean
   updated?: string
+  shortlistedUpdated?: string
   summarySent?: string
   claimSent?: string
   claimResent?: string
@@ -108,7 +170,10 @@ function encodeParams(input: {
   const params = new URLSearchParams()
   if (input.q.trim()) params.set('q', input.q.trim())
   if (input.status !== 'all') params.set('status', input.status)
+  if (input.sort && input.sort !== 'match') params.set('sort', input.sort)
+  if (input.shortlisted) params.set('shortlisted', '1')
   if (input.updated) params.set('updated', input.updated)
+  if (input.shortlistedUpdated) params.set('shortlistedUpdated', input.shortlistedUpdated)
   if (input.summarySent) params.set('summarySent', input.summarySent)
   if (input.claimSent) params.set('claimSent', input.claimSent)
   if (input.claimResent) params.set('claimResent', input.claimResent)
@@ -154,6 +219,8 @@ export default async function AdminInternshipApplicantsPage({
 
   const q = (resolvedSearchParams?.q ?? '').trim().toLowerCase()
   const statusFilter = normalizeStatusFilter(resolvedSearchParams?.status)
+  const sort = normalizeSort(resolvedSearchParams?.sort)
+  const shortlistedOnly = resolvedSearchParams?.shortlisted === '1'
 
   const admin = supabaseAdmin()
 
@@ -161,10 +228,10 @@ export default async function AdminInternshipApplicantsPage({
     admin.from('internships').select('id, title, employer_id, company_name').eq('id', internshipId).maybeSingle(),
     admin
       .from('applications')
-      .select('id, internship_id, student_id, created_at, match_score, match_reasons, resume_url, status')
+      .select('id, internship_id, student_id, created_at, match_score, match_reasons, resume_url, status, pilot_tags')
       .eq('internship_id', internshipId)
-      .order('match_score', { ascending: false, nullsFirst: false })
-      .order('created_at', { ascending: false }),
+      .order(sort === 'recent' ? 'created_at' : 'match_score', { ascending: false, nullsFirst: false })
+      .order(sort === 'recent' ? 'match_score' : 'created_at', { ascending: false, nullsFirst: false }),
   ])
 
   if (!internship?.id) {
@@ -237,8 +304,9 @@ export default async function AdminInternshipApplicantsPage({
     const school = profile?.school?.trim() || 'School not set'
     const major = formatMajor(profile?.majors, canonicalMajorName(profile?.major))
     const gradYear = profile?.year?.trim() || 'Grad year not set'
-    const topReasons = parseReasons(application.match_reasons).slice(0, 3)
+    const topReasons = compactReasons(application.match_reasons)
     const resumeUrl = application.resume_url ? signedResumeUrlByPath.get(application.resume_url) ?? null : null
+    const shortlisted = isShortlisted(application.pilot_tags)
 
     return {
       applicationId: application.id,
@@ -252,11 +320,13 @@ export default async function AdminInternshipApplicantsPage({
       resumeUrl,
       status,
       createdAt: application.created_at,
+      shortlisted,
     }
   })
 
   const filteredRows = applicantRows.filter((row) => {
     if (statusFilter !== 'all' && row.status !== statusFilter) return false
+    if (shortlistedOnly && !row.shortlisted) return false
     if (!q) return true
 
     const reasonText = row.topReasons.join(' ').toLowerCase()
@@ -273,9 +343,11 @@ export default async function AdminInternshipApplicantsPage({
     const nextStatusRaw = String(formData.get('status') ?? '').trim()
     const qValue = String(formData.get('q') ?? '').trim()
     const statusValue = normalizeStatusFilter(String(formData.get('status_filter') ?? ''))
+    const sortValue = normalizeSort(String(formData.get('sort') ?? ''))
+    const shortlistedValue = String(formData.get('shortlisted') ?? '') === '1'
 
     if (!applicationId) {
-      redirect(`/admin/internships/${internshipId}/applicants${encodeParams({ q: qValue, status: statusValue, error: 'Missing application id' })}`)
+      redirect(`/admin/internships/${internshipId}/applicants${encodeParams({ q: qValue, status: statusValue, sort: sortValue, shortlisted: shortlistedValue, error: 'Missing application id' })}`)
     }
 
     const nextStatus = normalizeStatus(nextStatusRaw)
@@ -292,6 +364,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: error.message,
         })}`
       )
@@ -301,7 +375,64 @@ export default async function AdminInternshipApplicantsPage({
       `/admin/internships/${internshipId}/applicants${encodeParams({
         q: qValue,
         status: statusValue,
+        sort: sortValue,
+        shortlisted: shortlistedValue,
         updated: '1',
+      })}`
+    )
+  }
+
+  async function toggleShortlistAction(formData: FormData) {
+    'use server'
+
+    await requireAnyRole(ADMIN_ROLES, { requestedPath: '/admin/internships/[id]/applicants' })
+
+    const applicationId = String(formData.get('application_id') ?? '').trim()
+    const nextShortlisted = String(formData.get('next_shortlisted') ?? '') === '1'
+    const currentTags = parseReasons(formData.getAll('current_pilot_tag'))
+    const qValue = String(formData.get('q') ?? '').trim()
+    const statusValue = normalizeStatusFilter(String(formData.get('status_filter') ?? ''))
+    const sortValue = normalizeSort(String(formData.get('sort') ?? ''))
+    const shortlistedValue = String(formData.get('shortlisted') ?? '') === '1'
+
+    if (!applicationId) {
+      redirect(
+        `/admin/internships/${internshipId}/applicants${encodeParams({
+          q: qValue,
+          status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
+          error: 'Missing application id',
+        })}`
+      )
+    }
+
+    const adminWrite = supabaseAdmin()
+    const { error } = await adminWrite
+      .from('applications')
+      .update({ pilot_tags: toggleShortlistTag(currentTags, nextShortlisted) })
+      .eq('id', applicationId)
+      .eq('internship_id', internshipId)
+
+    if (error) {
+      redirect(
+        `/admin/internships/${internshipId}/applicants${encodeParams({
+          q: qValue,
+          status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
+          error: error.message,
+        })}`
+      )
+    }
+
+    redirect(
+      `/admin/internships/${internshipId}/applicants${encodeParams({
+        q: qValue,
+        status: statusValue,
+        sort: sortValue,
+        shortlisted: shortlistedValue,
+        shortlistedUpdated: '1',
       })}`
     )
   }
@@ -315,6 +446,8 @@ export default async function AdminInternshipApplicantsPage({
 
     const qValue = String(formData.get('q') ?? '').trim()
     const statusValue = normalizeStatusFilter(String(formData.get('status_filter') ?? ''))
+    const sortValue = normalizeSort(String(formData.get('sort') ?? ''))
+    const shortlistedValue = String(formData.get('shortlisted') ?? '') === '1'
     const adminWrite = supabaseAdmin()
 
     const [{ data: internshipRow }, { data: fullApplicationsData }] = await Promise.all([
@@ -333,7 +466,7 @@ export default async function AdminInternshipApplicantsPage({
 
     if (!internshipRow?.id || !internshipRow.employer_id) {
       redirect(
-        `/admin/internships/${internshipId}/applicants${encodeParams({ q: qValue, status: statusValue, error: 'Internship not found' })}`
+        `/admin/internships/${internshipId}/applicants${encodeParams({ q: qValue, status: statusValue, sort: sortValue, shortlisted: shortlistedValue, error: 'Internship not found' })}`
       )
     }
 
@@ -349,6 +482,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: 'Employer contact_email is required before sending summary',
         })}`
       )
@@ -424,6 +559,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: 'NEXT_PUBLIC_APP_URL is required to send summary emails',
         })}`
       )
@@ -442,6 +579,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: 'Email provider not configured',
         })}`
       )
@@ -464,6 +603,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: logError.message,
         })}`
       )
@@ -473,6 +614,8 @@ export default async function AdminInternshipApplicantsPage({
       `/admin/internships/${internshipId}/applicants${encodeParams({
         q: qValue,
         status: statusValue,
+        sort: sortValue,
+        shortlisted: shortlistedValue,
         summarySent: '1',
       })}`
     )
@@ -489,6 +632,8 @@ export default async function AdminInternshipApplicantsPage({
     const invalidateExisting = String(formData.get('invalidate_existing') ?? '') === 'on'
     const qValue = String(formData.get('q') ?? '').trim()
     const statusValue = normalizeStatusFilter(String(formData.get('status_filter') ?? ''))
+    const sortValue = normalizeSort(String(formData.get('sort') ?? ''))
+    const shortlistedValue = String(formData.get('shortlisted') ?? '') === '1'
     const adminWrite = supabaseAdmin()
 
     const { data: internshipRow } = await adminWrite
@@ -502,6 +647,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: 'Internship not found',
         })}`
       )
@@ -519,6 +666,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: 'Employer contact_email is required before sending claim link',
         })}`
       )
@@ -540,6 +689,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: result.error,
         })}`
       )
@@ -549,6 +700,8 @@ export default async function AdminInternshipApplicantsPage({
       `/admin/internships/${internshipId}/applicants${encodeParams({
         q: qValue,
         status: statusValue,
+        sort: sortValue,
+        shortlisted: shortlistedValue,
         ...(mode === 'resend' ? { claimResent: '1' } : { claimSent: '1' }),
       })}`
     )
@@ -560,6 +713,8 @@ export default async function AdminInternshipApplicantsPage({
     await requireAnyRole(ADMIN_ROLES, { requestedPath: '/admin/internships/[id]/applicants' })
     const qValue = String(formData.get('q') ?? '').trim()
     const statusValue = normalizeStatusFilter(String(formData.get('status_filter') ?? ''))
+    const sortValue = normalizeSort(String(formData.get('sort') ?? ''))
+    const shortlistedValue = String(formData.get('shortlisted') ?? '') === '1'
     const contactEmail = String(formData.get('contact_email') ?? '').trim().toLowerCase()
     const adminWrite = supabaseAdmin()
 
@@ -573,6 +728,8 @@ export default async function AdminInternshipApplicantsPage({
         `/admin/internships/${internshipId}/applicants${encodeParams({
           q: qValue,
           status: statusValue,
+          sort: sortValue,
+          shortlisted: shortlistedValue,
           error: error.message,
         })}`
       )
@@ -582,6 +739,8 @@ export default async function AdminInternshipApplicantsPage({
       `/admin/internships/${internshipId}/applicants${encodeParams({
         q: qValue,
         status: statusValue,
+        sort: sortValue,
+        shortlisted: shortlistedValue,
         contactSaved: '1',
       })}`
     )
@@ -590,7 +749,7 @@ export default async function AdminInternshipApplicantsPage({
   return (
     <main className="min-h-screen bg-white px-6 py-10">
       <section className="mx-auto max-w-7xl space-y-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <Link
               href="/admin/internships"
@@ -605,69 +764,107 @@ export default async function AdminInternshipApplicantsPage({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <form action={sendClaimLinkAction} className="inline-flex items-center gap-2">
-              <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
-              <input type="hidden" name="status_filter" value={statusFilter} />
-              <input type="hidden" name="mode" value="send" />
-              <button
-                type="submit"
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Send claim link
-              </button>
-            </form>
-            <form action={sendClaimLinkAction} className="inline-flex items-center gap-2">
-              <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
-              <input type="hidden" name="status_filter" value={statusFilter} />
-              <input type="hidden" name="mode" value="resend" />
-              <label className="inline-flex items-center gap-1 text-xs text-slate-600">
-                <input type="checkbox" name="invalidate_existing" />
-                Invalidate pending
-              </label>
-              <button
-                type="submit"
-                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Resend claim link
-              </button>
-            </form>
-            <form action={sendEmployerSummaryAction}>
-              <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
-              <input type="hidden" name="status_filter" value={statusFilter} />
-              <button
-                type="submit"
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                Send Employer Summary
-              </button>
-            </form>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Employer Access</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <form action={sendClaimLinkAction}>
+                  <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
+                  <input type="hidden" name="status_filter" value={statusFilter} />
+                  <input type="hidden" name="sort" value={sort} />
+                  <input type="hidden" name="shortlisted" value={shortlistedOnly ? '1' : ''} />
+                  <input type="hidden" name="mode" value="send" />
+                  <button
+                    type="submit"
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Send claim link
+                  </button>
+                </form>
+                <details className="relative">
+                  <summary className="list-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                    More access actions
+                  </summary>
+                  <div className="absolute right-0 z-10 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                    <form action={sendClaimLinkAction} className="space-y-2">
+                      <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
+                      <input type="hidden" name="status_filter" value={statusFilter} />
+                      <input type="hidden" name="sort" value={sort} />
+                      <input type="hidden" name="shortlisted" value={shortlistedOnly ? '1' : ''} />
+                      <input type="hidden" name="mode" value="resend" />
+                      <button
+                        type="submit"
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Resend claim link
+                      </button>
+                      <label className="flex items-center gap-2 rounded-md px-1 text-xs text-slate-600">
+                        <input type="checkbox" name="invalidate_existing" />
+                        Invalidate pending first
+                      </label>
+                    </form>
+                  </div>
+                </details>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Handoff</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <form action={sendEmployerSummaryAction}>
+                  <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
+                  <input type="hidden" name="status_filter" value={statusFilter} />
+                  <input type="hidden" name="sort" value={sort} />
+                  <input type="hidden" name="shortlisted" value={shortlistedOnly ? '1' : ''} />
+                  <button
+                    type="submit"
+                    className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Send Employer Summary
+                  </button>
+                </form>
+                <Link
+                  href={`/admin/internships/${encodeURIComponent(internshipId)}/shortlist`}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Candidate Pack
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          <form action={updateEmployerContactAction} className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
-            <input type="hidden" name="status_filter" value={statusFilter} />
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <label className="text-xs font-medium text-slate-700">Employer contact email</label>
-              <input
-                name="contact_email"
-                defaultValue={employerProfile?.contact_email ?? ''}
-                placeholder="name@company.com"
-                className="mt-1 w-full min-w-[280px] rounded-md border border-slate-300 bg-white p-2 text-sm"
-              />
+              <div className="text-sm font-semibold text-slate-900">Employer Contact</div>
+              <div className="mt-2 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+                <div>Status: <span className="font-medium text-slate-900">{formatClaimStatusLabel(claimStatus)}</span></div>
+                <div>Last sent: <span className="font-medium text-slate-900">{formatDate(claimStatus.lastSentAt)}</span></div>
+                <div>Last claimed: <span className="font-medium text-slate-900">{formatDate(claimStatus.lastClaimedAt)}</span></div>
+              </div>
             </div>
-            <button
-              type="submit"
-              className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Save contact
-            </button>
-          </form>
-          <div className="mt-2 text-xs text-slate-600">
-            Claim status: pending {claimStatus.pendingCount} · last sent {formatDate(claimStatus.lastSentAt)} · last
-            claimed {formatDate(claimStatus.lastClaimedAt)}
+            <form action={updateEmployerContactAction} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
+              <input type="hidden" name="status_filter" value={statusFilter} />
+              <input type="hidden" name="sort" value={sort} />
+              <input type="hidden" name="shortlisted" value={shortlistedOnly ? '1' : ''} />
+              <div>
+                <label className="text-xs font-medium text-slate-700">Email</label>
+                <input
+                  name="contact_email"
+                  defaultValue={employerProfile?.contact_email ?? ''}
+                  placeholder="name@company.com"
+                  className="mt-1 w-full min-w-[280px] rounded-md border border-slate-300 bg-white p-2 text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Save
+              </button>
+            </form>
           </div>
         </div>
 
@@ -679,6 +876,11 @@ export default async function AdminInternshipApplicantsPage({
         {resolvedSearchParams?.updated ? (
           <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
             Application status updated.
+          </div>
+        ) : null}
+        {resolvedSearchParams?.shortlistedUpdated ? (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            Shortlist updated.
           </div>
         ) : null}
         {resolvedSearchParams?.summarySent ? (
@@ -703,7 +905,8 @@ export default async function AdminInternshipApplicantsPage({
         ) : null}
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <form method="get" className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <form method="get" className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="w-full sm:max-w-sm">
               <label className="text-xs font-medium text-slate-700">Search</label>
               <input
@@ -728,12 +931,27 @@ export default async function AdminInternshipApplicantsPage({
                 ))}
               </select>
             </div>
+            <div>
+              <label className="text-xs font-medium text-slate-700">Sort</label>
+              <select name="sort" defaultValue={sort} className="mt-1 rounded-md border border-slate-300 p-2 text-sm">
+                <option value="match">Match score</option>
+                <option value="recent">Recent</option>
+              </select>
+            </div>
+            <label className="inline-flex min-h-10 items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700">
+              <input type="checkbox" name="shortlisted" value="1" defaultChecked={shortlistedOnly} />
+              <span className="whitespace-nowrap">Show shortlisted only</span>
+            </label>
             <button
               type="submit"
               className="h-10 rounded-md border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Filter
             </button>
+            </div>
+            <div className="text-xs text-slate-500">
+              Sorted by {sort === 'recent' ? 'recent applications' : 'match score (desc)'}
+            </div>
           </form>
 
           <div className="mt-4 overflow-x-auto">
@@ -746,31 +964,71 @@ export default async function AdminInternshipApplicantsPage({
                   <th className="px-3 py-2">Grad year</th>
                   <th className="px-3 py-2">Match score</th>
                   <th className="px-3 py-2">Top reasons</th>
-                  <th className="px-3 py-2">Resume</th>
                   <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Update</th>
+                  <th className="px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-3 py-8 text-center text-sm text-slate-500">
+                    <td colSpan={8} className="px-3 py-8 text-center text-sm text-slate-500">
                       No applicants found for current filters.
                     </td>
                   </tr>
                 ) : (
                   filteredRows.map((row) => (
                     <tr key={row.applicationId}>
-                      <td className="px-3 py-3 text-slate-900">{row.name}</td>
+                      <td className="px-3 py-3 text-slate-900">
+                        <div className="flex items-start gap-2">
+                          <form action={toggleShortlistAction}>
+                            <input type="hidden" name="application_id" value={row.applicationId} />
+                            <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
+                            <input type="hidden" name="status_filter" value={statusFilter} />
+                            <input type="hidden" name="sort" value={sort} />
+                            <input type="hidden" name="shortlisted" value={shortlistedOnly ? '1' : ''} />
+                            <input type="hidden" name="next_shortlisted" value={row.shortlisted ? '' : '1'} />
+                            {(applications.find((application) => application.id === row.applicationId)?.pilot_tags ?? []).map((tag) => (
+                              <input key={`${row.applicationId}-${tag}`} type="hidden" name="current_pilot_tag" value={tag} />
+                            ))}
+                            <button
+                              type="submit"
+                              aria-label={row.shortlisted ? 'Remove from shortlist' : 'Add to shortlist'}
+                              className={`mt-0.5 text-lg leading-none ${row.shortlisted ? 'text-amber-500' : 'text-slate-300 hover:text-amber-500'}`}
+                            >
+                              {row.shortlisted ? '★' : '☆'}
+                            </button>
+                          </form>
+                          <div>
+                            <Link href={`/admin/candidates/${encodeURIComponent(row.studentId)}`} className="font-medium text-blue-700 hover:underline">
+                              {row.name}
+                            </Link>
+                            <div className="mt-1 text-[11px] text-slate-500">Applied {formatDate(row.createdAt)}</div>
+                          </div>
+                        </div>
+                      </td>
                       <td className="px-3 py-3 text-slate-700">{row.school}</td>
                       <td className="px-3 py-3 text-slate-700">{row.major}</td>
                       <td className="px-3 py-3 text-slate-700">{row.gradYear}</td>
-                      <td className="px-3 py-3 text-slate-700">{typeof row.matchScore === 'number' ? row.matchScore : '—'}</td>
+                      <td className="px-3 py-3 text-slate-700">
+                        {typeof row.matchScore === 'number' ? (
+                          <div className="min-w-[120px]">
+                            <div className="text-sm font-medium text-slate-900">{Math.round(row.matchScore)}/100</div>
+                            <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
+                              <div
+                                className="h-full rounded-full bg-blue-500"
+                                style={{ width: `${Math.max(0, Math.min(100, Math.round(row.matchScore))) }%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td className="px-3 py-3 text-xs text-slate-700">
                         {row.topReasons.length > 0 ? (
-                          <ul className="list-disc space-y-1 pl-4">
+                          <ul className="space-y-1">
                             {row.topReasons.map((reason) => (
-                              <li key={`${row.applicationId}-${reason}`}>{reason}</li>
+                              <li key={`${row.applicationId}-${reason}`}>• {reason}</li>
                             ))}
                           </ul>
                         ) : (
@@ -778,22 +1036,12 @@ export default async function AdminInternshipApplicantsPage({
                         )}
                       </td>
                       <td className="px-3 py-3">
-                        {row.resumeUrl ? (
-                          <a href={row.resumeUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-700 hover:underline">
-                            View resume
-                          </a>
-                        ) : (
-                          <span className="text-xs text-slate-500">No resume</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3">
-                        <span className="rounded-full border border-slate-300 px-2 py-1 text-xs">{row.status}</span>
-                      </td>
-                      <td className="px-3 py-3">
                         <form action={updateStatusAction} className="flex items-center gap-2">
                           <input type="hidden" name="application_id" value={row.applicationId} />
                           <input type="hidden" name="q" value={resolvedSearchParams?.q ?? ''} />
                           <input type="hidden" name="status_filter" value={statusFilter} />
+                          <input type="hidden" name="sort" value={sort} />
+                          <input type="hidden" name="shortlisted" value={shortlistedOnly ? '1' : ''} />
                           <select
                             name="status"
                             defaultValue={row.status}
@@ -807,12 +1055,29 @@ export default async function AdminInternshipApplicantsPage({
                           </select>
                           <button
                             type="submit"
-                            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                            aria-label="Save status"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50"
                           >
-                            Save
+                            ✓
                           </button>
                         </form>
-                        <div className="mt-1 text-[11px] text-slate-500">Applied {formatDate(row.createdAt)}</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-col gap-1">
+                          <Link
+                            href={`/admin/candidates/${encodeURIComponent(row.studentId)}`}
+                            className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                          >
+                            View dossier
+                          </Link>
+                          {row.resumeUrl ? (
+                            <a href={row.resumeUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-slate-600 hover:text-blue-700 hover:underline">
+                              View resume
+                            </a>
+                          ) : (
+                            <span className="text-xs text-slate-400">No resume</span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))

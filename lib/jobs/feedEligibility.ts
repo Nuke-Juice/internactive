@@ -1,7 +1,10 @@
+import { isPilotMode } from '@/lib/pilotMode'
+
 export type FeedEligibilityInput = {
   is_active: boolean | null
   status?: string | null
   application_deadline?: string | null
+  visibility?: string | null
 }
 
 function parseDateOnly(value: string) {
@@ -19,6 +22,7 @@ export function isFeedEligible(input: FeedEligibilityInput, options?: { now?: Da
   if (input.is_active !== true) return false
   const status = (input.status ?? '').trim().toLowerCase()
   if (status === 'archived' || status === 'deleted' || status === 'private' || status === 'hidden') return false
+  if (isPilotMode() && (input.visibility ?? 'admin_only') !== 'public_browse') return false
 
   const deadline = (input.application_deadline ?? '').trim()
   if (!deadline) return true
@@ -29,4 +33,3 @@ export function isFeedEligible(input: FeedEligibilityInput, options?: { now?: Da
   const today = todayUtcDateOnly(now)
   return parsedDeadline.getTime() >= today.getTime()
 }
-

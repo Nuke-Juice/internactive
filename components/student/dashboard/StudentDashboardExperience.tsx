@@ -53,6 +53,10 @@ type Props = {
   checklistItems: ChecklistItem[]
   topInsights: InsightItem[]
   stalledCount: number
+  hideNextAction?: boolean
+  pipelineEyebrow?: string
+  pipelineTitle?: string
+  pipelineDescription?: string
 }
 
 function getStatusPill(status: DashboardApplicationRow['status']) {
@@ -89,6 +93,10 @@ export default function StudentDashboardExperience({
   checklistItems,
   topInsights,
   stalledCount,
+  hideNextAction = false,
+  pipelineEyebrow = 'Applications',
+  pipelineTitle = 'Pipeline',
+  pipelineDescription = 'Click a stage to focus the recent activity list without leaving the dashboard.',
 }: Props) {
   const [activeFilter, setActiveFilter] = useState<ApplicationStatusFilter>('all')
 
@@ -105,11 +113,9 @@ export default function StudentDashboardExperience({
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Applications</p>
-              <h2 className="mt-2 text-xl font-semibold text-slate-900">Pipeline</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Click a stage to focus the recent activity list without leaving the dashboard.
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{pipelineEyebrow}</p>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900">{pipelineTitle}</h2>
+              <p className="mt-1 text-sm text-slate-600">{pipelineDescription}</p>
             </div>
             <Link href={filterHref(activeFilter)} className="inline-flex items-center gap-2 text-sm font-medium text-slate-700 hover:text-slate-900">
               Open applications
@@ -228,22 +234,24 @@ export default function StudentDashboardExperience({
       </div>
 
       <aside className="space-y-6">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next best action</p>
-              <h2 className="mt-2 text-xl font-semibold text-slate-900">{nextAction.title}</h2>
+        {!hideNextAction ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next best action</p>
+                <h2 className="mt-2 text-xl font-semibold text-slate-900">{nextAction.title}</h2>
+              </div>
+              <Briefcase className="h-5 w-5 text-slate-400" />
             </div>
-            <Briefcase className="h-5 w-5 text-slate-400" />
-          </div>
-          <p className="mt-3 text-sm leading-6 text-slate-700">{nextAction.description}</p>
-          <Link
-            href={nextAction.href}
-            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            {nextAction.ctaLabel}
-          </Link>
-        </section>
+            <p className="mt-3 text-sm leading-6 text-slate-700">{nextAction.description}</p>
+            <Link
+              href={nextAction.href}
+              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              {nextAction.ctaLabel}
+            </Link>
+          </section>
+        ) : null}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-3">

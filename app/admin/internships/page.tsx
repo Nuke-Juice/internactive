@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { isVerifiedEmployerStatus } from '@/lib/billing/subscriptions'
+import { getEmployerVerificationTiers } from '@/lib/billing/subscriptions'
 import { requireAnyRole } from '@/lib/auth/requireAnyRole'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
 import {
@@ -61,6 +61,9 @@ type InternshipAdminRow = {
   company_name: string | null
   source: 'concierge' | 'employer_self' | 'partner' | string | null
   is_active: boolean | null
+  is_pilot_listing: boolean | null
+  visibility: string | null
+  status: string | null
   category: string | null
   experience_level: string | null
   apply_deadline: string | null
@@ -69,7 +72,6 @@ type InternshipAdminRow = {
   majors: string[] | string | null
   term: string | null
   target_graduation_years: string[] | null
-  required_course_category_ids: string[] | null
   hours_per_week: number | null
   location_city: string | null
   location_state: string | null
@@ -79,6 +81,13 @@ type InternshipAdminRow = {
 type EmployerOption = {
   user_id: string
   company_name: string | null
+}
+
+function formatEmployerTierLabel(value: string | null | undefined) {
+  const normalized = (value ?? '').trim().toLowerCase()
+  if (normalized === 'pro') return 'pro'
+  if (normalized === 'starter') return 'starter'
+  return 'free'
 }
 type EmployerIdentityRow = {
   user_id: string
@@ -213,9 +222,9 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
   let internshipsQuery = admin
     .from('internships')
     .select(
-      'id, title, employer_id, company_name, source, is_active, category, experience_level, apply_deadline, required_skills, preferred_skills, majors, term, target_graduation_years, required_course_category_ids, hours_per_week, location_city, location_state, remote_allowed',
+      'id, title, employer_id, company_name, source, is_active, is_pilot_listing, visibility, status, category, experience_level, apply_deadline, required_skills, preferred_skills, majors, term, target_graduation_years, location_city, location_state, remote_allowed',
       {
-      count: 'exact',
+        count: 'exact',
       }
     )
     .order('created_at', { ascending: false })
@@ -229,13 +238,16 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
     internshipsQuery = internshipsQuery.or(queryParts.join(','))
   }
 
-  const { data: internshipsData, count } = await internshipsQuery
+  const { data: internshipsData, count, error: internshipsError } = await internshipsQuery
+  if (internshipsError) {
+    redirect(`/admin/internships?error=${encodeURIComponent(internshipsError.message)}`)
+  }
   const internships = (internshipsData ?? []) as InternshipAdminRow[]
 
   const employerIds = Array.from(new Set(internships.map((row) => row.employer_id)))
   const [
     { data: profilesData },
-    { data: subscriptionsData },
+    verificationTierByEmployerId,
     { data: applicationsData },
     { data: requiredSkillItems },
     { data: preferredSkillItems },
@@ -245,8 +257,8 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
       ? admin.from('employer_profiles').select('user_id, company_name').in('user_id', employerIds)
       : Promise.resolve({ data: [] as EmployerOption[] }),
     employerIds.length > 0
-      ? admin.from('subscriptions').select('user_id, status').in('user_id', employerIds)
-      : Promise.resolve({ data: [] as Array<{ user_id: string; status: string | null }> }),
+      ? getEmployerVerificationTiers({ supabase: admin, userIds: employerIds })
+      : Promise.resolve(new Map<string, string>()),
     internships.length > 0
       ? admin.from('applications').select('internship_id').in('internship_id', internships.map((row) => row.id))
       : Promise.resolve({ data: [] as Array<{ internship_id: string }> }),
@@ -272,12 +284,6 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
 
   const companyByEmployerId = new Map(
     ((profilesData ?? []) as EmployerOption[]).map((profile) => [profile.user_id, profile.company_name])
-  )
-  const verificationByEmployerId = new Map(
-    ((subscriptionsData ?? []) as Array<{ user_id: string; status: string | null }>).map((subscription) => [
-      subscription.user_id,
-      isVerifiedEmployerStatus(subscription.status) ? 'verified' : 'unverified',
-    ])
   )
 
   const applicantsCountByInternshipId = new Map<string, number>()
@@ -877,7 +883,7 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                 <tr className="text-left text-xs font-semibold text-slate-600">
                   <th className="px-3 py-2">Title / Employer</th>
                   <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2">Verification</th>
+                  <th className="px-3 py-2">Employer tier</th>
                   <th className="px-3 py-2">Applicants</th>
                   <th className="px-3 py-2">Coverage</th>
                   <th className="px-3 py-2">Actions</th>
@@ -893,9 +899,11 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                 ) : (
                   internships.map((row) => {
                     const employerName = companyByEmployerId.get(row.employer_id) ?? row.company_name ?? 'Unknown employer'
-                    const status = row.is_active ? 'active' : 'inactive'
+                    const status =
+                      row.status?.trim() ||
+                      (row.is_active ? 'published' : row.visibility === 'public_browse' ? 'public' : row.is_pilot_listing ? 'pilot' : 'draft')
                     const source = normalizeSource(row.source ?? undefined)
-                    const verification = verificationByEmployerId.get(row.employer_id) ?? 'unverified'
+                    const employerTier = formatEmployerTierLabel(verificationTierByEmployerId.get(row.employer_id))
                     const applicantsCount = applicantsCountByInternshipId.get(row.id) ?? 0
                     const requiredSkillLinks = requiredSkillLinksByInternshipId.get(row.id) ?? 0
                     const preferredSkillLinks = preferredSkillLinksByInternshipId.get(row.id) ?? 0
@@ -924,13 +932,15 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                           <div className="text-xs text-slate-500">{employerName}</div>
                           <div className="text-[11px] text-slate-400">
                             {row.category || 'Uncategorized'} · {row.experience_level || 'n/a'} · {formatDate(row.apply_deadline)} · {source}
+                            {row.visibility ? ` · ${row.visibility}` : ''}
+                            {row.is_pilot_listing ? ' · pilot' : ''}
                           </div>
                         </td>
                         <td className="px-3 py-3 text-slate-900">
                           <span className="rounded-full border border-slate-300 px-2 py-1 text-xs">{status}</span>
                         </td>
                         <td className="px-3 py-3">
-                          <span className="rounded-full border border-slate-300 px-2 py-1 text-xs">{verification}</span>
+                          <span className="rounded-full border border-slate-300 px-2 py-1 text-xs">{employerTier}</span>
                         </td>
                         <td className="px-3 py-3">
                           <Link
@@ -957,19 +967,19 @@ export default async function AdminInternshipsPage({ searchParams }: { searchPar
                           <div className="flex items-center justify-end gap-1.5">
                             <Link
                               href={reviewHref}
-                              className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                              className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 px-3 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
                             >
                               Review listing
                             </Link>
                             <Link
                               href={`/admin/matching/preview?internship=${encodeURIComponent(row.id)}`}
-                              className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                              className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 px-3 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
                             >
                               View listing
                             </Link>
                             <Link
                               href={`${reviewHref}#status-action`}
-                              className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                              className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 px-3 text-center text-xs font-medium text-slate-700 hover:bg-slate-50"
                             >
                               {row.is_active ? 'Deactivate' : 'Activate'}
                             </Link>

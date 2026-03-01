@@ -51,6 +51,16 @@ async function isOnboardingComplete(supabase: SupabaseClient, userId: string, ro
   return isNonEmpty(profile?.company_name) && isNonEmpty(profile?.location_address_line1) && isNonEmpty(profile?.contact_email)
 }
 
+async function isStudentConciergeComplete(supabase: SupabaseClient, userId: string) {
+  const { data: profile } = await supabase
+    .from('student_profiles')
+    .select('concierge_opt_in, concierge_intake_completed_at')
+    .eq('user_id', userId)
+    .maybeSingle<{ concierge_opt_in?: boolean | null; concierge_intake_completed_at?: string | null }>()
+
+  return profile?.concierge_opt_in === true && isNonEmpty(profile?.concierge_intake_completed_at)
+}
+
 function hasIdentityName(user: { user_metadata?: Record<string, unknown> | null } | null | undefined) {
   const metadata = (user?.user_metadata ?? {}) as {
     first_name?: string
@@ -146,6 +156,17 @@ export async function resolvePostAuthRedirect(params: {
       destination: onboardingPath,
       role,
       onboardingComplete: false,
+    }
+  }
+
+  if (role === 'student' && isSignupDetailsPath(normalizedNext)) {
+    const conciergeComplete = await isStudentConciergeComplete(params.supabase, params.userId)
+    if (!conciergeComplete) {
+      return {
+        destination: '/student/pilot-screening',
+        role,
+        onboardingComplete: true,
+      }
     }
   }
 

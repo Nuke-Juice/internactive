@@ -13,6 +13,7 @@ export type InternshipAccessRow = {
   is_active: boolean | null
   status: string | null
   application_deadline: string | null
+  visibility?: string | null
 }
 
 export function canViewerAccessInternship(input: {
@@ -31,5 +32,6 @@ export function canViewerAccessInternship(input: {
     is_active: input.row.is_active,
     status: input.row.status,
     application_deadline: input.row.application_deadline,
+    visibility: input.row.visibility ?? null,
   })
 }

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
+import ConfirmSignOutButton from '@/components/auth/ConfirmSignOutButton'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { toUserFacingErrorMessage } from '@/lib/errors/userFacingError'
 import { normalizeStateCode, US_STATE_OPTIONS } from '@/lib/locations/usLocationCatalog'
@@ -489,13 +490,20 @@ export default function EmployerSignupDetailsPage() {
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <Link
-          href="/signup/employer"
-          aria-label="Back to account step"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            href="/signup/employer"
+            aria-label="Back to account step"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <ConfirmSignOutButton
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            confirmMessage="Sign out and return to the signed-out home page?"
+            redirectTo="/"
+          />
+        </div>
 
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">Employer profile details</h1>
         <p className="mt-2 text-slate-600">You&apos;re 2 minutes away from publishing trusted internship opportunities.</p>

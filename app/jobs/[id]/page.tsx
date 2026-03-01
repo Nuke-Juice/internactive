@@ -11,6 +11,7 @@ import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import { normalizeSeason } from '@/lib/availability/normalizeSeason'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { getStudentCourseworkFeatures } from '@/lib/coursework/getStudentCourseworkFeatures'
+import { getMinimumProfileFieldLabel, getMissingProfileFields } from '@/lib/profileCompleteness'
 import { formatCompleteness } from '@/src/profile/profileCompleteness'
 import { getStudentProfileCompleteness } from '@/src/profile/getStudentProfileCompleteness'
 import { getInternshipById } from '@/lib/jobs/getInternshipById'
@@ -246,6 +247,7 @@ export default async function JobDetailPage({
   let employerAvatarUrl: string | null = null
   let requiredCustomSkillTokens = new Set<string>()
   let preferredCustomSkillTokens = new Set<string>()
+  let applyProfileWarning: string | null = null
   if (user && userRole === 'student' && listing) {
     const fullProfileSelect =
       'school, major_id, major:canonical_majors(id, slug, name), majors, year, experience_level, coursework, coursework_unverified, interests, availability_start_month, availability_hours_per_week, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, location_lat, location_lng'
@@ -318,6 +320,11 @@ export default async function JobDetailPage({
           .map((item) => item.trim())
           .filter(Boolean)
       : []
+
+    const missingApplyFields = getMissingProfileFields(profile).map((field) => getMinimumProfileFieldLabel(field))
+    if (missingApplyFields.length > 0) {
+      applyProfileWarning = `You can still apply, but your profile is missing: ${missingApplyFields.join(', ')}.`
+    }
     const preferenceSignals = parseStudentPreferenceSignals(profile?.interests ?? null)
     const profilePreferredLocation = fallbackPreferredLocation(profile?.preferred_city, profile?.preferred_state)
     const preferredLocations =
@@ -1167,6 +1174,7 @@ export default async function JobDetailPage({
                   screeningQuestion={screeningQuestion}
                   hasSavedResume={hasSavedResume}
                   savedResumeFileName={savedResumeFileName}
+                  profileWarning={applyProfileWarning}
                 />
               </div>
               {capReached ? (

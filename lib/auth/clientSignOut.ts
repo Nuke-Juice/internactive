@@ -8,6 +8,7 @@ type RouterLike = {
 }
 
 const LOCAL_STORAGE_KEY_PATTERNS = [
+  /^sb-.*-auth-token$/,
   /^internup:apply:returnTo$/,
   /^onboarding:(student|employer):details:/,
   /^internactive:listingDraft:/,
@@ -17,6 +18,7 @@ const LOCAL_STORAGE_KEY_PATTERNS = [
 ]
 
 const SESSION_STORAGE_KEY_PATTERNS = [
+  /^sb-.*-auth-token$/,
   /^verify-warning-shown:/,
   /^internup:apply:returnTo$/,
 ]
@@ -66,11 +68,29 @@ export async function signOutAndResetClientView(input: {
   redirectTo?: string
 }) {
   const redirectTo = input.redirectTo ?? '/'
-  const { error } = await input.supabase.auth.signOut()
+  try {
+    await fetch('/auth/signout', {
+      method: 'POST',
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  } catch {
+    // Keep going. Client-side sign out is still the primary mechanism.
+  }
+
+  const { error } = await input.supabase.auth.signOut({ scope: 'global' })
   if (error) return { error }
   clearClientAuthArtifacts()
   await clearBrowserCaches()
   input.router.replace(redirectTo)
   input.router.refresh()
+  if (typeof window !== 'undefined') {
+    window.setTimeout(() => {
+      window.location.replace(redirectTo)
+    }, 60)
+  }
   return { error }
 }

@@ -16,6 +16,7 @@ export type InternshipDetailListing = {
   is_active: boolean | null
   status: string | null
   application_deadline: string | null
+  visibility?: string | null
   [key: string]: unknown
 }
 
@@ -81,6 +82,7 @@ const DETAIL_SELECT_RICH_COLUMNS = [
   'restrict_by_year',
   'is_active',
   'status',
+  'visibility',
   'internship_required_skill_items(skill_id)',
   'internship_preferred_skill_items(skill_id)',
   'internship_skill_requirements(importance, canonical_skill_id, custom_skill_id, custom_skill:custom_skills(name))',
@@ -146,6 +148,7 @@ const DETAIL_SELECT_RICH_LEGACY_COLUMNS = [
   'restrict_by_year',
   'is_active',
   'status',
+  'visibility',
   'internship_required_skill_items(skill_id)',
   'internship_preferred_skill_items(skill_id)',
   'internship_required_course_categories(category_id, category:canonical_course_categories(name, slug))',
@@ -210,9 +213,10 @@ const DETAIL_SELECT_BASE_COLUMNS = [
   'restrict_by_year',
   'is_active',
   'status',
+  'visibility',
 ] as const
 
-type MinimalListingRow = Pick<InternshipDetailListing, 'id' | 'employer_id' | 'is_active' | 'status' | 'application_deadline'>
+type MinimalListingRow = Pick<InternshipDetailListing, 'id' | 'employer_id' | 'is_active' | 'status' | 'application_deadline' | 'visibility'>
 
 function isMissingColumnError(message: string | null | undefined) {
   const normalized = (message ?? '').toLowerCase()
@@ -348,7 +352,7 @@ export async function getInternshipById(
     const admin = supabaseAdmin()
     const { data: existsRow } = await admin
       .from('internships')
-      .select('id, employer_id, is_active, status, application_deadline')
+      .select('id, employer_id, is_active, status, application_deadline, visibility')
       .eq('id', id)
       .maybeSingle()
     const minimal = (existsRow ?? null) as MinimalListingRow | null

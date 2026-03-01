@@ -1,5 +1,6 @@
 'use client'
 
+import { usePathname } from 'next/navigation'
 import CookieNoticeBanner from '@/components/CookieNoticeBanner'
 import GlobalErrorToasts from '@/components/feedback/GlobalErrorToasts'
 import RouteFeedbackToasts from '@/components/feedback/RouteFeedbackToasts'
@@ -34,21 +35,26 @@ export default function AppShellClient({
   showNotificationsDot = false,
   employerPlanId = null,
 }: Props) {
+  const pathname = usePathname()
+  const isAdminRoute = pathname?.startsWith('/admin') ?? false
+
   return (
     <ToastProvider>
       <GlobalErrorToasts />
       <RouteFeedbackToasts />
-      <SiteHeader
-        isAuthenticated={isAuthenticated}
-        role={role}
-        email={email}
-        avatarUrl={avatarUrl}
-        isEmailVerified={isEmailVerified}
-        showFinishProfilePrompt={showFinishProfilePrompt}
-        finishProfileHref={finishProfileHref}
-        showNotificationsDot={showNotificationsDot}
-        employerPlanId={employerPlanId}
-      />
+      {isAdminRoute ? null : (
+        <SiteHeader
+          isAuthenticated={isAuthenticated}
+          role={role}
+          email={email}
+          avatarUrl={avatarUrl}
+          isEmailVerified={isEmailVerified}
+          showFinishProfilePrompt={showFinishProfilePrompt}
+          finishProfileHref={finishProfileHref}
+          showNotificationsDot={showNotificationsDot}
+          employerPlanId={employerPlanId}
+        />
+      )}
       {children}
       <SiteFooter />
       <CookieNoticeBanner />

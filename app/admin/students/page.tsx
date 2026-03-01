@@ -7,6 +7,7 @@ import { deleteUserAccountById } from '@/lib/auth/accountDeletion'
 import { parseStudentPreferenceSignals } from '@/lib/student/preferenceSignals'
 import { hasSupabaseAdminCredentials, supabaseAdmin } from '@/lib/supabase/admin'
 import AdminStudentsTable from '@/components/admin/AdminStudentsTable'
+import { buildStudentCoverage, resolveStudentCourseworkCoverage } from '@/lib/admin/studentCoverage'
 
 type SearchParams = Promise<{ q?: string; success?: string; error?: string }>
 
@@ -31,6 +32,7 @@ type StudentViewRow = StudentRow & {
   availability_label: string
   canonical_skill_labels: string[]
   coursework_category_names: string[]
+  coursework_category_status: 'present' | 'inference_pending' | 'none'
   missing_match_dimensions: string[]
   coverage_label: string
 }
@@ -112,7 +114,7 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
   const { data } = await query
   const students = (data ?? []) as StudentRow[]
 
-  const [skillRowsResult, courseworkCategoryRowsResult] = await Promise.all([
+  const [skillRowsResult, courseworkCategoryRowsResult, courseworkItemRowsResult, canonicalCourseRowsResult] = await Promise.all([
     students.length > 0
       ? admin
           .from('student_skill_items')
@@ -128,6 +130,19 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
           .in('student_id', students.map((row) => row.user_id))
       : Promise.resolve({
           data: [] as Array<{ student_id: string | null; category: { name?: string | null } | Array<{ name?: string | null }> | null }>,
+        }),
+    students.length > 0
+      ? admin.from('student_coursework_items').select('student_id, coursework_item_id').in('student_id', students.map((row) => row.user_id))
+      : Promise.resolve({
+          data: [] as Array<{ student_id: string | null; coursework_item_id: string | null }>,
+        }),
+    students.length > 0
+      ? admin
+          .from('student_courses')
+          .select('student_profile_id')
+          .in('student_profile_id', students.map((row) => row.user_id))
+      : Promise.resolve({
+          data: [] as Array<{ student_profile_id: string | null }>,
         }),
   ])
 
@@ -163,6 +178,16 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
     courseworkCategoriesByStudentId.set(row.student_id, next)
   }
 
+  const courseworkEntriesByStudentId = new Map<string, number>()
+  for (const row of (courseworkItemRowsResult.data ?? []) as Array<{ student_id: string | null; coursework_item_id: string | null }>) {
+    if (!row.student_id || typeof row.coursework_item_id !== 'string') continue
+    courseworkEntriesByStudentId.set(row.student_id, (courseworkEntriesByStudentId.get(row.student_id) ?? 0) + 1)
+  }
+  for (const row of (canonicalCourseRowsResult.data ?? []) as Array<{ student_profile_id: string | null }>) {
+    if (!row.student_profile_id) continue
+    courseworkEntriesByStudentId.set(row.student_profile_id, (courseworkEntriesByStudentId.get(row.student_profile_id) ?? 0) + 1)
+  }
+
   const authUsersEntries = await Promise.all(
     students.map(async (student) => {
       const { data: authData } = await admin.auth.admin.getUserById(student.user_id)
@@ -177,6 +202,7 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
     const major = formatMajor(row.majors, canonicalMajorName(row.major))
     const canonicalSkillLabels = Array.from(new Set(canonicalSkillsByStudentId.get(row.user_id) ?? []))
     const courseworkCategoryNames = Array.from(new Set(courseworkCategoriesByStudentId.get(row.user_id) ?? []))
+    const courseworkEntryCount = courseworkEntriesByStudentId.get(row.user_id) ?? 0
     const preferences = parseStudentPreferenceSignals(row.interests)
     const majorTokens = parseMajors(row.majors)
     const hasHours = typeof row.availability_hours_per_week === 'number' && row.availability_hours_per_week > 0
@@ -186,18 +212,23 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
       preferences.preferredWorkModes.length > 0 ||
       Boolean(row.preferred_city?.trim() && row.preferred_state?.trim())
     const totalSkillSignals = canonicalSkillLabels.length + preferences.skills.length
-    const checks = [
-      ['majors', majorTokens.length > 0 || major !== 'Major not set'],
-      ['skills', totalSkillSignals > 0],
-      ['coursework categories', courseworkCategoryNames.length > 0],
-      ['term', hasTerm],
-      ['hours', hasHours],
-      ['location/work mode', hasLocationOrMode],
-      ['grad year', Boolean(row.year?.trim())],
-      ['experience', Boolean(row.experience_level?.trim())],
-    ] as const
-    const missingDimensions = checks.filter(([, ok]) => !ok).map(([label]) => label)
-    const coverageLabel = `${checks.filter(([, ok]) => ok).length}/${checks.length}`
+    const courseworkCoverage = resolveStudentCourseworkCoverage({
+      courseworkEntryCount,
+      courseworkCategoryCount: courseworkCategoryNames.length,
+    })
+    const coverage = buildStudentCoverage({
+      majors: majorTokens.length > 0 || major !== 'Major not set' ? [major] : [],
+      year: row.year,
+      experienceLevel: row.experience_level,
+      preferredTerms: hasTerm ? ['present'] : [],
+      availabilityHours: row.availability_hours_per_week,
+      preferredLocations: hasLocationOrMode ? ['present'] : [],
+      preferredWorkModes: [],
+      skillCount: totalSkillSignals,
+      courseworkEntryCount,
+      courseworkCategoryCount: courseworkCategoryNames.length,
+    })
+    const coverageLabel = `${coverage.presentDimensions}/${coverage.totalDimensions}`
     const viewRow: StudentViewRow = {
       ...row,
       name: nameFromAuthMetadata({
@@ -211,7 +242,12 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
       availability_label: formatAvailability(row.availability_start_month, row.availability_hours_per_week),
       canonical_skill_labels: canonicalSkillLabels,
       coursework_category_names: courseworkCategoryNames,
-      missing_match_dimensions: missingDimensions,
+      coursework_category_status: courseworkCoverage.hasCourseworkCategories
+        ? 'present'
+        : courseworkCoverage.inferencePending
+          ? 'inference_pending'
+          : 'none',
+      missing_match_dimensions: coverage.missingDimensions,
       coverage_label: coverageLabel,
     }
     return viewRow

@@ -16,6 +16,7 @@ import { parseStudentPreferenceSignals } from '../student/preferenceSignals.ts'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { inferLevelBandFromCourseNumber } from '@/lib/coursework/classification'
 import { normalizeSeason } from '@/lib/availability/normalizeSeason'
+import { buildStudentCoverage } from '@/lib/admin/studentCoverage'
 
 export type MatchingPreviewFilters = {
   category?: string
@@ -184,35 +185,6 @@ function extractLabel(value: { name?: string | null } | { label?: string | null 
   if ('name' in value) return typeof value.name === 'string' ? value.name.trim() : ''
   if ('label' in value) return typeof value.label === 'string' ? value.label.trim() : ''
   return ''
-}
-
-function buildStudentCoverage(params: {
-  majors: string[]
-  year: string | null
-  experienceLevel: string | null
-  preferredTerms: string[]
-  availabilityHours: number | null
-  preferredLocations: string[]
-  preferredWorkModes: string[]
-  skillCount: number
-  courseworkCategoryCount: number
-}) {
-  const checks = [
-    ['majors', params.majors.length > 0],
-    ['skills', params.skillCount > 0],
-    ['coursework categories', params.courseworkCategoryCount > 0],
-    ['term', params.preferredTerms.length > 0],
-    ['hours', typeof params.availabilityHours === 'number' && params.availabilityHours > 0],
-    ['location/work mode', params.preferredLocations.length > 0 || params.preferredWorkModes.length > 0],
-    ['grad year', typeof params.year === 'string' && params.year.trim().length > 0],
-    ['experience', typeof params.experienceLevel === 'string' && params.experienceLevel.trim().length > 0],
-  ] as const
-
-  return {
-    totalDimensions: checks.length,
-    presentDimensions: checks.filter(([, ok]) => ok).length,
-    missingDimensions: checks.filter(([, ok]) => !ok).map(([label]) => label),
-  }
 }
 
 function buildInternshipCoverage(internship: InternshipRow) {
@@ -458,6 +430,8 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
     const canonicalCourseLevelBands = Array.from(new Set(canonicalLevelBandsByStudent.get(row.user_id) ?? []))
     const skillLabels = Array.from(new Set(skillLabelsByStudent.get(row.user_id) ?? []))
     const courseworkCategoryNames = Array.from(new Set(courseworkCategoryNamesByStudent.get(row.user_id) ?? []))
+    const hasCanonicalCourseworkEntries =
+      canonicalCategoryIdsByStudent.has(row.user_id) || canonicalLevelBandsByStudent.has(row.user_id)
 
     const coverage = buildStudentCoverage({
       majors,
@@ -468,6 +442,7 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
       preferredLocations,
       preferredWorkModes: preferenceSignals.preferredWorkModes,
       skillCount: skillIds.length + preferenceSignals.skills.length,
+      courseworkEntryCount: courseworkItemIds.length + (hasCanonicalCourseworkEntries ? 1 : 0),
       courseworkCategoryCount: canonicalCourseworkCategoryIds.length > 0 ? canonicalCourseworkCategoryIds.length : courseworkCategoryIds.length,
     })
 
@@ -526,6 +501,158 @@ export async function loadAdminStudentPreviewOptions(admin: SupabaseClient, quer
     })
     .sort((a, b) => a.email.localeCompare(b.email))
     .slice(0, 150)
+}
+
+export async function loadAdminStudentPreviewById(admin: SupabaseClient, studentId: string) {
+  const { data: studentRowData } = await admin
+    .from('student_profiles')
+    .select('user_id, school, major:canonical_majors(name), majors, year, experience_level, interests, preferred_city, preferred_state, availability_start_month, availability_hours_per_week')
+    .eq('user_id', studentId)
+    .maybeSingle()
+
+  const studentRow = studentRowData as StudentProfileRow | null
+  if (!studentRow?.user_id) return null
+
+  const [skillRowsResult, courseworkCategoryRowsResult, courseworkItemRowsResult, canonicalCourseRowsResult, authUserResult] = await Promise.all([
+    admin.from('student_skill_items').select('student_id, skill_id, skill:skills(label)').eq('student_id', studentId),
+    admin
+      .from('student_coursework_category_links')
+      .select('student_id, category_id, category:coursework_categories(name)')
+      .eq('student_id', studentId),
+    admin.from('student_coursework_items').select('student_id, coursework_item_id').eq('student_id', studentId),
+    admin
+      .from('student_courses')
+      .select('student_profile_id, course:canonical_courses(category_id, course_number, level, category:canonical_course_categories(id, name))')
+      .eq('student_profile_id', studentId),
+    admin.auth.admin.getUserById(studentId),
+  ])
+
+  const skillRows = (skillRowsResult.data ?? []) as StudentSkillRow[]
+  const courseworkCategoryRows = (courseworkCategoryRowsResult.data ?? []) as StudentCourseworkCategoryRow[]
+  const courseworkItemRows = (courseworkItemRowsResult.data ?? []) as StudentCourseworkItemRow[]
+  const canonicalCourseRows = (canonicalCourseRowsResult.data ?? []) as StudentCanonicalCourseRow[]
+
+  const skillIds = Array.from(
+    new Set(skillRows.map((row) => row.skill_id).filter((value): value is string => typeof value === 'string'))
+  )
+  const skillLabels = Array.from(
+    new Set(skillRows.flatMap((row) => asArray(row.skill).map((item) => extractLabel(item)).filter(Boolean)))
+  )
+  const courseworkCategoryIds = Array.from(
+    new Set(courseworkCategoryRows.map((row) => row.category_id).filter((value): value is string => typeof value === 'string'))
+  )
+  const courseworkCategoryNames = Array.from(
+    new Set(courseworkCategoryRows.flatMap((row) => asArray(row.category).map((item) => extractLabel(item)).filter(Boolean)))
+  )
+  const courseworkItemIds = Array.from(
+    new Set(courseworkItemRows.map((row) => row.coursework_item_id).filter((value): value is string => typeof value === 'string'))
+  )
+
+  const canonicalCourseworkCategoryIds = new Set<string>()
+  const canonicalCourseworkCategoryNames = new Set<string>()
+  const canonicalCourseLevelBands = new Set<'intro' | 'intermediate' | 'advanced'>()
+  for (const row of canonicalCourseRows) {
+    for (const course of asArray(row.course)) {
+      for (const category of asArray(course.category)) {
+        if (typeof category.id === 'string') canonicalCourseworkCategoryIds.add(category.id)
+        else if (typeof course.category_id === 'string') canonicalCourseworkCategoryIds.add(course.category_id)
+        const label = extractLabel(category)
+        if (label) canonicalCourseworkCategoryNames.add(label)
+      }
+      const explicitLevel = String(course.level ?? '').trim().toLowerCase()
+      const levelBand =
+        explicitLevel === 'intro' || explicitLevel === 'intermediate' || explicitLevel === 'advanced'
+          ? (explicitLevel as 'intro' | 'intermediate' | 'advanced')
+          : inferLevelBandFromCourseNumber(course.course_number)
+      canonicalCourseLevelBands.add(levelBand)
+    }
+  }
+
+  const authUser = authUserResult.data.user
+  const metadata = (authUser?.user_metadata ?? {}) as { first_name?: string; last_name?: string }
+  const majorName = canonicalMajorName(studentRow.major)
+  const majors = majorName ? parseMajors([majorName]) : parseMajors(studentRow.majors)
+  const preferenceSignals = parseStudentPreferenceSignals(studentRow.interests)
+  const fallbackSeason = seasonFromMonth(studentRow.availability_start_month)
+  const preferredTerms =
+    preferenceSignals.preferredTerms.length > 0 ? preferenceSignals.preferredTerms : fallbackSeason ? [fallbackSeason] : []
+  const fallbackPreferredLocation =
+    studentRow.preferred_city?.trim() && studentRow.preferred_state?.trim()
+      ? `${studentRow.preferred_city.trim()}, ${studentRow.preferred_state.trim()}`
+      : ''
+  const preferredLocations =
+    preferenceSignals.preferredLocations.length > 0
+      ? preferenceSignals.preferredLocations
+      : fallbackPreferredLocation
+        ? [fallbackPreferredLocation]
+        : []
+
+  const coverage = buildStudentCoverage({
+    majors,
+    year: studentRow.year,
+    experienceLevel: studentRow.experience_level,
+    preferredTerms,
+    availabilityHours: studentRow.availability_hours_per_week,
+    preferredLocations,
+    preferredWorkModes: preferenceSignals.preferredWorkModes,
+    skillCount: skillIds.length + preferenceSignals.skills.length,
+    courseworkEntryCount: courseworkItemIds.length + canonicalCourseRows.length,
+    courseworkCategoryCount: canonicalCourseworkCategoryIds.size > 0 ? canonicalCourseworkCategoryIds.size : courseworkCategoryIds.length,
+  })
+
+  const profile: StudentMatchProfile = {
+    majors,
+    year: studentRow.year,
+    experience_level: studentRow.experience_level,
+    skills: preferenceSignals.skills,
+    skill_ids: skillIds,
+    canonical_coursework_category_ids: Array.from(canonicalCourseworkCategoryIds),
+    canonical_coursework_category_names: Array.from(canonicalCourseworkCategoryNames),
+    canonical_coursework_level_bands: Array.from(canonicalCourseLevelBands),
+    coursework_item_ids: courseworkItemIds,
+    coursework_category_ids: courseworkCategoryIds,
+    coursework: [],
+    availability_hours_per_week: studentRow.availability_hours_per_week,
+    availability_start_month: studentRow.availability_start_month,
+    preferred_terms: preferredTerms,
+    preferred_locations: preferredLocations,
+    preferred_work_modes: preferenceSignals.preferredWorkModes,
+    remote_only: preferenceSignals.remoteOnly,
+  }
+
+  return {
+    userId: studentRow.user_id,
+    name: nameFromAuthMetadata({
+      firstName: metadata.first_name,
+      lastName: metadata.last_name,
+      email: authUser?.email,
+      fallbackId: studentRow.user_id,
+    }),
+    email: authUser?.email ?? 'Email not set',
+    school: studentRow.school,
+    majorLabel: majors[0] ?? 'Major not set',
+    year: studentRow.year,
+    experienceLevel: studentRow.experience_level,
+    canonicalSkillLabels: skillLabels,
+    courseworkCategoryNames,
+    preferredTerms,
+    preferredWorkModes: preferenceSignals.preferredWorkModes,
+    preferredLocations,
+    coverage,
+    profile,
+  } satisfies AdminStudentPreviewOption
+}
+
+export async function loadTopInternshipMatchesForStudent(
+  admin: SupabaseClient,
+  studentId: string,
+  options?: { filters?: MatchingPreviewFilters; limit?: number; includeInactive?: boolean }
+) {
+  const student = await loadAdminStudentPreviewById(admin, studentId)
+  if (!student) return null
+  const internships = await loadAdminInternshipPreviewItems(admin, options?.filters ?? {}, { includeInactive: options?.includeInactive })
+  const ranked = rankInternshipsForStudentPreview(internships, student.profile, { explain: true }).slice(0, options?.limit ?? 5)
+  return { student, ranked }
 }
 
 export async function loadAdminInternshipPreviewItems(

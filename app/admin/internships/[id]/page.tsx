@@ -208,7 +208,7 @@ export default async function AdminInternshipEditPage({
     admin
       .from('internships')
       .select(
-        'id, title, employer_id, company_name, source, is_active, category, experience_level, work_mode, employment_type, internship_types, work_authorization_scope, location_city, location_state, remote_allowed, remote_eligibility, remote_eligibility_scope, remote_eligible_states, pay_min_hourly, pay_max_hourly, pay_min, pay_max, compensation_currency, compensation_interval, compensation_is_estimated, bonus_eligible, compensation_notes, short_summary, description, description_raw, responsibilities, qualifications, requirements_details, compliance_details, source_metadata, majors, term, target_graduation_years, required_course_category_ids, required_skills, preferred_skills, recommended_coursework, apply_deadline, application_deadline, admin_notes, template_used, created_at, updated_at'
+        'id, title, employer_id, company_name, source, is_active, is_pilot_listing, visibility, category, experience_level, work_mode, employment_type, internship_types, work_authorization_scope, location_city, location_state, remote_allowed, remote_eligibility, remote_eligibility_scope, remote_eligible_states, pay_min_hourly, pay_max_hourly, pay_min, pay_max, compensation_currency, compensation_interval, compensation_is_estimated, bonus_eligible, compensation_notes, short_summary, description, description_raw, responsibilities, qualifications, requirements_details, compliance_details, source_metadata, majors, term, target_graduation_years, required_course_category_ids, required_skills, preferred_skills, recommended_coursework, apply_deadline, application_deadline, admin_notes, template_used, created_at, updated_at'
       )
       .eq('id', id)
       .maybeSingle(),
@@ -343,6 +343,8 @@ export default async function AdminInternshipEditPage({
     const shortSummary = String(formData.get('short_summary') ?? '').trim()
     const adminNotes = String(formData.get('admin_notes') ?? '').trim() || null
     const templateUsed = String(formData.get('template_used') ?? '').trim() || null
+    const visibility = String(formData.get('visibility') ?? 'admin_only').trim() === 'public_browse' ? 'public_browse' : 'admin_only'
+    const isPilotListing = String(formData.get('is_pilot_listing') ?? '1').trim() !== '0'
     const payString =
       payMinHourly !== null || payMaxHourly !== null
         ? `$${payMinHourly ?? payMaxHourly ?? 0}-${payMaxHourly ?? payMinHourly ?? 0}/hr`
@@ -572,6 +574,8 @@ export default async function AdminInternshipEditPage({
         company_name: employerProfile.company_name ?? null,
         source,
         is_active: !isDraft,
+        is_pilot_listing: isPilotListing,
+        visibility,
         category,
         role_category: category,
         experience_level: experienceLevel,
@@ -1322,6 +1326,32 @@ export default async function AdminInternshipEditPage({
                 defaultValue={internship.apply_deadline ?? ''}
                 className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
               />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-700">Pilot visibility</label>
+              <select
+                name="visibility"
+                defaultValue={internship.visibility ?? 'admin_only'}
+                className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm"
+              >
+                <option value="admin_only">Admin only</option>
+                <option value="public_browse">Public browse</option>
+              </select>
+              <p className="mt-1 text-xs text-slate-500">Default off during the pilot. Students only see public-browse listings.</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-700">Pilot listing</label>
+              <input type="hidden" name="is_pilot_listing" value="0" />
+              <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  name="is_pilot_listing"
+                  value="1"
+                  defaultChecked={internship.is_pilot_listing ?? true}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                Track this listing in the pilot workflow
+              </label>
             </div>
             <div>
               <label className="text-xs font-medium text-slate-700">Template used</label>

@@ -21,12 +21,14 @@ type Props = {
   screeningQuestion?: string | null
   hasSavedResume?: boolean
   savedResumeFileName?: string | null
+  profileWarning?: string | null
 }
 
 type ModalContentProps = Pick<
   Props,
   'listingId' | 'listingTitle' | 'companyName' | 'screeningQuestion' | 'hasSavedResume' | 'savedResumeFileName'
 > & {
+  profileWarning?: string | null
   onClose: () => void
   onReset: () => void
 }
@@ -89,6 +91,7 @@ function ApplyModalContent({
   screeningQuestion = null,
   hasSavedResume = false,
   savedResumeFileName = null,
+  profileWarning = null,
   onClose,
   onReset,
 }: ModalContentProps) {
@@ -129,6 +132,12 @@ function ApplyModalContent({
             <p className="text-sm text-slate-700">
               If the employer uses an ATS, they may email you a link to complete an additional application.
             </p>
+          </div>
+        ) : null}
+
+        {state.warning ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            {state.warning}
           </div>
         ) : null}
 
@@ -216,6 +225,12 @@ function ApplyModalContent({
     <form action={formAction} className="mt-4 space-y-4">
       <input type="hidden" name="listing_id" value={listingId} />
 
+      {profileWarning ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          {profileWarning}
+        </div>
+      ) : null}
+
       {screeningPrompt ? (
         <div>
           <label className="text-sm font-medium text-slate-800">{screeningPrompt}</label>
@@ -273,6 +288,7 @@ export default function ApplyModalLauncher({
   screeningQuestion = null,
   hasSavedResume = false,
   savedResumeFileName = null,
+  profileWarning = null,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -384,6 +400,7 @@ export default function ApplyModalLauncher({
               screeningQuestion={screeningQuestion}
               hasSavedResume={hasSavedResume}
               savedResumeFileName={savedResumeFileName}
+              profileWarning={profileWarning}
               onClose={handleClose}
               onReset={handleReset}
             />

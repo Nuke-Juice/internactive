@@ -44,6 +44,7 @@ export type ApplyFromListingModalState = {
   ok: boolean
   error?: string
   code?: ApplyErrorCode
+  warning?: string
   profile_missing?: string[]
   application_missing?: string[]
   eligibility_failed?: string[]
@@ -106,6 +107,12 @@ function profileMissingMessage(fields: string[]) {
   const labels = fields.map(labelProfileField)
   if (labels.length === 0) return 'Complete required profile fields before applying.'
   return `Complete required profile fields before applying: ${labels.join(', ')}.`
+}
+
+function profileSoftWarningMessage(fields: string[]) {
+  const labels = fields.map(labelProfileField)
+  if (labels.length === 0) return ''
+  return `You can still apply, but your profile is missing: ${labels.join(', ')}.`
 }
 
 function logApplyLookupDebug(input: {
@@ -266,9 +273,7 @@ function evaluateApplyGate(params: {
   }
 
   const canApply =
-    reasons.profile_missing.length === 0 &&
-    reasons.application_missing.length === 0 &&
-    reasons.eligibility_failed.length === 0
+    reasons.application_missing.length === 0 && reasons.eligibility_failed.length === 0
 
   if (process.env.NODE_ENV !== 'production' && !canApply) {
     console.info('[apply.gate.debug]', {
@@ -643,17 +648,9 @@ export async function submitApplicationFromListingModalAction(
     listingId,
     userId: user.id,
   })
+  const profileWarning =
+    gate.reasons.profile_missing.length > 0 ? profileSoftWarningMessage(gate.reasons.profile_missing) : undefined
   if (!gate.canApply) {
-    if (gate.reasons.profile_missing.length > 0) {
-      return {
-        ok: false,
-        code: APPLY_ERROR.PROFILE_INCOMPLETE,
-        profile_missing: gate.reasons.profile_missing,
-        application_missing: gate.reasons.application_missing,
-        eligibility_failed: gate.reasons.eligibility_failed,
-        error: profileMissingMessage(gate.reasons.profile_missing),
-      }
-    }
     if (gate.reasons.application_missing.length > 0) {
       const needsResume = gate.reasons.application_missing.includes('resume')
       return {
@@ -833,6 +830,7 @@ export async function submitApplicationFromListingModalAction(
 
   return {
     ok: true,
+    warning: profileWarning,
     applicationId: insertedApplicationId ?? undefined,
     externalApplyRequired: shouldRequireImmediateAts,
     externalApplyUrl: shouldRequireImmediateAts ? (effectiveAts.externalApplyUrl || null) : null,

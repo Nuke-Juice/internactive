@@ -2,6 +2,7 @@ import { supabaseServer } from '@/lib/supabase/server'
 import { normalizeListingCoursework } from '@/lib/coursework/normalizeListingCoursework'
 import { getEmployerVerificationTiers } from '@/lib/billing/subscriptions'
 import { isFeedEligible } from '@/lib/jobs/feedEligibility'
+import { isPilotMode } from '@/lib/pilotMode'
 
 export type Internship = {
   id: string
@@ -179,6 +180,8 @@ export type Internship = {
   created_at: string | null
   is_active: boolean | null
   source: 'concierge' | 'employer_self' | 'partner' | string | null
+  visibility?: string | null
+  is_pilot_listing?: boolean | null
   status?: string | null
 }
 
@@ -261,6 +264,8 @@ const INTERNSHIP_SELECT_RICH_COLUMNS = [
   'created_at',
   'is_active',
   'source',
+  'visibility',
+  'is_pilot_listing',
   'status',
 ] as const
 
@@ -312,6 +317,8 @@ const INTERNSHIP_SELECT_BASE_COLUMNS = [
   'created_at',
   'is_active',
   'source',
+  'visibility',
+  'is_pilot_listing',
   'status',
 ] as const
 
@@ -350,6 +357,8 @@ const INTERNSHIP_SELECT_LEGACY_COLUMNS = [
   'created_at',
   'is_active',
   'source',
+  'visibility',
+  'is_pilot_listing',
   'status',
 ] as const
 
@@ -414,6 +423,10 @@ function buildInternshipsQuery(params: {
     .or(`application_deadline.is.null,application_deadline.gte.${today}`)
     .order('created_at', { ascending: false })
     .range(start, end)
+
+  if (isPilotMode()) {
+    query = query.eq('visibility', 'public_browse')
+  }
 
   if (searchQuery.length >= 2) {
     const prefix = `${searchQuery}%`
@@ -622,10 +635,11 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
       })
       const visibleRows = mappedRows.filter((row) =>
         isFeedEligible({
-          is_active: row.is_active,
-          status: row.status ?? null,
-          application_deadline: row.application_deadline ?? null,
-        })
+        is_active: row.is_active,
+        status: row.status ?? null,
+        application_deadline: row.application_deadline ?? null,
+        visibility: row.visibility ?? null,
+      })
       )
       return {
         rows: visibleRows.slice(0, limit),
@@ -645,6 +659,7 @@ export async function fetchInternships(options?: FetchInternshipsOptions) {
       is_active: row.is_active,
       status: row.status ?? null,
       application_deadline: row.application_deadline ?? null,
+      visibility: row.visibility ?? null,
     })
   )
 
@@ -667,7 +682,10 @@ export async function fetchInternshipsByIds(ids: string[]) {
     .eq('is_active', true)
     .or(`application_deadline.is.null,application_deadline.gte.${today}`)
 
-  const rows = (data ?? []) as unknown as RawInternshipRow[]
+  const visibilityFilteredData =
+    isPilotMode() ? (data ?? []).filter((row) => (row as { visibility?: string | null }).visibility === 'public_browse') : (data ?? [])
+
+  const rows = visibilityFilteredData as unknown as RawInternshipRow[]
   const mapped = await withDerivedEmployerVerificationTiers({
     supabase,
     rows: mapInternshipRows(rows),

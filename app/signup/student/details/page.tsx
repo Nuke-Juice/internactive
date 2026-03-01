@@ -15,6 +15,7 @@ import {
 } from '@/lib/locations/usLocationCatalog'
 import { supabaseBrowser } from '@/lib/supabase/client'
 import { toUserFacingErrorMessage } from '@/lib/errors/userFacingError'
+import ConfirmSignOutButton from '@/components/auth/ConfirmSignOutButton'
 import type { CanonicalMajor } from '@/components/account/MajorCombobox'
 import StudentProgressBar from '@/components/onboarding/StudentProgressBar'
 import StudentStep1 from '@/components/onboarding/StudentStep1'
@@ -1047,7 +1048,7 @@ export default function StudentSignupDetailsPage() {
       window.localStorage.removeItem(STUDENT_DRAFT_KEY)
     }
 
-    window.location.href = '/'
+    window.location.href = '/student/pilot-screening?welcome=1'
   }
 
   function handleNext() {
@@ -1206,16 +1207,23 @@ export default function StudentSignupDetailsPage() {
   return (
     <main className="min-h-screen bg-white px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <button
-          type="button"
-          aria-label="Back to account step"
-          onClick={() => {
-            router.push('/signup/student')
-          }}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button
+            type="button"
+            aria-label="Back to account step"
+            onClick={() => {
+              router.push('/signup/student')
+            }}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-opacity hover:opacity-70 focus:outline-none"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <ConfirmSignOutButton
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            confirmMessage="Sign out and return to the signed-out home page?"
+            redirectTo="/"
+          />
+        </div>
 
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">Student profile details</h1>
         <p className="mt-2 text-slate-600">You&apos;re 2 minutes away from matching with internships.</p>

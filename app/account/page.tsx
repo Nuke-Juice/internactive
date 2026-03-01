@@ -9,6 +9,7 @@ import { buildVerifyRequiredHref } from '@/lib/auth/emailVerification'
 import { createBillingPortalSessionAction } from '@/lib/billing/actions'
 import { getEmployerVerificationStatus } from '@/lib/billing/subscriptions'
 import { isAdminRole, isAppRole, isUserRole, type AppRole, type UserRole } from '@/lib/auth/roles'
+import { hasCompletedConciergeIntake, isPilotMode } from '@/lib/pilotMode'
 import { getMinimumProfileCompleteness } from '@/lib/profileCompleteness'
 import { supabaseServer } from '@/lib/supabase/server'
 
@@ -34,6 +35,8 @@ type StudentProfileRow = {
   exact_address_line1: string | null
   location_lat: number | null
   location_lng: number | null
+  concierge_opt_in?: boolean | null
+  concierge_intake_completed_at?: string | null
 }
 
 type EmployerProfileRow = {
@@ -303,17 +306,18 @@ export default async function AccountPage() {
   }
 
   if (role === 'student') {
+    const pilotMode = isPilotMode()
     const { data: profile } = await supabase
       .from('student_profiles')
       .select(
-        'university_id, school, major_id, major:canonical_majors(id, slug, name), majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, exact_address_line1, location_lat, location_lng'
+        'university_id, school, major_id, major:canonical_majors(id, slug, name), majors, year, coursework, experience_level, availability_start_month, availability_hours_per_week, interests, preferred_city, preferred_state, preferred_zip, max_commute_minutes, transport_mode, exact_address_line1, location_lat, location_lng, concierge_opt_in, concierge_intake_completed_at'
       )
       .eq('user_id', user.id)
       .maybeSingle()
 
-    if (!getMinimumProfileCompleteness(profile).ok) {
-      redirect('/signup/student/details')
-    }
+    const hasConciergeProfile = hasCompletedConciergeIntake(profile)
+    const minimumProfileComplete = getMinimumProfileCompleteness(profile).ok
+    const showOnboardingBanner = !pilotMode && !minimumProfileComplete
 
     return (
       <main className="min-h-screen bg-slate-50 px-6 py-10">
@@ -326,6 +330,40 @@ export default async function AccountPage() {
             >
               Security settings
             </Link>
+          </div>
+          {showOnboardingBanner ? (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm">
+              <div className="font-semibold text-amber-950">Profile setup is still in progress.</div>
+              <p className="mt-1">
+                You can view and edit your account here without being forced back into the onboarding wizard.
+              </p>
+              <div className="mt-3">
+                <Link
+                  href="/signup/student/details"
+                  className="inline-flex items-center rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
+                >
+                  Continue onboarding
+                </Link>
+              </div>
+            </div>
+          ) : null}
+          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Concierge preferences</div>
+                <p className="mt-1 text-sm text-slate-600">
+                  {hasConciergeProfile
+                    ? "You're in the concierge pool. Update your preferences any time."
+                    : 'Join the concierge pool so the founder can prioritize warm introductions and curated shortlists.'}
+                </p>
+              </div>
+              <Link
+                href="/student/pilot-screening"
+                className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                {hasConciergeProfile ? 'Update concierge preferences' : 'Join concierge pilot'}
+              </Link>
+            </div>
           </div>
           <StudentAccount userId={user.id} initialProfile={(profile ?? null) as StudentProfileRow | null} />
         </div>

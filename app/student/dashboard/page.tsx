@@ -1,6 +1,8 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import StudentDashboardExperience from '@/components/student/dashboard/StudentDashboardExperience'
+import { isPilotMode } from '@/lib/pilotMode'
 import { requireRole } from '@/lib/auth/requireRole'
 import { supabaseServer } from '@/lib/supabase/server'
 import { formatCompleteness } from '@/src/profile/profileCompleteness'
@@ -84,6 +86,9 @@ function initialsForCompany(name: string) {
 
 export default async function StudentDashboardPage() {
   const { user } = await requireRole('student', { requestedPath: '/student/dashboard' })
+
+  if (isPilotMode()) redirect('/')
+
   const supabase = await supabaseServer()
 
   const [applicationsResult, latestAnalysisResult, studentCategoriesResult, internshipsResult] = await Promise.all([
@@ -325,6 +330,18 @@ export default async function StudentDashboardPage() {
             <p className="mt-2 text-sm leading-6 text-slate-600">
               Focus on what moves your search forward: pipeline momentum, the next best action, and the profile signals that improve your odds.
             </p>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">{nextAction.title}</p>
+              <p className="mt-1 text-sm text-slate-600">{nextAction.description}</p>
+            </div>
+            <Link href={nextAction.href} className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              {nextAction.ctaLabel}
+            </Link>
           </div>
         </div>
 
