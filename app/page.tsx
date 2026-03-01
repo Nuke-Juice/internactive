@@ -43,6 +43,81 @@ function ConciergeLanding() {
   )
 }
 
+function PublicLanding() {
+  return (
+    <main className="min-h-screen bg-slate-50">
+      <section className="mx-auto max-w-6xl px-6 py-16 md:py-24">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_420px] lg:items-center">
+          <div>
+            <div className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
+              Internships with structure
+            </div>
+            <h1 className="mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-slate-900 md:text-6xl">
+              Start with a profile, not a crowded feed.
+            </h1>
+            <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-600">
+              Internactive is built to help students get to relevant internships faster and give employers cleaner signals than a generic job board.
+            </p>
+
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              <Link href="/signup/student" className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+                Create student profile
+              </Link>
+              <Link
+                href="/for-employers"
+                className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                For employers
+              </Link>
+            </div>
+
+            <div className="mt-10 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="text-sm font-semibold text-slate-900">Match-ready profiles</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Show coursework, availability, and experience before you start applying.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="text-sm font-semibold text-slate-900">Cleaner employer workflow</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Employers get a structured pipeline instead of low-signal job-board volume.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="text-sm font-semibold text-slate-900">Feed stays secondary</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Listings still exist, but the main path is profile-first onboarding.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm">
+            <div className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">How it works</div>
+            <div className="mt-6 space-y-4">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-900">1. Build your profile</div>
+                <p className="mt-1 text-sm leading-6 text-slate-600">Add major, schedule, skills, and experience so the platform has enough signal to work with.</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-900">2. See better-fit opportunities</div>
+                <p className="mt-1 text-sm leading-6 text-slate-600">Use the platform once you have context, instead of dropping visitors straight into a generic listing wall.</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-900">3. Apply with clearer context</div>
+                <p className="mt-1 text-sm leading-6 text-slate-600">Employers can evaluate applicants with more complete student information.</p>
+              </div>
+            </div>
+
+            <div className="mt-6 border-t border-slate-200 pt-5">
+              <div className="text-sm font-medium text-slate-900">Need the listing feed anyway?</div>
+              <p className="mt-1 text-sm leading-6 text-slate-600">It&apos;s still available, just no longer the primary logged-out experience.</p>
+              <Link href="/jobs" className="mt-3 inline-flex text-sm font-semibold text-blue-700 hover:text-blue-900">
+                View internship listings
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  )
+}
+
 export default async function HomePage({
   searchParams,
 }: {
@@ -71,6 +146,10 @@ export default async function HomePage({
   } = await supabase.auth.getUser()
 
   if (!pilotMode) {
+    if (!user) {
+      return <PublicLanding />
+    }
+
     return (
       <main className="min-h-screen bg-slate-50">
         <Suspense fallback={<JobsViewSkeleton />}>

@@ -86,6 +86,7 @@ export default function SiteHeader({
   const effectiveIsAuthenticated = clientIsAuthenticated
   const pilotMode = isPilotMode()
   const isPilotStudent = pilotMode && role === 'student'
+  const showPublicBrowseEntry = effectiveIsAuthenticated && !isPilotStudent
 
   const homeActive =
     matchPath(pathname ?? '/', [{ id: 'home', href: '/', match: 'exact', activeOn: isPilotStudent ? undefined : pilotMode ? ['/jobs'] : undefined }]) === 'home'
@@ -424,7 +425,7 @@ export default function SiteHeader({
               <Link href="/" className={`hidden md:inline ${textLinkClasses(homeActive)}`}>
                 Home
               </Link>
-              {!isPilotStudent ? (
+              {showPublicBrowseEntry ? (
                 <Link href="/jobs" className={`hidden md:inline ${textLinkClasses(pathname === '/jobs' || pathname?.startsWith('/jobs/'))}`}>
                   Browse
                 </Link>
@@ -432,50 +433,52 @@ export default function SiteHeader({
             </div>
 
             <nav className="hidden items-center gap-2 md:flex">
-              <form onSubmit={submitMenuSearch} className="relative hidden items-center gap-2 lg:flex">
-                <div className="relative">
-                  <input
-                    value={menuSearchQuery}
-                    onChange={(event) => {
-                      setMenuSearchQuery(event.target.value)
-                      setSearchSuggestionsOpen(true)
-                    }}
-                    onFocus={() => setSearchSuggestionsOpen(true)}
-                    onBlur={() => setTimeout(() => setSearchSuggestionsOpen(false), 120)}
-                    placeholder="Search"
-                    aria-label="Search"
-                    className="h-9 w-72 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                  {searchSuggestionsOpen && menuSearchQuery.trim().length >= 2 ? (
-                    <div className="absolute left-0 z-30 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
-                      {searchSuggestionsLoading ? (
-                        <div className="px-3 py-2 text-sm text-slate-500">Searching...</div>
-                      ) : searchSuggestions.length > 0 ? (
-                        searchSuggestions.map((item, index) => (
-                          <button
-                            key={`${item.kind}:${item.value}:${index}`}
-                            type="button"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              setMenuSearchQuery(item.value)
-                              setSearchSuggestionsOpen(false)
-                              router.push(item.href)
-                            }}
-                            className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                          >
-                            <span className="font-medium">{item.label}</span>
-                            <span className="ml-2 text-xs text-slate-500">
-                              {item.kind === 'employer' ? 'Employer' : 'Internship'}
-                            </span>
-                          </button>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-sm text-slate-500">No results found.</div>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </form>
+              {effectiveIsAuthenticated ? (
+                <form onSubmit={submitMenuSearch} className="relative hidden items-center gap-2 lg:flex">
+                  <div className="relative">
+                    <input
+                      value={menuSearchQuery}
+                      onChange={(event) => {
+                        setMenuSearchQuery(event.target.value)
+                        setSearchSuggestionsOpen(true)
+                      }}
+                      onFocus={() => setSearchSuggestionsOpen(true)}
+                      onBlur={() => setTimeout(() => setSearchSuggestionsOpen(false), 120)}
+                      placeholder="Search"
+                      aria-label="Search"
+                      className="h-9 w-72 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    />
+                    {searchSuggestionsOpen && menuSearchQuery.trim().length >= 2 ? (
+                      <div className="absolute left-0 z-30 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                        {searchSuggestionsLoading ? (
+                          <div className="px-3 py-2 text-sm text-slate-500">Searching...</div>
+                        ) : searchSuggestions.length > 0 ? (
+                          searchSuggestions.map((item, index) => (
+                            <button
+                              key={`${item.kind}:${item.value}:${index}`}
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setMenuSearchQuery(item.value)
+                                setSearchSuggestionsOpen(false)
+                                router.push(item.href)
+                              }}
+                              className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                            >
+                              <span className="font-medium">{item.label}</span>
+                              <span className="ml-2 text-xs text-slate-500">
+                                {item.kind === 'employer' ? 'Employer' : 'Internship'}
+                              </span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="px-3 py-2 text-sm text-slate-500">No results found.</div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </form>
+              ) : null}
 
               {headerNavItems.length > 0 ? <AppNav variant="top" items={headerNavItems} /> : null}
 
@@ -573,20 +576,22 @@ export default function SiteHeader({
 
           {mobileMenuOpen ? (
             <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 md:hidden">
-              <form onSubmit={submitMenuSearch} className="relative">
-                <input
-                  value={menuSearchQuery}
-                  onChange={(event) => setMenuSearchQuery(event.target.value)}
-                  placeholder="Search employers or internships"
-                  aria-label="Search"
-                  className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </form>
+              {effectiveIsAuthenticated ? (
+                <form onSubmit={submitMenuSearch} className="relative">
+                  <input
+                    value={menuSearchQuery}
+                    onChange={(event) => setMenuSearchQuery(event.target.value)}
+                    placeholder="Search employers or internships"
+                    aria-label="Search"
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                </form>
+              ) : null}
               <div className="grid grid-cols-2 gap-2">
                 <Link href="/" className={navClasses(homeActive)}>
                   Home
                 </Link>
-                {!isPilotStudent ? (
+                {showPublicBrowseEntry ? (
                   <Link href="/jobs" className={navClasses(pathname === '/jobs' || pathname?.startsWith('/jobs/'))}>
                     Browse
                   </Link>
